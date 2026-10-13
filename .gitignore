@@ -1,0 +1,27 @@
+# Local API credentials
+.env
+.env.*
+!.env.example
+
+# Local Python environment
+.venv/
+
+# Python caches
+__pycache__/
+*.py[cod]
+
+# Local photo-analysis database may contain private metadata and model output.
+photo_analysis.sqlite3
+photo_analysis.sqlite3-shm
+photo_analysis.sqlite3-wal
+
+# Default Excel export may contain photo filenames, reviews, and camera settings.
+photo_analyses.xlsx
+
+# HTML reports contain embedded image previews and analysis text.
+photo_analysis_report*.html
+
+# Local working files, generated outputs, and user photo samples.
+.work/
+outputs/
+test_photo/
