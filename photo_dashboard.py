@@ -347,11 +347,16 @@ h1 span { font-size: 0.75rem; background: var(--teal); color: white; padding: 3p
 .zoom-hint { position: absolute; bottom: 10px; right: 12px; background: rgba(0,0,0,0.7); color: #e2e8f0; font-size: 0.74rem; padding: 4px 10px; border-radius: 999px; pointer-events: none; }
 .kbd-hint { font-size: 0.74rem; color: #94a3b8; margin-top: 8px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .kbd-key { background: #334155; color: #f1f5f9; padding: 1px 6px; border-radius: 4px; font-weight: 700; font-family: monospace; }
-.note-item { background: #f8fafc; border-left: 3px solid var(--blue); padding: 7px 12px; border-radius: 0 8px 8px 0; margin-bottom: 6px; font-size: 0.82rem; line-height: 1.4; white-space: pre-wrap; }
-.note-item h4 { margin: 0 0 2px; font-size: 0.86rem; display: flex; justify-content: space-between; }
-.list-box { background: #f8fafc; padding: 8px 12px; border-radius: 8px; margin-top: 6px; }
-.list-box h4 { margin: 0 0 3px; font-size: 0.86rem; }
-.list-box ul { margin: 0; padding-left: 18px; font-size: 0.80rem; line-height: 1.35; color: #475569; }
+.note-item { background: #f8fafc; border-left: 3px solid var(--blue); padding: 5px 10px; border-radius: 0 8px 8px 0; margin-bottom: 4px; font-size: 0.78rem; line-height: 1.35; white-space: pre-wrap; }
+.note-item h4 { margin: 0 0 2px; font-size: 0.82rem; display: flex; justify-content: space-between; }
+.note-item-compact { background: #f8fafc; padding: 6px 10px; border-radius: 0 8px 8px 0; font-size: 0.76rem; line-height: 1.35; box-shadow: 0 1px 2px rgba(0,0,0,0.03); }
+.note-item-compact .note-header { display: flex; justify-content: space-between; align-items: center; font-weight: 700; margin-bottom: 3px; font-size: 0.80rem; }
+.note-item-compact .note-body { color: #334155; word-break: keep-all; }
+.list-box { background: #f8fafc; padding: 6px 10px; border-radius: 8px; margin-top: 4px; }
+.list-box h4 { margin: 0 0 2px; font-size: 0.80rem; }
+.list-box ul { margin: 0; padding-left: 14px; font-size: 0.76rem; line-height: 1.3; color: #475569; }
+.list-box-compact { padding: 6px 10px; border-radius: 8px; }
+.list-box-compact ul { margin: 0; padding-left: 14px; font-size: 0.75rem; line-height: 1.3; color: #334155; }
 .lr-metric { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 6px 8px; text-align: center; }
 .lr-metric span { display: block; font-size: 0.70rem; color: var(--muted); margin-bottom: 1px; }
 .lr-metric strong { display: block; font-size: 0.90rem; color: #1e293b; font-weight: 700; }
@@ -888,35 +893,57 @@ function openDetailModal(id) {
         </div>
       </div>
 
-      <!-- 세부 평가 요소별 코멘트 (그래프 바로 아래) -->
-      <div class="note-item">
-        <h4><span>📐 구도 평가</span> <strong>${item.composition_score.toFixed(1)}</strong></h4>
-        <div>${item.composition_notes}</div>
-      </div>
-      <div class="note-item">
-        <h4><span>💡 조명/노출 평가</span> <strong>${item.lighting_score.toFixed(1)}</strong></h4>
-        <div>${item.lighting_notes}</div>
-      </div>
-      <div class="note-item">
-        <h4><span>🎨 색감/톤 평가</span> <strong>${item.color_score.toFixed(1)}</strong></h4>
-        <div>${item.color_notes}</div>
-      </div>
-      <div class="note-item">
-        <h4><span>📷 촬영 기술 평가</span> <strong>${item.technique_score.toFixed(1)}</strong></h4>
-        <div>${item.technique_notes}</div>
-      </div>
-      <div class="note-item" style="border-left: 3px solid #6366f1;">
-        <h4><span>🎯 피규어 눈동자/페이스 초점 핀</span> <strong style="color:#4f46e5;">${item.focus_status || '완벽 칼초점'}</strong></h4>
-        <div>${item.focus_notes ? item.focus_notes : '눈동자 아이 데칼 및 안면 조형 핀 상태 양호'}</div>
+      <!-- 세부 평가 요소별 코멘트 (2x2 그리드 컴팩트 배치) -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px;">
+        <div class="note-item-compact" style="border-left: 3px solid #3b82f6;">
+          <div class="note-header">
+            <span>📐 구도 평가</span>
+            <strong style="color:#2563eb;">${item.composition_score.toFixed(1)}</strong>
+          </div>
+          <div class="note-body">${item.composition_notes}</div>
+        </div>
+        <div class="note-item-compact" style="border-left: 3px solid #f59e0b;">
+          <div class="note-header">
+            <span>💡 조명/노출 평가</span>
+            <strong style="color:#d97706;">${item.lighting_score.toFixed(1)}</strong>
+          </div>
+          <div class="note-body">${item.lighting_notes}</div>
+        </div>
+        <div class="note-item-compact" style="border-left: 3px solid #ec4899;">
+          <div class="note-header">
+            <span>🎨 색감/톤 평가</span>
+            <strong style="color:#db2777;">${item.color_score.toFixed(1)}</strong>
+          </div>
+          <div class="note-body">${item.color_notes}</div>
+        </div>
+        <div class="note-item-compact" style="border-left: 3px solid #10b981;">
+          <div class="note-header">
+            <span>📷 촬영 기술 평가</span>
+            <strong style="color:#059669;">${item.technique_score.toFixed(1)}</strong>
+          </div>
+          <div class="note-body">${item.technique_notes}</div>
+        </div>
       </div>
 
-      <div class="list-box">
-        <h4 style="color:var(--teal)">✓ 주요 장점</h4>
-        <ul>${item.strengths.map(s => `<li>${s}</li>`).join('')}</ul>
+      <!-- 초점 핀 상태 인라인 슬림 바 -->
+      <div class="note-item-compact" style="border-left: 3px solid #6366f1;margin-bottom:6px;">
+        <div class="note-header">
+          <span>🎯 피규어 눈동자/페이스 초점 핀</span>
+          <strong style="color:#4f46e5;">${item.focus_status || '완벽 칼초점'}</strong>
+        </div>
+        <div class="note-body">${item.focus_notes ? item.focus_notes : '눈동자 아이 데칼 및 안면 조형 핀 상태 양호'}</div>
       </div>
-      <div class="list-box" style="margin-top:6px;">
-        <h4 style="color:#e11d48">✗ 단점 및 다음 촬영 개선점</h4>
-        <ul>${item.improvements.map(i => `<li>${i}</li>`).join('')}</ul>
+
+      <!-- 주요 장점 및 단점/개선점 (좌우 2열 배치로 세로 공간 50% 절약) -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px;">
+        <div class="list-box-compact" style="background:#f0fdf4;border:1px solid #bbf7d0;">
+          <h4 style="color:#059669;margin:0 0 3px;font-size:0.78rem;font-weight:700;">✓ 주요 장점</h4>
+          <ul>${item.strengths.map(s => `<li>${s}</li>`).join('')}</ul>
+        </div>
+        <div class="list-box-compact" style="background:#fff1f2;border:1px solid #fecdd3;">
+          <h4 style="color:#e11d48;margin:0 0 3px;font-size:0.78rem;font-weight:700;">✗ 단점 및 촬영 개선점</h4>
+          <ul>${item.improvements.map(i => `<li>${i}</li>`).join('')}</ul>
+        </div>
       </div>
 
       <div style="margin-top:8px;">
