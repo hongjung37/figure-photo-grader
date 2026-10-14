@@ -2552,7 +2552,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 body = self.rfile.read(content_length)
 
                 # Parse multipart form data
-                boundary = content_type.split("boundary=")[-1].strip()
+                boundary_raw = content_type.split("boundary=")[-1].strip()
+                boundary = boundary_raw.strip('"\'')
                 parts = body.split(f"--{boundary}".encode("utf-8"))
 
                 file_bytes = None
@@ -2561,13 +2562,21 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 category_param = "auto"
 
                 for part in parts:
-                    if b'name="tier"' in part:
-                        tier = part.split(b"\r\n\r\n")[1].split(b"\r\n")[0].decode("utf-8").strip()
-                    elif b'name="category"' in part:
-                        category_param = part.split(b"\r\n\r\n")[1].split(b"\r\n")[0].decode("utf-8").strip()
-                    elif b'name="image"' in part:
-                        header, data = part.split(b"\r\n\r\n", 1)
-                        data = data.rstrip(b"\r\n")
+                    if b"\r\n\r\n" not in part:
+                        continue
+                    header, data = part.split(b"\r\n\r\n", 1)
+                    if data.endswith(b"\r\n"):
+                        data = data[:-2]
+                    if data.endswith(b"--"):
+                        data = data[:-2]
+                    if data.endswith(b"\r\n"):
+                        data = data[:-2]
+
+                    if b'name="tier"' in header:
+                        tier = data.decode("utf-8", errors="replace").strip()
+                    elif b'name="category"' in header:
+                        category_param = data.decode("utf-8", errors="replace").strip()
+                    elif b'name="image"' in header:
                         file_bytes = data
                         for line in header.split(b"\r\n"):
                             if b"filename=" in line:
@@ -2612,10 +2621,13 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 self.wfile.write(json.dumps(res, ensure_ascii=False).encode("utf-8"))
                 return
             except Exception as exc:
+                import traceback
+                print(f"[/api/analyze ERROR] {type(exc).__name__}: {exc}", file=sys.stderr)
+                traceback.print_exc(file=sys.stderr)
                 self.send_response(HTTPStatus.INTERNAL_SERVER_ERROR)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.end_headers()
-                self.wfile.write(json.dumps({"success": False, "error": str(exc)}).encode("utf-8"))
+                self.wfile.write(json.dumps({"success": False, "error": str(exc)}, ensure_ascii=False).encode("utf-8"))
                 return
 
         if parsed.path == "/api/update-status":
