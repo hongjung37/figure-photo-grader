@@ -985,6 +985,71 @@ def generate_single_sns_crop(photo: PreparedPhoto, ratio_key: str, model: str = 
     return CropBox.model_validate_json(output_text)
 
 
+class CropSet(BaseModel):
+    """All four SNS crop recommendations produced by a single Gemini call."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    instagram_crop_4_5: CropBox
+    instagram_crop_1_1: CropBox
+    x_crop_16_9: CropBox
+    x_crop_3_4: CropBox
+
+
+def generate_all_sns_crops(photo: PreparedPhoto, model: str = DEFAULT_MODEL) -> CropSet:
+    """Generate the 4 SNS crop boxes in ONE call (instead of 4 per-ratio calls).
+
+    Sharing one call also keeps the subject/face reference consistent across ratios.
+    """
+    load_dotenv(dotenv_path=ENV_FILE_PATH, override=False)
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY를 .env 파일 또는 환경변수에 설정해 주세요.")
+
+    ratio_lines = []
+    for key, cfg in SNS_CROP_RATIO_CONFIGS.items():
+        ratio_lines.append(
+            f"- {key}: {cfg['name']} ({cfg['aspect']}, 목표 픽셀 종횡비 {cfg['w'] / cfg['h']:.4f})\n"
+            f"  가이드: {cfg['guide']}\n"
+            f"  ratio_label: '{cfg['name']} ({cfg['aspect']})'"
+        )
+    ratio_block = "\n".join(ratio_lines)
+
+    prompt = f"""당신은 피규어 사진 및 SNS(Instagram, X/Twitter) 비주얼 디렉터입니다.
+제시된 피규어 사진(원본 해상도: {photo.width} × {photo.height})을 분석하고,
+아래 4가지 규격 각각에 가장 이상적인 크롭 영역(정규화 좌표 0.0~1.0)과 구도 연출 조언을 JSON으로 한 번에 제안하세요.
+먼저 사진 속 피규어의 얼굴 위치를 하나 정하고, 4개 크롭 모두 그 얼굴을 기준으로 일관되게 구성하세요.
+
+[규격별 지침]
+{ratio_block}
+
+[좌표 및 필드 작성 규칙]
+- ymin, xmin, ymax, xmax는 0.0 이상 1.0 이하 실수값 (소수점 4자리 권장). 0.0 <= ymin < ymax <= 1.0, 0.0 <= xmin < xmax <= 1.0.
+- ★중요(실제 픽셀 비율): 실제 픽셀 가로 = (xmax - xmin) * {photo.width}, 실제 픽셀 세로 = (ymax - ymin) * {photo.height} 입니다.
+  각 크롭의 (가로/세로) 픽셀 비율이 해당 목표 종횡비에 최대한 근접하도록 폭과 높이를 조율하세요.
+- ★핵심(헤드룸 보존 및 안면 중심 프레이밍): 얼굴과 눈이 잘리지 않도록 정수리 위 여백(헤드룸)을 자연스럽게 살리고, 가로로 넓은 비율(1:1, 16:9)에서는 하단(베이스/다리)을 덜어내어 얼굴이 프레임 상단 3분할선 또는 중앙에 오게 하세요.
+- composition_tip: 각 비율에서 왜 그 위치로 잘라야 피규어가 돋보이는지 1~2줄로 설명하세요.
+"""
+
+    client = _get_client(api_key)
+    input_payload = [
+        {"type": "text", "text": prompt},
+        {
+            "type": "image",
+            "data": base64.b64encode(photo.upload_bytes).decode("ascii"),
+            "mime_type": photo.upload_mime_type,
+        },
+    ]
+    output_text = _call_gemini_interaction(
+        client=client,
+        model=model,
+        input_payload=input_payload,
+        schema=CropSet.model_json_schema(),
+        task_desc="SNS 크롭 4종 일괄 제안",
+    )
+    return CropSet.model_validate_json(output_text)
+
+
 def generate_sns_caption_and_tags(photo: PreparedPhoto, model: str = DEFAULT_MODEL) -> SNSCaptionAndTags:
     """Generate social caption and hashtags on-demand without re-analyzing crops."""
     load_dotenv(dotenv_path=ENV_FILE_PATH, override=False)

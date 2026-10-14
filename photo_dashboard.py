@@ -19,6 +19,7 @@ from urllib.parse import parse_qs, urlparse
 from photo_analyzer import (
     DEFAULT_DB_PATH,
     MODEL_PRESETS,
+    SNS_CROP_RATIO_CONFIGS,
     CropBox,
     LightroomAdvice,
     PhotoAnalysis,
@@ -30,6 +31,7 @@ from photo_analyzer import (
     dhash_to_sqlite,
     ensure_tag_tables,
     generate_lightroom_advice,
+    generate_all_sns_crops,
     generate_single_sns_crop,
     generate_sns_advice,
     generate_sns_caption_and_tags,
@@ -1613,6 +1615,8 @@ async function requestSingleSnsCrop(ratioKey, recordId, btn, force=false) {
       const item = allData.find(d => d.id === recordId);
       if (item) {
         if (!item.sns_advice) item.sns_advice = {};
+        // The server may have generated all 4 ratios at once; keep every cached crop.
+        Object.assign(item.sns_advice, data.advice || {});
         item.sns_advice[ratioKey] = data.crop_box;
         currentCropRatioKey = ratioKey;
         const container = document.getElementById('sns-advice-content');
@@ -3037,9 +3041,21 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     else:
                         raise ValueError(f"사진 파일 '{fname}'을 찾을 수 없으며 DB 썸네일도 없습니다.")
 
-                    crop_box = generate_single_sns_crop(prepared, ratio_key=ratio_key, model=MODEL_PRESETS["lite"])
-                    crop_dict = crop_box.model_dump(mode="json")
-                    cached_advice[ratio_key] = crop_dict
+                    if ratio_key not in SNS_CROP_RATIO_CONFIGS:
+                        raise ValueError(f"지원하지 않는 SNS 크롭 비율 키입니다: {ratio_key}")
+
+                    if force:
+                        # Explicit regenerate: refresh only the requested ratio.
+                        crop_box = generate_single_sns_crop(prepared, ratio_key=ratio_key, model=MODEL_PRESETS["lite"])
+                        cached_advice[ratio_key] = crop_box.model_dump(mode="json")
+                    else:
+                        # First crop request for this photo: get all 4 ratios in ONE call and cache them,
+                        # so the other ratio buttons need no further API calls.
+                        crop_set = generate_all_sns_crops(prepared, model=MODEL_PRESETS["lite"])
+                        for key, box in crop_set.model_dump(mode="json").items():
+                            if key == ratio_key or not cached_advice.get(key):
+                                cached_advice[key] = box
+                    crop_dict = cached_advice[ratio_key]
                     advice_json = json.dumps(cached_advice, ensure_ascii=False)
 
                     with conn:

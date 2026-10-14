@@ -876,5 +876,30 @@ class PhotoAnalyzerTests(unittest.TestCase):
             self.assertIsNone(photo_dashboard.find_existing_analysis(db_path, "missing"))
 
 
+    def test_generate_all_sns_crops_uses_single_call(self) -> None:
+        import os
+        from unittest import mock
+
+        import photo_analyzer
+
+        box = {"ymin": 0.1, "xmin": 0.1, "ymax": 0.9, "xmax": 0.9, "ratio_label": "r", "composition_tip": "t"}
+        payload = json.dumps({key: box for key in photo_analyzer.SNS_CROP_RATIO_CONFIGS})
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            image_path = Path(temporary_directory) / "batch.jpg"
+            self._make_jpeg(image_path)
+            photo = prepare_photo(image_path)
+            with mock.patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}), \
+                    mock.patch.object(photo_analyzer, "_get_client", return_value=object()), \
+                    mock.patch.object(photo_analyzer, "_call_gemini_interaction", return_value=payload) as call:
+                crops = photo_analyzer.generate_all_sns_crops(photo)
+
+        self.assertEqual(call.call_count, 1)
+        self.assertEqual(set(crops.model_dump()), set(photo_analyzer.SNS_CROP_RATIO_CONFIGS))
+        prompt_text = call.call_args.kwargs["input_payload"][0]["text"]
+        for key in photo_analyzer.SNS_CROP_RATIO_CONFIGS:
+            self.assertIn(key, prompt_text)
+
+
 if __name__ == "__main__":
     unittest.main()
