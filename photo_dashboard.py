@@ -758,6 +758,11 @@ h1 span { font-size: 0.75rem; background: var(--teal); color: white; padding: 3p
       <option value="general">📷 일반 피규어 촬영 (기본 전시/조형 중심)</option>
     </select>
 
+    <label style="display:flex;align-items:flex-start;gap:8px;font-size:0.84rem;margin-bottom:14px;cursor:pointer;">
+      <input type="checkbox" id="upload-force" style="margin-top:3px;">
+      <span><strong>이미 분석된 사진도 다시 분석</strong><br><span style="color:var(--muted);font-size:0.78rem;">체크하지 않으면 같은 파일은 API 호출 없이 기존 결과를 재사용합니다. 체크하면 새로 호출하며 별도 기록으로 추가됩니다.</span></span>
+    </label>
+
     <div class="drop-zone" id="drop-zone" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)">
       <div style="font-size:2.2rem;margin-bottom:6px;">📁</div>
       <strong style="font-size:0.95rem;">사진 파일(들) 또는 폴더를 드래그하여 놓으세요</strong>
@@ -2496,6 +2501,8 @@ function openUploadModal() {
   document.getElementById('progress-percent').textContent = '0%';
   document.getElementById('progress-text').textContent = '';
   document.getElementById('progress-current-file').textContent = '';
+  const forceBox = document.getElementById('upload-force');
+  if (forceBox) forceBox.checked = false;
   // reset file inputs
   const mInput = document.getElementById('file-input-multi');
   if (mInput) mInput.value = '';
@@ -2555,6 +2562,7 @@ async function processBatchUpload(files) {
   isBatchUploading = true;
   const tier = document.getElementById('upload-tier').value;
   const category = document.getElementById('upload-category').value;
+  const force = document.getElementById('upload-force').checked;
   const progContainer = document.getElementById('progress-container');
   const progText = document.getElementById('progress-text');
   const progPercent = document.getElementById('progress-percent');
@@ -2584,7 +2592,7 @@ async function processBatchUpload(files) {
     formData.append('category', category);
 
     try {
-      const res = await fetch('/api/analyze', { method: 'POST', body: formData });
+      const res = await fetch('/api/analyze' + (force ? '?force=true' : ''), { method: 'POST', body: formData });
       const result = await res.json();
       if (result.success) {
         successCount++;
