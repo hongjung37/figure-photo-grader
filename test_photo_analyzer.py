@@ -665,6 +665,31 @@ class PhotoAnalyzerTests(unittest.TestCase):
         h2 = compute_dhash_from_bytes(buf2.getvalue())
         self.assertLessEqual(hamming_distance(h1, h2), 2)
 
+    def test_dhash_sqlite_signed_conversion_large_int(self) -> None:
+        from photo_analyzer import dhash_to_sqlite, dhash_from_sqlite, save_analysis, prepare_photo
+        import photo_dashboard
+
+        large_val = 0xFEDCBA0987654321  # > 2**63 - 1 (overflows signed 64-bit int)
+        signed_val = dhash_to_sqlite(large_val)
+        self.assertLess(signed_val, 0)
+        self.assertEqual(dhash_from_sqlite(signed_val), large_val)
+
+        # Ensure SQLite insert and retrieval works without OverflowError
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            db_path = Path(temporary_directory) / "test_overflow.sqlite3"
+            image_path = Path(temporary_directory) / "test_overflow.jpg"
+            self._make_jpeg(image_path)
+            photo = prepare_photo(image_path)
+            # Inject large dhash
+            object.__setattr__(photo, "dhash", large_val)
+            analysis = self._valid_analysis()
+            rec_id = save_analysis(db_path, photo, "test-model", analysis)
+
+            photo_dashboard.ensure_db_columns(db_path)
+            items = photo_dashboard.get_all_analyses(db_path)
+            self.assertEqual(len(items), 1)
+            self.assertEqual(items[0]["dhash"], large_val)
+
     def test_cluster_burst_groups_ranking_and_drop_reasons(self) -> None:
         from photo_dashboard import cluster_burst_groups
 

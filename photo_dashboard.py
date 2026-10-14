@@ -26,6 +26,8 @@ from photo_analyzer import (
     SNSAdvice,
     analyze_with_gemini,
     compute_dhash_from_bytes,
+    dhash_from_sqlite,
+    dhash_to_sqlite,
     ensure_tag_tables,
     generate_lightroom_advice,
     generate_single_sns_crop,
@@ -65,7 +67,7 @@ def ensure_db_columns(db_path: Path) -> None:
         for mid, mthumb in missing:
             try:
                 dh = compute_dhash_from_bytes(mthumb)
-                conn.execute("UPDATE photo_analyses SET dhash = ? WHERE id = ?", (dh, mid))
+                conn.execute("UPDATE photo_analyses SET dhash = ? WHERE id = ?", (dhash_to_sqlite(dh), mid))
             except Exception:
                 pass
 
@@ -339,7 +341,9 @@ def get_all_analyses(db_path: Path, max_hamming_dist: int = 15) -> list[dict]:
                 pass
 
         dhash_val = row["dhash"] if "dhash" in row.keys() and row["dhash"] is not None else None
-        if dhash_val is None and row["thumbnail"]:
+        if dhash_val is not None:
+            dhash_val = dhash_from_sqlite(dhash_val)
+        elif row["thumbnail"]:
             try:
                 dhash_val = compute_dhash_from_bytes(row["thumbnail"])
             except Exception:
@@ -2651,6 +2655,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                         upload_bytes=photo_obj.upload_bytes,
                         upload_mime_type=photo_obj.upload_mime_type,
                         thumbnail_bytes=photo_obj.thumbnail_bytes,
+                        dhash=photo_obj.dhash,
                     )
                     model = MODEL_PRESETS.get(tier, MODEL_PRESETS["lite"])
                     category_hint = category_param if category_param != "auto" else None

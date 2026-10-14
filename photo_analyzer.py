@@ -20,6 +20,8 @@ from typing import Any
 from dotenv import load_dotenv
 from google import genai
 from PIL import ExifTags, Image, ImageOps
+
+Image.MAX_IMAGE_PIXELS = None
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from photo_html_report import save_html_report
 from photo_tag_schema import (
@@ -223,7 +225,24 @@ def compute_dhash_from_bytes(image_bytes: bytes, hash_size: int = 8) -> int:
 
 def hamming_distance(h1: int, h2: int) -> int:
     """Compute Hamming distance between two 64-bit perceptual hashes."""
-    return bin(h1 ^ h2).count("1")
+    return bin((int(h1) ^ int(h2)) & 0xFFFFFFFFFFFFFFFF).count("1")
+
+
+def dhash_to_sqlite(val: int | None) -> int | None:
+    """Convert 64-bit unsigned perceptual hash to signed 64-bit integer for SQLite INTEGER compatibility."""
+    if val is None:
+        return None
+    val = int(val) & 0xFFFFFFFFFFFFFFFF
+    if val >= (1 << 63):
+        val -= (1 << 64)
+    return val
+
+
+def dhash_from_sqlite(val: int | None) -> int | None:
+    """Restore 64-bit unsigned perceptual hash from SQLite signed 64-bit integer."""
+    if val is None:
+        return None
+    return int(val) & 0xFFFFFFFFFFFFFFFF
 
 
 @dataclass(frozen=True)
@@ -980,7 +999,7 @@ def save_analysis(
                 analysis.model_dump_json(),
                 datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 thumb_data,
-                dhash_to_save,
+                dhash_to_sqlite(dhash_to_save),
             ),
         )
         record_id = int(cursor.lastrowid)
