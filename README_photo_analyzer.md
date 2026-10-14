@@ -54,8 +54,8 @@ python .\photo_analyzer.py ".\photos\" --category snap --workers 4
 분석기는 피규어 및 캐릭터 모델 사진(Figure Photography)의 완성도를 전문적으로 비평하도록 최적화되어 있습니다. 작업 목적에 맞춰 세 가지 모델 티어 중 하나를 선택할 수 있습니다.
 
 - `--tier lite`: `gemini-3.1-flash-lite` (기본값) — 빠르고 가벼운 대량 분류 및 스크리닝용
-- `--tier standard`: `gemini-2.5-flash` — 균형 잡힌 표준 화질 평가용
-- `--tier pro`: `gemini-2.5-pro` — 미세 디테일, 조명 질감, 심도 표현을 심층 분석하는 전문가급 모드
+- `--tier standard`: `gemini-3.5-flash-lite` — 균형 잡힌 표준 화질 평가용
+- `--tier pro`: `gemini-3.8-flash` — 고화질 심층 비평 모드
 
 ```powershell
 # 1. 단일 사진 기본 분석 (Lite)
@@ -65,7 +65,7 @@ python .\photo_analyzer.py "F:\photos\sample.jpg"
 python .\photo_analyzer.py "F:\photos\sample.jpg" --tier pro
 
 # 3. 모델명을 직접 지정할 수도 있습니다.
-python .\photo_analyzer.py "F:\photos\sample.jpg" --model "gemini-2.5-pro"
+python .\photo_analyzer.py "F:\photos\sample.jpg" --model "gemini-3.8-flash"
 ```
 
 ## 폴더 일괄 분석 (Batch Mode)

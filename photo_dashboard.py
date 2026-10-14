@@ -24,6 +24,7 @@ from photo_analyzer import (
     SNSAdvice,
     analyze_with_gemini,
     compute_dhash_from_bytes,
+    ensure_tag_tables,
     generate_lightroom_advice,
     generate_single_sns_crop,
     generate_sns_advice,
@@ -41,6 +42,7 @@ def ensure_db_columns(db_path: Path) -> None:
     if not db_path.is_file():
         return
     with closing(sqlite3.connect(db_path)) as conn, conn:
+        ensure_tag_tables(conn)
         cols = [r[1] for r in conn.execute("PRAGMA table_info(photo_analyses)").fetchall()]
         if "thumbnail" not in cols:
             conn.execute("ALTER TABLE photo_analyses ADD COLUMN thumbnail BLOB")
@@ -544,9 +546,9 @@ h1 span { font-size: 0.75rem; background: var(--teal); color: white; padding: 3p
     
     <label style="font-weight:700;font-size:0.84rem;display:block;margin-bottom:6px;">분석 모델 티어 선택:</label>
     <select class="select-input" id="upload-tier" style="width:100%;margin-bottom:12px;">
-      <option value="lite">Flash-Lite (초고속 스크리닝 / 기본)</option>
-      <option value="standard">2.5-Flash (균형 잡힌 화질 평가)</option>
-      <option value="pro">3.1-Pro (전문가급 심층 비평)</option>
+      <option value="lite">Flash-Lite 3.1 (초고속 스크리닝 / 기본)</option>
+      <option value="standard">Flash-Lite 3.5 (균형 잡힌 표준 화질 평가)</option>
+      <option value="pro">Flash 3.8 (고화질 심층 비평)</option>
     </select>
 
     <label style="font-weight:700;font-size:0.84rem;display:block;margin-bottom:6px;">피규어 촬영 세부 유형:</label>
@@ -722,15 +724,47 @@ function renderGallery() {
   `).join('');
 }
 
-function renderTagPills(tags) {
+function getTagColorStyle(tag) {
+  if (['차가움', '쿨톤(차가움)', '차가운 톤'].includes(tag)) {
+    return 'background:#e0f2fe;color:#0369a1;border:1px solid #bae6fd;';
+  }
+  if (['따뜻함', '웜톤(따뜻함)', '따뜻한 톤'].includes(tag)) {
+    return 'background:#fef3c7;color:#b45309;border:1px solid #fde68a;';
+  }
+  if (['청량함', '자연색'].includes(tag)) {
+    return 'background:#d1fae5;color:#065f46;border:1px solid #a7f3d0;';
+  }
+  if (['화사함', '파스텔'].includes(tag)) {
+    return 'background:#ffe4e6;color:#9f1239;border:1px solid #fecdd3;';
+  }
+  if (['몽환적', '신비로움', '사이버펑크·네온', '네온·컬러조명'].includes(tag)) {
+    return 'background:#f3e8ff;color:#6b21a8;border:1px solid #e9d5ff;';
+  }
+  if (['다크·누아르', '시네마틱', '로우키(어두움)'].includes(tag)) {
+    return 'background:#334155;color:#f8fafc;border:1px solid #475569;';
+  }
+  if (['하이키(밝음)', '비비드 컬러', '생동감', '역동적'].includes(tag)) {
+    return 'background:#ffedd5;color:#c2410c;border:1px solid #fed7aa;';
+  }
+  return 'background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;';
+}
+
+function renderTagPills(tags, maxCount = 4) {
   if (!tags) return '';
   const pills = [];
   for (const [k, v] of Object.entries(tags)) {
     if (Array.isArray(v)) {
-      v.forEach(t => pills.push(`<span class="tag-pill">${t}</span>`));
+      v.forEach(t => {
+        const style = getTagColorStyle(t);
+        pills.push(`<span class="tag-pill" style="${style}">${t}</span>`);
+      });
     }
   }
-  return pills.slice(0, 4).join('');
+  if (maxCount > 0 && pills.length > maxCount) {
+    const hiddenCount = pills.length - maxCount;
+    return pills.slice(0, maxCount).join('') + `<span class="tag-pill" style="background:transparent;border:1px dashed #cbd5e1;color:var(--muted);font-size:0.7rem;">+${hiddenCount}</span>`;
+  }
+  return pills.join('');
 }
 
 function renderBurstThumbnails(groupId, currentId) {
@@ -949,7 +983,7 @@ function openDetailModal(id) {
       <div style="margin-top:8px;">
         <span style="font-size:0.78rem;font-weight:700;color:var(--muted);display:block;margin-bottom:4px;">🏷️ 분위기 & 스타일 태그</span>
         <div class="tag-pills">
-          ${renderTagPills(item.aesthetic_tags)}
+          ${renderTagPills(item.aesthetic_tags, 50)}
         </div>
       </div>
     </div>

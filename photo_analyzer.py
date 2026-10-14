@@ -499,7 +499,11 @@ figure_category 값에 반드시 '{cat_info['label']}'을 입력하고, 아래 �
 - improvements: 사진의 단점, 아쉬운 점 및 다음 촬영을 위한 개선점 목록 (2~3개)
 
 미학 태깅(aesthetic_tags):
-- 아래 8개 범주별로 이미지에서 직접 확인되는 태그를 0~3개 선택하세요. 근거가 없거나 해당되지 않으면 빈 배열([])을 사용하세요.
+- 아래 8개 범주별로 이미지에서 직접 확인되는 태그를 0~3개 선택하세요.
+- ★미학적 분위기/온도감 필수 판별 규칙:
+  1) mood(분위기): 사진의 정서적 무드와 온도감을 면밀히 분석하여 '차가움', '따뜻함', '청량함', '화사함', '몽환적', '다크·누아르', '시네마틱' 등에서 반드시 1~3개를 필수로 선택하세요 (빈 배열 금지).
+  2) color_impression(색조 인상): 피규어 조명과 피부톤의 색온도를 판별하여 '따뜻한 톤', '차가운 톤', '쿨톤(차가움)', '웜톤(따뜻함)', '파스텔', '비비드 컬러' 등에서 반드시 1~3개를 필수로 선택하세요 (빈 배열 금지).
+  3) light_expression(빛 표현): '자연광', '스튜디오 조명', '확산광', '역광', '부드러운 그림자', '강한 명암' 등에서 반드시 1~3개를 필수로 선택하세요.
 - 허용된 태그 문구를 그대로 사용하고, 문장이나 새 태그를 임의로 만들지 마세요.
 - viewpoint(시점)는 촬영 방향을 판별할 수 있을 때 정면·측면·후면·사선 등을 선택하고, 높이/시점도 함께 표현할 수 있습니다.
 - pose_gaze(포즈·시선)는 인물이나 동물 등 해당 피사체가 보일 때만 적용하세요.
@@ -1260,7 +1264,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--tier",
         choices=list(MODEL_PRESETS.keys()),
         default=DEFAULT_TIER,
-        help=f"모델 티어 프리셋 선택 (lite: Flash-Lite, standard: 2.5-Flash, pro: 2.5-Pro) (기본값: {DEFAULT_TIER})",
+        help=f"모델 티어 프리셋 선택 (lite: Flash-Lite 3.1, standard: Flash-Lite 3.5, pro: Flash 3.8) (기본값: {DEFAULT_TIER})",
     )
     parser.add_argument(
         "--model",

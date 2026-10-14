@@ -254,6 +254,26 @@ class PhotoAnalyzerTests(unittest.TestCase):
         self.assertEqual(photo_analyzer.MODEL_PRESETS["lite"], "gemini-3.1-flash-lite")
         self.assertEqual(photo_analyzer.MODEL_PRESETS["standard"], "gemini-3.5-flash-lite")
         self.assertEqual(photo_analyzer.MODEL_PRESETS["pro"], "gemini-3.8-flash")
+        self.assertIn("Flash-Lite 3.1", photo_dashboard.DASHBOARD_HTML)
+        self.assertIn("Flash-Lite 3.5", photo_dashboard.DASHBOARD_HTML)
+        self.assertIn("Flash 3.8", photo_dashboard.DASHBOARD_HTML)
+
+    def test_aesthetic_mood_tags_registered(self) -> None:
+        self.assertIn("차가움", AESTHETIC_TAG_OPTIONS["mood"])
+        self.assertIn("따뜻함", AESTHETIC_TAG_OPTIONS["mood"])
+        self.assertIn("쿨톤(차가움)", AESTHETIC_TAG_OPTIONS["color_impression"])
+        self.assertIn("웜톤(따뜻함)", AESTHETIC_TAG_OPTIONS["color_impression"])
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            db_path = Path(temporary_directory) / "test.sqlite3"
+            with closing(sqlite3.connect(db_path)) as conn, conn:
+                conn.execute("CREATE TABLE photo_analyses (id INTEGER PRIMARY KEY)")
+            photo_dashboard.ensure_db_columns(db_path)
+            with closing(sqlite3.connect(db_path)) as conn:
+                tags = [r[0] for r in conn.execute("SELECT tag FROM photo_tag_catalog WHERE category_key = 'mood'").fetchall()]
+                self.assertIn("차가움", tags)
+                self.assertIn("따뜻함", tags)
+                self.assertIn("청량함", tags)
 
     def test_figure_prompt_includes_figure_photography_context(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
