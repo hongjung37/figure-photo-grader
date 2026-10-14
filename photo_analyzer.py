@@ -1172,14 +1172,18 @@ def save_analysis(
             )"""
         )
         existing_cols = [r[1] for r in connection.execute("PRAGMA table_info(photo_analyses)").fetchall()]
-        if "thumbnail" not in existing_cols:
-            connection.execute("ALTER TABLE photo_analyses ADD COLUMN thumbnail BLOB")
-        if "lr_advice_json" not in existing_cols:
-            connection.execute("ALTER TABLE photo_analyses ADD COLUMN lr_advice_json TEXT")
-        if "sns_advice_json" not in existing_cols:
-            connection.execute("ALTER TABLE photo_analyses ADD COLUMN sns_advice_json TEXT")
-        if "dhash" not in existing_cols:
-            connection.execute("ALTER TABLE photo_analyses ADD COLUMN dhash INTEGER")
+        for col_name, col_type in (
+            ("thumbnail", "BLOB"),
+            ("lr_advice_json", "TEXT"),
+            ("sns_advice_json", "TEXT"),
+            ("dhash", "INTEGER"),
+            ("user_score", "REAL"),
+        ):
+            if col_name not in existing_cols:
+                try:
+                    connection.execute(f"ALTER TABLE photo_analyses ADD COLUMN {col_name} {col_type}")
+                except sqlite3.OperationalError:
+                    pass
         ensure_tag_tables(connection)
         connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_photo_analyses_sha256 "

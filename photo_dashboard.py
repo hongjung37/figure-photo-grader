@@ -41,7 +41,7 @@ from photo_analyzer import (
     save_analysis,
     set_usage_log_db,
 )
-from photo_tag_schema import AESTHETIC_TAG_CATEGORIES, get_score_grade
+from photo_tag_schema import AESTHETIC_TAG_CATEGORIES, AESTHETIC_TAG_OPTIONS, get_score_grade
 
 PORT = 8080
 
@@ -84,6 +84,8 @@ def ensure_db_columns(db_path: Path) -> None:
             conn.execute("ALTER TABLE photo_analyses ADD COLUMN user_notes TEXT DEFAULT ''")
         if "dhash" not in cols:
             conn.execute("ALTER TABLE photo_analyses ADD COLUMN dhash INTEGER")
+        if "user_score" not in cols:
+            conn.execute("ALTER TABLE photo_analyses ADD COLUMN user_score REAL")
 
         missing = conn.execute(
             "SELECT id, thumbnail FROM photo_analyses WHERE dhash IS NULL AND thumbnail IS NOT NULL"
@@ -386,6 +388,7 @@ def get_all_analyses(db_path: Path, max_hamming_dist: int = 15) -> list[dict]:
                 "created_at": row["created_at"],
                 "review_status": row["review_status"] if "review_status" in row.keys() else "미검토",
                 "user_notes": row["user_notes"] if "user_notes" in row.keys() else "", 
+                "user_score": float(row["user_score"]) if "user_score" in row.keys() and row["user_score"] is not None else None,
                 "final_score": final_score,
                 "grade": get_score_grade(final_score),
                 "figure_category": analysis_data.get("figure_category", "일반 피규어 촬영"),
@@ -411,6 +414,109 @@ def get_all_analyses(db_path: Path, max_hamming_dist: int = 15) -> list[dict]:
             }
         )
     return cluster_burst_groups(results, max_hamming_dist=max_hamming_dist)
+
+
+def get_tag_stats(db_path: Path, min_count: int = 1) -> dict:
+    """Aggregate statistics by aesthetic tag, including AI scores and user ratings."""
+    ensure_db_columns(db_path)
+    analyses = get_all_analyses(db_path)
+
+    total_photos = len(analyses)
+    user_rated_photos = sum(1 for a in analyses if a.get("user_score") is not None)
+
+    tag_data: dict[tuple[str, str], dict] = {}
+
+    for a in analyses:
+        tags_dict = a.get("aesthetic_tags") or {}
+        ai_score = float(a.get("final_score") or 0.0)
+        u_score = a.get("user_score")
+        light_score = float(a.get("lighting_score") or 0.0)
+        comp_score = float(a.get("composition_score") or 0.0)
+        tech_score = float(a.get("technique_score") or 0.0)
+        color_score = float(a.get("color_score") or 0.0)
+
+        for cat_key, t_list in tags_dict.items():
+            if not isinstance(t_list, list):
+                continue
+            cat_name = AESTHETIC_TAG_CATEGORIES.get(cat_key, cat_key)
+            for t in t_list:
+                key = (cat_key, t)
+                if key not in tag_data:
+                    tag_data[key] = {
+                        "category_key": cat_key,
+                        "category_name": cat_name,
+                        "tag": t,
+                        "count": 0,
+                        "ai_scores": [],
+                        "user_scores": [],
+                        "lighting_scores": [],
+                        "composition_scores": [],
+                        "technique_scores": [],
+                        "color_scores": [],
+                    }
+                td = tag_data[key]
+                td["count"] += 1
+                td["ai_scores"].append(ai_score)
+                if u_score is not None:
+                    td["user_scores"].append(float(u_score))
+                td["lighting_scores"].append(light_score)
+                td["composition_scores"].append(comp_score)
+                td["technique_scores"].append(tech_score)
+                td["color_scores"].append(color_score)
+
+    items = []
+    for (cat_key, t), td in tag_data.items():
+        if td["count"] < min_count:
+            continue
+        avg_ai = sum(td["ai_scores"]) / len(td["ai_scores"]) if td["ai_scores"] else 0.0
+        avg_user = (sum(td["user_scores"]) / len(td["user_scores"])) if td["user_scores"] else None
+        avg_light = sum(td["lighting_scores"]) / len(td["lighting_scores"]) if td["lighting_scores"] else 0.0
+        avg_comp = sum(td["composition_scores"]) / len(td["composition_scores"]) if td["composition_scores"] else 0.0
+        avg_tech = sum(td["technique_scores"]) / len(td["technique_scores"]) if td["technique_scores"] else 0.0
+        avg_color = sum(td["color_scores"]) / len(td["color_scores"]) if td["color_scores"] else 0.0
+
+        score_diff = round(avg_user - avg_ai, 2) if avg_user is not None else None
+
+        items.append({
+            "category_key": cat_key,
+            "category_name": td["category_name"],
+            "tag": t,
+            "count": td["count"],
+            "avg_ai_score": round(avg_ai, 2),
+            "avg_user_score": round(avg_user, 2) if avg_user is not None else None,
+            "score_diff": score_diff,
+            "user_rated_count": len(td["user_scores"]),
+            "avg_lighting_score": round(avg_light, 2),
+            "avg_composition_score": round(avg_comp, 2),
+            "avg_technique_score": round(avg_tech, 2),
+            "avg_color_score": round(avg_color, 2),
+        })
+
+    items.sort(key=lambda x: x["avg_ai_score"], reverse=True)
+
+    top_ai_tags = items[:5]
+    bottom_ai_tags = sorted(items, key=lambda x: x["avg_ai_score"])[:5] if len(items) >= 2 else []
+
+    with_user = [x for x in items if x["avg_user_score"] is not None]
+    top_user_fav_tags = sorted(with_user, key=lambda x: (x["score_diff"] or 0), reverse=True)[:5]
+
+    categories_dict: dict[str, list] = {}
+    for it in items:
+        categories_dict.setdefault(it["category_key"], []).append(it)
+
+    return {
+        "total_photos": total_photos,
+        "user_rated_photos": user_rated_photos,
+        "total_unique_tags": len(tag_data),
+        "filtered_tags_count": len(items),
+        "min_count": min_count,
+        "all_tags": items,
+        "top_ai_tags": top_ai_tags,
+        "bottom_ai_tags": bottom_ai_tags,
+        "top_user_fav_tags": top_user_fav_tags,
+        "categories": categories_dict,
+        "category_names": AESTHETIC_TAG_CATEGORIES,
+    }
 
 
 DASHBOARD_HTML = """<!doctype html>
@@ -603,6 +709,146 @@ h1 span { font-size: 0.75rem; background: var(--teal); color: white; padding: 3p
   header { padding: 18px 20px; }
   .main-container { padding: 0 16px; }
 }
+
+/* Toggle Logic & Tag Filter */
+.toggle-logic-btn {
+  border: none;
+  background: transparent;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #64748b;
+  cursor: pointer;
+  transition: all .15s;
+}
+.toggle-logic-btn.active {
+  background: white;
+  color: #0f172a;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+.badge-user-score {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.74rem;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+}
+
+/* Tag Insights View Styling */
+.insights-container {
+  display: none;
+  animation: fadeIn 0.2s ease-in-out;
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.insights-toolbar {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 16px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.03);
+  margin-bottom: 20px;
+}
+.insights-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.insights-kpi-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 16px 18px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.02);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.insights-kpi-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.insights-kpi-value {
+  font-size: 1.4rem;
+  font-weight: 900;
+  color: var(--navy);
+  line-height: 1.2;
+}
+.insights-kpi-sub {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-top: 4px;
+}
+.insights-rankings-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 24px;
+}
+@media (max-width: 900px) {
+  .insights-rankings-grid { grid-template-columns: 1fr; }
+}
+.insights-rank-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 18px 20px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.03);
+}
+.insights-categories-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+  gap: 20px;
+}
+.category-insight-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 18px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.03);
+}
+.tag-stat-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px solid #f1f5f9;
+  font-size: 0.82rem;
+}
+.tag-stat-row:last-child {
+  border-bottom: none;
+}
+.tag-progress-track {
+  height: 6px;
+  background: #f1f5f9;
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+.tag-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}
 </style>
 </head>
 <body>
@@ -658,18 +904,47 @@ h1 span { font-size: 0.75rem; background: var(--teal); color: white; padding: 3p
       </div>
     </div>
 
-    <div style="display:flex;gap:12px;align-items:center;">
-      <select class="select-input" id="sort-select" onchange="renderGallery()">
-        <option value="score_desc">점수 높은 순</option>
-        <option value="score_asc">점수 낮은 순</option>
-        <option value="newest">최신 분석 순</option>
-        <option value="name">파일명 순</option>
+    <div class="filter-group tag-filter-group" style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);width:100%;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+      <span style="font-size:0.84rem;font-weight:700;color:var(--muted)">🏷️ 태그 필터:</span>
+      
+      <div class="tag-logic-toggle" style="display:inline-flex;background:#e2e8f0;border-radius:8px;padding:2px;gap:2px;">
+        <button id="tag-logic-and" class="toggle-logic-btn active" onclick="setTagLogic('AND')" title="선택한 모든 태그를 만족하는 사진만 표시">AND (모두 포함)</button>
+        <button id="tag-logic-or" class="toggle-logic-btn" onclick="setTagLogic('OR')" title="선택한 태그 중 하나라도 있는 사진 표시">OR (하나라도 포함)</button>
+      </div>
+
+      <select id="tag-select-box" class="select-input" onchange="onTagSelectChange(this)" style="max-width:210px;font-size:0.78rem;padding:3px 6px;">
+        <option value="">+ 전체 태그 목록에서 선택...</option>
       </select>
+
+      <div id="quick-popular-tags" style="display:inline-flex;gap:4px;flex-wrap:wrap;align-items:center;"></div>
+
+      <button id="btn-clear-tag-filter" class="filter-btn" style="display:none;padding:2px 8px;font-size:0.74rem;color:#ef4444;border-color:#fca5a5;background:#fff5f5;" onclick="clearAllSelectedTags()">✕ 태그 해제</button>
+    </div>
+
+    <div id="active-tags-container" style="display:none;width:100%;margin-top:4px;gap:6px;align-items:center;flex-wrap:wrap;">
+      <span style="font-size:0.75rem;font-weight:700;color:#0284c7;">적용 중인 태그:</span>
+      <div id="active-tags-pills" style="display:inline-flex;gap:4px;flex-wrap:wrap;"></div>
+    </div>
+
+    <div style="display:flex;gap:12px;align-items:center;width:100%;justify-content:space-between;margin-top:4px;flex-wrap:wrap;">
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span style="font-size:0.84rem;font-weight:700;color:var(--muted)">정렬:</span>
+        <select class="select-input" id="sort-select" onchange="renderGallery()">
+          <option value="score_desc">AI 점수 높은 순</option>
+          <option value="score_asc">AI 점수 낮은 순</option>
+          <option value="user_score_desc">👤 내 점수 높은 순</option>
+          <option value="user_score_asc">👤 내 점수 낮은 순</option>
+          <option value="gap_desc">⚖️ AI와 점수 차이 큰 순</option>
+          <option value="newest">최신 분석 순</option>
+          <option value="name">파일명 순</option>
+        </select>
+      </div>
 
       <div class="view-tabs">
         <button class="tab-btn active" id="tab-gallery" onclick="switchView('gallery')">갤러리 뷰</button>
         <button class="tab-btn" id="tab-compare" onclick="switchView('compare')">1:1 비교(Culling)</button>
         <button class="tab-btn" id="tab-tournament" onclick="openTournamentModal()" style="background:#fef3c7;border-color:#fde68a;color:#b45309;font-weight:700;">🏆 블라인드 토너먼트</button>
+        <button class="tab-btn" id="tab-insights" onclick="switchView('insights')">📊 태그 인사이트</button>
       </div>
     </div>
   </div>
@@ -691,6 +966,9 @@ h1 span { font-size: 0.75rem; background: var(--teal); color: white; padding: 3p
     </div>
     <div class="compare-columns" id="compare-content"></div>
   </div>
+
+  <!-- Tag Insights View (방안 A) -->
+  <div class="insights-container" id="insights-view" style="display:none;margin-top:22px;"></div>
 </main>
 
 <!-- Detail Modal -->
@@ -796,6 +1074,147 @@ let allData = [];
 let currentFilter = 'all';
 let currentCatFilter = 'all';
 let currentDetailId = null;
+let currentView = 'gallery';
+let selectedTags = new Set();
+let tagLogic = 'AND'; // 'AND' or 'OR'
+let insightsMinCount = 2;
+let insightsRatingMode = 'ai'; // 'ai', 'user', 'diff'
+
+const TAG_CATEGORIES = {
+  "viewpoint": "시점",
+  "composition_space": "구도·공간",
+  "pose_gaze": "포즈·시선",
+  "mood": "분위기",
+  "subject_background": "피사체-배경 관계",
+  "light_expression": "빛 표현",
+  "color_impression": "색조 인상",
+  "narrative_implication": "이야기 암시"
+};
+
+function setTagLogic(mode) {
+  tagLogic = mode;
+  const btnAnd = document.getElementById('tag-logic-and');
+  const btnOr = document.getElementById('tag-logic-or');
+  if (btnAnd) btnAnd.classList.toggle('active', mode === 'AND');
+  if (btnOr) btnOr.classList.toggle('active', mode === 'OR');
+  renderGallery();
+}
+
+function toggleTagFilter(tag) {
+  if (selectedTags.has(tag)) {
+    selectedTags.delete(tag);
+  } else {
+    selectedTags.add(tag);
+  }
+  if (currentView !== 'gallery') {
+    switchView('gallery');
+  }
+  updateTagFilterUI();
+  renderGallery();
+}
+
+function clearAllSelectedTags() {
+  selectedTags.clear();
+  updateTagFilterUI();
+  renderGallery();
+}
+
+function onTagSelectChange(sel) {
+  const tag = sel.value;
+  if (!tag) return;
+  selectedTags.add(tag);
+  sel.value = '';
+  if (currentView !== 'gallery') {
+    switchView('gallery');
+  }
+  updateTagFilterUI();
+  renderGallery();
+}
+
+function getAllTagsFromItem(item) {
+  const set = new Set();
+  const tags = item.aesthetic_tags;
+  if (!tags) return set;
+  for (const val of Object.values(tags)) {
+    if (Array.isArray(val)) {
+      val.forEach(t => set.add(t));
+    }
+  }
+  return set;
+}
+
+function updateTagFilterUI() {
+  const pillsContainer = document.getElementById('active-tags-pills');
+  const activeBar = document.getElementById('active-tags-container');
+  const clearBtn = document.getElementById('btn-clear-tag-filter');
+
+  if (!pillsContainer || !activeBar || !clearBtn) return;
+
+  if (selectedTags.size === 0) {
+    activeBar.style.display = 'none';
+    clearBtn.style.display = 'none';
+  } else {
+    activeBar.style.display = 'flex';
+    clearBtn.style.display = 'inline-block';
+    pillsContainer.innerHTML = Array.from(selectedTags).map(t => {
+      const style = getTagColorStyle(t);
+      return `<span class="tag-pill" style="${style}font-weight:700;display:inline-flex;align-items:center;gap:4px;cursor:pointer;" onclick="toggleTagFilter('${t}')">${t} <span style="font-weight:900;color:#ef4444;font-size:0.8rem;">×</span></span>`;
+    }).join('');
+  }
+
+  document.querySelectorAll('.quick-tag-btn').forEach(btn => {
+    const t = btn.getAttribute('data-tag');
+    btn.classList.toggle('active', selectedTags.has(t));
+  });
+}
+
+function populateTagSelectorAndQuickTags() {
+  const tagFreq = {};
+  const tagsByCategory = {};
+
+  allData.forEach(d => {
+    const tags = d.aesthetic_tags || {};
+    for (const [ckey, list] of Object.entries(tags)) {
+      if (Array.isArray(list)) {
+        list.forEach(t => {
+          tagFreq[t] = (tagFreq[t] || 0) + 1;
+          tagsByCategory[ckey] = tagsByCategory[ckey] || new Set();
+          tagsByCategory[ckey].add(t);
+        });
+      }
+    }
+  });
+
+  const select = document.getElementById('tag-select-box');
+  if (select) {
+    let optHtml = '<option value="">+ 전체 태그 목록에서 선택...</option>';
+    for (const [ckey, cname] of Object.entries(TAG_CATEGORIES)) {
+      const tagSet = tagsByCategory[ckey];
+      if (tagSet && tagSet.size > 0) {
+        optHtml += `<optgroup label="${cname}">`;
+        Array.from(tagSet).sort().forEach(t => {
+          const cnt = tagFreq[t] || 0;
+          optHtml += `<option value="${t}">${t} (${cnt}장)</option>`;
+        });
+        optHtml += `</optgroup>`;
+      }
+    }
+    select.innerHTML = optHtml;
+  }
+
+  const quickContainer = document.getElementById('quick-popular-tags');
+  if (quickContainer) {
+    const sortedTags = Object.entries(tagFreq).sort((a, b) => b[1] - a[1]).slice(0, 8);
+    quickContainer.innerHTML = sortedTags.map(([t, cnt]) => `
+      <button class="filter-btn quick-tag-btn ${selectedTags.has(t) ? 'active' : ''}" 
+              data-tag="${t}" 
+              style="padding:3px 9px;font-size:0.75rem;" 
+              onclick="toggleTagFilter('${t}')">
+        #${t} <small style="opacity:0.75;">(${cnt})</small>
+      </button>
+    `).join('');
+  }
+}
 
 function setCatFilter(cat, btn) {
   currentCatFilter = cat;
@@ -811,7 +1230,12 @@ async function loadData() {
   allData = await res.json();
   updateStats();
   populateCompareSelects();
+  populateTagSelectorAndQuickTags();
+  updateTagFilterUI();
   renderGallery();
+  if (currentView === 'insights') {
+    renderTagInsights();
+  }
 }
 
 const loadAnalyses = loadData;
@@ -874,6 +1298,23 @@ function filterList(list) {
     res = res.filter(d => !d.is_burst || d.is_best_pick || expandedBurstGroups.has(d.burst_group_id));
   }
 
+  if (selectedTags.size > 0) {
+    res = res.filter(d => {
+      const itemTags = getAllTagsFromItem(d);
+      if (tagLogic === 'AND') {
+        for (const t of selectedTags) {
+          if (!itemTags.has(t)) return false;
+        }
+        return true;
+      } else {
+        for (const t of selectedTags) {
+          if (itemTags.has(t)) return true;
+        }
+        return false;
+      }
+    });
+  }
+
   return res;
 }
 
@@ -882,6 +1323,21 @@ function sortList(list) {
   return [...list].sort((a, b) => {
     if (sort === 'score_desc') return b.final_score - a.final_score;
     if (sort === 'score_asc') return a.final_score - b.final_score;
+    if (sort === 'user_score_desc') {
+      const sa = (a.user_score !== null && a.user_score !== undefined) ? a.user_score : -1;
+      const sb = (b.user_score !== null && b.user_score !== undefined) ? b.user_score : -1;
+      return sb - sa;
+    }
+    if (sort === 'user_score_asc') {
+      const sa = (a.user_score !== null && a.user_score !== undefined) ? a.user_score : 999;
+      const sb = (b.user_score !== null && b.user_score !== undefined) ? b.user_score : 999;
+      return sa - sb;
+    }
+    if (sort === 'gap_desc') {
+      const ga = (a.user_score !== null && a.user_score !== undefined) ? Math.abs(a.user_score - a.final_score) : -1;
+      const gb = (b.user_score !== null && b.user_score !== undefined) ? Math.abs(b.user_score - b.final_score) : -1;
+      return gb - ga;
+    }
     if (sort === 'newest') return b.id - a.id;
     if (sort === 'name') return a.filename.localeCompare(b.filename);
     return 0;
@@ -911,10 +1367,16 @@ function renderGallery() {
             ) : ''}
             ${item.review_status === '토너먼트 1위' ? '<span class="badge-best-pick" style="background:#fef3c7;color:#b45309;border:1px solid #fde68a;display:inline-block;margin-top:4px;margin-left:4px;">🏆 토너먼트 1위</span>' : ''}
             ${item.sns_advice ? '<span style="display:inline-block;margin-top:4px;margin-left:4px;font-size:0.75rem;font-weight:700;color:#0284c7;background:#e0f2fe;padding:2px 7px;border-radius:6px;">📱 SNS크롭</span>' : ''}
+            ${item.user_score !== null && item.user_score !== undefined ? `
+              <span class="badge-user-score" style="display:inline-block;margin-top:4px;margin-left:4px;" title="사용자 직접 평점: ${item.user_score.toFixed(1)}점 (AI: ${item.final_score.toFixed(1)}점)">👤 내 점수 ${item.user_score.toFixed(1)}</span>
+            ` : ''}
           </div>
           <div class="score-badge">
             <span class="score-num">${item.final_score.toFixed(1)}</span>
             <span class="score-grade">${item.grade}</span>
+            ${item.user_score !== null && item.user_score !== undefined ? `
+              <span style="font-size:0.74rem;font-weight:800;color:#1d4ed8;margin-top:3px;">👤 ${item.user_score.toFixed(1)}점</span>
+            ` : ''}
           </div>
         </div>
         <div class="mini-scores">
@@ -972,7 +1434,9 @@ function renderTagPills(tags, maxCount = 4) {
     if (Array.isArray(v)) {
       v.forEach(t => {
         const style = getTagColorStyle(t);
-        pills.push(`<span class="tag-pill" style="${style}">${t}</span>`);
+        const isSelected = selectedTags && selectedTags.has(t);
+        const selBorder = isSelected ? 'box-shadow:0 0 0 2px #0284c7;font-weight:800;' : '';
+        pills.push(`<span class="tag-pill" style="${style}${selBorder}cursor:pointer;" onclick="event.stopPropagation(); toggleTagFilter('${t}')" title="클릭하여 #${t} 태그로 필터링">${isSelected ? '✓ ' : ''}${t}</span>`);
       });
     }
   }
@@ -1099,6 +1563,41 @@ function openDetailModal(id) {
         <b>종합 총평:</b> ${item.final_reason}
       </div>
 
+      <!-- 사용자 직접 평점 매기기 & AI 비교 영역 -->
+      <div class="user-score-section" style="background:#f8fafc;border:1px solid #cbd5e1;border-radius:14px;padding:12px 16px;margin-bottom:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+          <div style="display:flex;align-items:center;gap:6px;">
+            <span style="font-size:1.15rem;">👤</span>
+            <div>
+              <b style="font-size:0.88rem;color:var(--navy);">내 직접 평가 평점 (User Rating)</b>
+              <div style="font-size:0.73rem;color:var(--muted);">점수를 직접 매겨 AI와 시각을 비교해보세요.</div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+            <div style="display:inline-flex;align-items:center;background:white;border:1px solid var(--line);border-radius:8px;padding:2px 8px;">
+              <input type="number" id="detail-user-score-input" min="0" max="10" step="0.1" 
+                     value="${item.user_score !== null && item.user_score !== undefined ? item.user_score.toFixed(1) : ''}" 
+                     placeholder="0.0~10" 
+                     style="width:65px;border:none;outline:none;font-size:0.92rem;font-weight:700;color:#0f172a;text-align:center;">
+              <span style="font-size:0.75rem;color:var(--muted);font-weight:600;">/ 10</span>
+            </div>
+            <button class="filter-btn" style="background:#0284c7;color:white;border-color:#0284c7;padding:4px 10px;font-weight:700;font-size:0.78rem;" onclick="submitUserScore(${item.id})">저장</button>
+            ${item.user_score !== null && item.user_score !== undefined ? `
+              <button class="filter-btn" style="background:#f1f5f9;color:#64748b;border-color:#cbd5e1;padding:4px 8px;font-size:0.76rem;" onclick="clearUserScore(${item.id})">초기화</button>
+            ` : ''}
+          </div>
+        </div>
+
+        <div style="display:flex;gap:4px;align-items:center;margin-top:8px;flex-wrap:wrap;">
+          <span style="font-size:0.73rem;color:var(--muted);font-weight:600;">빠른 점수:</span>
+          ${[6.0, 7.0, 7.5, 8.0, 8.5, 9.0, 9.5, 10.0].map(s => `
+            <button class="filter-btn" style="padding:1px 6px;font-size:0.72rem;background:white;" onclick="setQuickUserScore(${item.id}, ${s})">${s.toFixed(1)}</button>
+          `).join('')}
+        </div>
+
+        ${item.user_score !== null && item.user_score !== undefined ? renderScoreComparisonBox(item.final_score, item.user_score) : ''}
+      </div>
+
       <!-- 세부 평가 요소 점수 요약 그래프 (우측 상단) -->
       <div class="score-summary-card">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
@@ -1216,6 +1715,86 @@ function openDetailModal(id) {
   if (item.sns_advice && item.sns_advice[currentCropRatioKey]) {
     setTimeout(() => { selectCropRatio('instagram_crop_4_5', item.id); }, 150);
   }
+}
+
+function renderScoreComparisonBox(aiScore, userScore) {
+  const diff = Math.round((userScore - aiScore) * 10) / 10;
+  let badgeStyle, badgeText, comment;
+  if (Math.abs(diff) <= 0.2) {
+    badgeStyle = 'background:#f3e8ff;color:#7e22ce;border:1px solid #d8b4fe;';
+    badgeText = '±0.0 (AI와 일치)';
+    comment = '🤖 AI와 👤 내 시각이 거의 완벽하게 일치합니다!';
+  } else if (diff > 0) {
+    badgeStyle = 'background:#e0f2fe;color:#0369a1;border:1px solid #bae6fd;';
+    badgeText = `+${diff.toFixed(1)} (AI보다 호평)`;
+    comment = `👤 내가 AI(${aiScore.toFixed(1)}점)보다 +${diff.toFixed(1)}점 더 높게 평가했습니다. (개인 취향 부합)`;
+  } else {
+    badgeStyle = 'background:#fef3c7;color:#b45309;border:1px solid #fde68a;';
+    badgeText = `${diff.toFixed(1)} (AI보다 엄격)`;
+    comment = `👤 내가 AI(${aiScore.toFixed(1)}점)보다 ${Math.abs(diff).toFixed(1)}점 더 엄격하게 평가했습니다.`;
+  }
+  return `
+    <div style="margin-top:8px;padding:8px 10px;background:white;border-radius:8px;border:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;">
+      <div style="display:flex;align-items:center;gap:6px;">
+        <span style="font-size:0.8rem;font-weight:700;color:var(--navy);">🤖 AI ${aiScore.toFixed(1)} vs 👤 내 점수 ${userScore.toFixed(1)}</span>
+        <span style="font-size:0.72rem;font-weight:800;padding:1px 7px;border-radius:999px;${badgeStyle}">${badgeText}</span>
+      </div>
+      <span style="font-size:0.75rem;color:var(--muted);">${comment}</span>
+    </div>
+  `;
+}
+
+async function submitUserScore(id) {
+  const input = document.getElementById('detail-user-score-input');
+  if (!input) return;
+  const raw = input.value.trim();
+  let scoreVal = null;
+  if (raw !== '') {
+    scoreVal = parseFloat(raw);
+    if (isNaN(scoreVal) || scoreVal < 0 || scoreVal > 10) {
+      alert('점수는 0.0점에서 10.0점 사이로 입력해주세요.');
+      return;
+    }
+    scoreVal = Math.round(scoreVal * 10) / 10;
+  }
+
+  try {
+    const res = await fetch('/api/rate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, user_score: scoreVal })
+    });
+    const data = await res.json();
+    if (data.success) {
+      const item = allData.find(d => d.id === id);
+      if (item) {
+        item.user_score = data.user_score;
+      }
+      openDetailModal(id);
+      renderGallery();
+      populateTagSelectorAndQuickTags();
+      if (currentView === 'insights') {
+        renderTagInsights();
+      }
+    } else {
+      alert('평점 저장 실패: ' + (data.error || '알 수 없는 오류'));
+    }
+  } catch (err) {
+    alert('평점 저장 중 네트워크 오류: ' + err.message);
+  }
+}
+
+function setQuickUserScore(id, score) {
+  const input = document.getElementById('detail-user-score-input');
+  if (input) input.value = score.toFixed(1);
+  submitUserScore(id);
+}
+
+function clearUserScore(id) {
+  if (!confirm('직접 매긴 평가 점수를 초기화하시겠습니까?')) return;
+  const input = document.getElementById('detail-user-score-input');
+  if (input) input.value = '';
+  submitUserScore(id);
 }
 
 let currentCropBox = null;
@@ -2342,18 +2921,364 @@ window.addEventListener('keydown', (e) => {
 });
 
 function switchView(mode) {
+  currentView = mode;
+  const galleryGrid = document.getElementById('gallery-grid');
+  const compareView = document.getElementById('compare-view');
+  const insightsView = document.getElementById('insights-view');
+  const tabGallery = document.getElementById('tab-gallery');
+  const tabCompare = document.getElementById('tab-compare');
+  const tabInsights = document.getElementById('tab-insights');
+
+  if (tabGallery) tabGallery.classList.toggle('active', mode === 'gallery');
+  if (tabCompare) tabCompare.classList.toggle('active', mode === 'compare');
+  if (tabInsights) tabInsights.classList.toggle('active', mode === 'insights');
+
   if (mode === 'gallery') {
-    document.getElementById('gallery-grid').style.display = 'grid';
-    document.getElementById('compare-view').style.display = 'none';
-    document.getElementById('tab-gallery').classList.add('active');
-    document.getElementById('tab-compare').classList.remove('active');
-  } else {
-    document.getElementById('gallery-grid').style.display = 'none';
-    document.getElementById('compare-view').style.display = 'block';
-    document.getElementById('tab-gallery').classList.remove('active');
-    document.getElementById('tab-compare').classList.add('active');
+    if (galleryGrid) galleryGrid.style.display = 'grid';
+    if (compareView) compareView.style.display = 'none';
+    if (insightsView) insightsView.style.display = 'none';
+  } else if (mode === 'compare') {
+    if (galleryGrid) galleryGrid.style.display = 'none';
+    if (compareView) compareView.style.display = 'block';
+    if (insightsView) insightsView.style.display = 'none';
     updateComparison();
+  } else if (mode === 'insights') {
+    if (galleryGrid) galleryGrid.style.display = 'none';
+    if (compareView) compareView.style.display = 'none';
+    if (insightsView) insightsView.style.display = 'block';
+    renderTagInsights();
   }
+}
+
+function setInsightsMinCount(val) {
+  insightsMinCount = parseInt(val) || 2;
+  renderTagInsights();
+}
+
+function setInsightsRatingMode(mode) {
+  insightsRatingMode = mode;
+  renderTagInsights();
+}
+
+function computeClientTagStats(minCount) {
+  const totalPhotos = allData.length;
+  const userRatedPhotos = allData.filter(d => d.user_score !== null && d.user_score !== undefined).length;
+  const tagData = {};
+
+  allData.forEach(d => {
+    const tags = d.aesthetic_tags || {};
+    const aiScore = d.final_score || 0;
+    const uScore = (d.user_score !== null && d.user_score !== undefined) ? d.user_score : null;
+    const lScore = d.lighting_score || 0;
+    const cScore = d.composition_score || 0;
+    const tScore = d.technique_score || 0;
+    const colScore = d.color_score || 0;
+
+    for (const [ckey, list] of Object.entries(tags)) {
+      if (Array.isArray(list)) {
+        const cname = TAG_CATEGORIES[ckey] || ckey;
+        list.forEach(t => {
+          const key = ckey + '::' + t;
+          if (!tagData[key]) {
+            tagData[key] = {
+              category_key: ckey,
+              category_name: cname,
+              tag: t,
+              count: 0,
+              ai_scores: [],
+              user_scores: [],
+              lighting_scores: [],
+              composition_scores: [],
+              technique_scores: [],
+              color_scores: []
+            };
+          }
+          const td = tagData[key];
+          td.count += 1;
+          td.ai_scores.push(aiScore);
+          if (uScore !== null) td.user_scores.push(uScore);
+          td.lighting_scores.push(lScore);
+          td.composition_scores.push(cScore);
+          td.technique_scores.push(tScore);
+          td.color_scores.push(colScore);
+        });
+      }
+    }
+  });
+
+  const allTags = [];
+  for (const td of Object.values(tagData)) {
+    if (td.count < minCount) continue;
+    const avgAi = td.ai_scores.length ? (td.ai_scores.reduce((a, b) => a + b, 0) / td.ai_scores.length) : 0;
+    const avgUser = td.user_scores.length ? (td.user_scores.reduce((a, b) => a + b, 0) / td.user_scores.length) : null;
+    const avgLight = td.lighting_scores.length ? (td.lighting_scores.reduce((a, b) => a + b, 0) / td.lighting_scores.length) : 0;
+    const avgComp = td.composition_scores.length ? (td.composition_scores.reduce((a, b) => a + b, 0) / td.composition_scores.length) : 0;
+    const avgTech = td.technique_scores.length ? (td.technique_scores.reduce((a, b) => a + b, 0) / td.technique_scores.length) : 0;
+    const avgColor = td.color_scores.length ? (td.color_scores.reduce((a, b) => a + b, 0) / td.color_scores.length) : 0;
+
+    const diff = (avgUser !== null) ? Math.round((avgUser - avgAi) * 10) / 10 : null;
+
+    allTags.push({
+      category_key: td.category_key,
+      category_name: td.category_name,
+      tag: td.tag,
+      count: td.count,
+      avg_ai_score: Math.round(avgAi * 10) / 10,
+      avg_user_score: (avgUser !== null) ? Math.round(avgUser * 10) / 10 : null,
+      score_diff: diff,
+      user_rated_count: td.user_scores.length,
+      avg_lighting_score: Math.round(avgLight * 10) / 10,
+      avg_composition_score: Math.round(avgComp * 10) / 10,
+      avg_technique_score: Math.round(avgTech * 10) / 10,
+      avg_color_score: Math.round(avgColor * 10) / 10
+    });
+  }
+
+  let sortedTags = [...allTags];
+  if (insightsRatingMode === 'user') {
+    sortedTags.sort((a, b) => {
+      const sa = a.avg_user_score !== null ? a.avg_user_score : -1;
+      const sb = b.avg_user_score !== null ? b.avg_user_score : -1;
+      return sb - sa;
+    });
+  } else if (insightsRatingMode === 'diff') {
+    sortedTags.sort((a, b) => {
+      const da = a.score_diff !== null ? a.score_diff : -999;
+      const db = b.score_diff !== null ? b.score_diff : -999;
+      return db - da;
+    });
+  } else {
+    sortedTags.sort((a, b) => b.avg_ai_score - a.avg_ai_score);
+  }
+
+  const topTags = sortedTags.slice(0, 5);
+  const bottomTags = (sortedTags.length >= 2) ? [...sortedTags].reverse().slice(0, 5) : [];
+
+  const categories = {};
+  for (const t of sortedTags) {
+    if (!categories[t.category_key]) categories[t.category_key] = [];
+    categories[t.category_key].push(t);
+  }
+
+  const tagsWithDiff = allTags.filter(t => t.score_diff !== null);
+  const bestFavTag = tagsWithDiff.length ? [...tagsWithDiff].sort((a, b) => b.score_diff - a.score_diff)[0] : null;
+
+  return {
+    totalPhotos,
+    userRatedPhotos,
+    totalUniqueTags: Object.keys(tagData).length,
+    filteredCount: allTags.length,
+    allTags,
+    topTags,
+    bottomTags,
+    categories,
+    bestFavTag
+  };
+}
+
+function getScoreColor(score) {
+  if (score >= 9.0) return '#2563eb';
+  if (score >= 8.0) return '#0d9488';
+  if (score >= 7.0) return '#d97706';
+  return '#e11d48';
+}
+
+function renderTagInsights() {
+  const container = document.getElementById('insights-view');
+  if (!container) return;
+
+  const stats = computeClientTagStats(insightsMinCount);
+
+  if (!allData.length) {
+    container.innerHTML = '<div style="text-align:center;padding:60px;color:var(--muted)">분석된 사진 데이터가 없습니다. 먼저 사진을 업로드해 분석해주세요.</div>';
+    return;
+  }
+
+  const topAi = stats.allTags.length ? [...stats.allTags].sort((a, b) => b.avg_ai_score - a.avg_ai_score)[0] : null;
+  const userRatePct = stats.totalPhotos ? Math.round((stats.userRatedPhotos / stats.totalPhotos) * 100) : 0;
+
+  container.innerHTML = `
+    <!-- Insights Toolbar -->
+    <div class="insights-toolbar">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <span style="font-size:1.15rem;font-weight:900;color:var(--navy);display:flex;align-items:center;gap:6px;">
+          📊 시각 태그별 평균 점수 & 미학 경향성 인사이트
+        </span>
+        <span style="font-size:0.75rem;background:#e0f2fe;color:#0369a1;padding:3px 9px;border-radius:999px;font-weight:700;">
+          총 ${stats.filteredCount}개 태그 분석됨
+        </span>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <!-- Sample Min Count Filter -->
+        <div style="display:inline-flex;align-items:center;gap:6px;background:#f1f5f9;padding:4px 10px;border-radius:10px;border:1px solid #e2e8f0;">
+          <span style="font-size:0.78rem;font-weight:700;color:var(--muted);">최소 사진 수:</span>
+          <select class="select-input" style="padding:2px 8px;font-size:0.78rem;border:none;background:transparent;font-weight:700;color:#0284c7;cursor:pointer;" onchange="setInsightsMinCount(this.value)">
+            <option value="1" ${insightsMinCount === 1 ? 'selected' : ''}>1장 이상 (전체)</option>
+            <option value="2" ${insightsMinCount === 2 ? 'selected' : ''}>2장 이상 (표준 권장)</option>
+            <option value="3" ${insightsMinCount === 3 ? 'selected' : ''}>3장 이상</option>
+            <option value="5" ${insightsMinCount === 5 ? 'selected' : ''}>5장 이상 (대용량)</option>
+          </select>
+        </div>
+
+        <!-- Rating Mode Switcher -->
+        <div style="display:inline-flex;background:#e2e8f0;border-radius:10px;padding:3px;gap:2px;">
+          <button class="toggle-logic-btn ${insightsRatingMode === 'ai' ? 'active' : ''}" onclick="setInsightsRatingMode('ai')">🤖 AI 점수</button>
+          <button class="toggle-logic-btn ${insightsRatingMode === 'user' ? 'active' : ''}" onclick="setInsightsRatingMode('user')">👤 내 점수</button>
+          <button class="toggle-logic-btn ${insightsRatingMode === 'diff' ? 'active' : ''}" onclick="setInsightsRatingMode('diff')">⚖️ AI vs 내 점수 비교</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- KPI Summary Cards -->
+    <div class="insights-kpi-grid">
+      <div class="insights-kpi-card">
+        <div class="insights-kpi-title">📷 총 분석 데이터</div>
+        <div class="insights-kpi-value">${stats.totalPhotos} <small style="font-size:0.9rem;font-weight:500;color:var(--muted)">장</small></div>
+        <div class="insights-kpi-sub">고유 시각 태그 ${stats.totalUniqueTags}개 추출</div>
+      </div>
+
+      <div class="insights-kpi-card">
+        <div class="insights-kpi-title">👤 사용자 직접 평가율</div>
+        <div class="insights-kpi-value">${stats.userRatedPhotos} <small style="font-size:0.9rem;font-weight:500;color:var(--muted)">장 (${userRatePct}%)</small></div>
+        <div class="insights-kpi-sub">${stats.userRatedPhotos > 0 ? 'AI 점수와 내 취향 비교 가능' : '사진 상세 모달에서 직접 평가해보세요'}</div>
+      </div>
+
+      <div class="insights-kpi-card">
+        <div class="insights-kpi-title">🌟 AI 최고 평점 태그</div>
+        <div class="insights-kpi-value" style="font-size:1.2rem;color:#0d9488;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+          ${topAi ? `#${topAi.tag}` : '-'}
+        </div>
+        <div class="insights-kpi-sub">${topAi ? `평균 ${topAi.avg_ai_score.toFixed(1)}점 (${topAi.count}장 등록)` : '데이터 없음'}</div>
+      </div>
+
+      <div class="insights-kpi-card">
+        <div class="insights-kpi-title">💡 내 취향 최고 태그 (AI 대비 +차이)</div>
+        <div class="insights-kpi-value" style="font-size:1.2rem;color:#6366f1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+          ${stats.bestFavTag ? `#${stats.bestFavTag.tag}` : '-'}
+        </div>
+        <div class="insights-kpi-sub">${stats.bestFavTag ? `AI 대비 +${stats.bestFavTag.score_diff.toFixed(1)}점 더 선호` : '직접 평가가 쌓이면 노출됩니다'}</div>
+      </div>
+    </div>
+
+    <!-- Top 5 & Bottom 5 Rankings -->
+    <div class="insights-rankings-grid">
+      <!-- Top 5 -->
+      <div class="insights-rank-card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <h3 style="margin:0;font-size:1.02rem;display:flex;align-items:center;gap:6px;color:#065f46;">
+            <span>🌟</span> 최고 평점 태그 Top 5 (A컷 제조 태그)
+          </h3>
+          <span style="font-size:0.75rem;color:var(--muted);">클릭 시 갤러리 검색</span>
+        </div>
+        <div>
+          ${stats.topTags.length ? stats.topTags.map((t, idx) => renderTagStatRow(t, idx + 1, 'top')).join('') : '<div style="color:var(--muted);font-size:0.84rem;padding:20px;text-align:center;">조건을 만족하는 태그가 없습니다.</div>'}
+        </div>
+      </div>
+
+      <!-- Bottom 5 -->
+      <div class="insights-rank-card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <h3 style="margin:0;font-size:1.02rem;display:flex;align-items:center;gap:6px;color:#991b1b;">
+            <span>🔻</span> 감점 요인 / 최저 평점 태그 Bottom 5
+          </h3>
+          <span style="font-size:0.75rem;color:var(--muted);">클릭 시 갤러리 검색</span>
+        </div>
+        <div>
+          ${stats.bottomTags.length ? stats.bottomTags.map((t, idx) => renderTagStatRow(t, idx + 1, 'bottom')).join('') : '<div style="color:var(--muted);font-size:0.84rem;padding:20px;text-align:center;">조건을 만족하는 태그가 없습니다.</div>'}
+        </div>
+      </div>
+    </div>
+
+    <!-- 8 Aesthetic Categories Breakdown Grid -->
+    <div style="margin-top:28px;">
+      <div style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <h3 style="margin:0;font-size:1.15rem;font-weight:800;color:var(--navy);">
+            🎨 8대 미학 카테고리별 세부 스타일 경향성
+          </h3>
+          <span style="font-size:0.78rem;color:var(--muted);">카테고리별로 어떤 촬영 기법과 구도가 더 높은 점수를 받는지 비교해보세요.</span>
+        </div>
+      </div>
+
+      <div class="insights-categories-grid">
+        ${Object.entries(TAG_CATEGORIES).map(([ckey, cname]) => {
+          const catTags = stats.categories[ckey] || [];
+          return `
+            <div class="category-insight-card">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid #e2e8f0;">
+                <b style="font-size:0.92rem;color:var(--navy);">${cname}</b>
+                <span style="font-size:0.72rem;background:#f1f5f9;color:var(--muted);padding:2px 7px;border-radius:999px;">
+                  ${catTags.length}개 태그
+                </span>
+              </div>
+              <div>
+                ${catTags.length ? catTags.slice(0, 6).map((t, idx) => renderCategoryTagRow(t)).join('') : '<div style="font-size:0.78rem;color:var(--muted);padding:14px;text-align:center;">최소 등록 기준(${insightsMinCount}장)을 만족하는 태그가 아직 없습니다.</div>'}
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function renderTagStatRow(t, rank, type) {
+  const score = (insightsRatingMode === 'user' && t.avg_user_score !== null) ? t.avg_user_score : t.avg_ai_score;
+  const scoreColor = getScoreColor(score);
+  const rankColor = type === 'top' ? (rank === 1 ? '#eab308' : (rank === 2 ? '#94a3b8' : '#b45309')) : '#ef4444';
+  const style = getTagColorStyle(t.tag);
+
+  return `
+    <div class="tag-stat-row">
+      <div style="display:flex;align-items:center;gap:8px;overflow:hidden;">
+        <span style="font-weight:900;font-size:0.85rem;color:${rankColor};width:18px;">${rank}</span>
+        <span class="tag-pill" style="${style}cursor:pointer;font-weight:700;" onclick="toggleTagFilter('${t.tag}')" title="클릭하여 #${t.tag} 사진 모아보기">
+          #${t.tag}
+        </span>
+        <small style="color:var(--muted);font-size:0.74rem;">${t.category_name} (${t.count}장)</small>
+      </div>
+
+      <div style="text-align:right;min-width:140px;">
+        <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px;">
+          ${t.avg_user_score !== null ? `<span style="font-size:0.74rem;color:#1d4ed8;font-weight:700;">👤 ${t.avg_user_score.toFixed(1)}</span>` : ''}
+          <strong style="color:${scoreColor};font-size:0.95rem;">🤖 ${t.avg_ai_score.toFixed(1)}<small style="font-size:0.75rem;font-weight:500;color:var(--muted);">/10</small></strong>
+          ${t.score_diff !== null ? `
+            <span style="font-size:0.7rem;font-weight:800;padding:1px 5px;border-radius:4px;${t.score_diff > 0 ? 'background:#e0f2fe;color:#0369a1;' : (t.score_diff < 0 ? 'background:#fee2e2;color:#b91c1c;' : 'background:#f3e8ff;color:#7e22ce;')}">
+              ${t.score_diff > 0 ? '+' : ''}${t.score_diff.toFixed(1)}
+            </span>
+          ` : ''}
+        </div>
+        <div class="tag-progress-track">
+          <div class="tag-progress-fill" style="width:${Math.min(100, Math.max(0, score * 10))}%;background:${scoreColor};"></div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderCategoryTagRow(t) {
+  const score = (insightsRatingMode === 'user' && t.avg_user_score !== null) ? t.avg_user_score : t.avg_ai_score;
+  const scoreColor = getScoreColor(score);
+  const style = getTagColorStyle(t.tag);
+
+  return `
+    <div style="padding:6px 0;border-bottom:1px solid #f8fafc;display:flex;align-items:center;justify-content:space-between;gap:8px;">
+      <span class="tag-pill" style="${style}cursor:pointer;font-size:0.75rem;font-weight:600;" onclick="toggleTagFilter('${t.tag}')" title="클릭하여 #${t.tag} 사진 모아보기">
+        #${t.tag} <small style="opacity:0.75;">(${t.count})</small>
+      </span>
+
+      <div style="text-align:right;min-width:110px;">
+        <div style="display:flex;align-items:center;justify-content:flex-end;gap:5px;font-size:0.78rem;">
+          <span style="font-weight:800;color:${scoreColor};">${score.toFixed(1)}점</span>
+          ${t.avg_user_score !== null && insightsRatingMode !== 'user' ? `<span style="font-size:0.7rem;color:#1d4ed8;">(👤${t.avg_user_score.toFixed(1)})</span>` : ''}
+        </div>
+        <div class="tag-progress-track" style="height:4px;">
+          <div class="tag-progress-fill" style="width:${Math.min(100, Math.max(0, score * 10))}%;background:${scoreColor};"></div>
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 function populateCompareSelects() {
@@ -2706,6 +3631,19 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
             return
 
+        if parsed.path == "/api/tag-stats":
+            query = parse_qs(parsed.query)
+            try:
+                min_count = max(1, int(query.get("min_count", ["1"])[0]))
+            except Exception:
+                min_count = 1
+            data = get_tag_stats(self.db_path, min_count=min_count)
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
+            return
+
         if path.startswith("/api/image/"):
             try:
                 record_id = int(path.split("/")[-1])
@@ -2871,6 +3809,31 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.end_headers()
                 self.wfile.write(json.dumps({"success": True}).encode("utf-8"))
+                return
+            except Exception as exc:
+                self.send_response(HTTPStatus.INTERNAL_SERVER_ERROR)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(json.dumps({"success": False, "error": str(exc)}).encode("utf-8"))
+                return
+
+        if parsed.path == "/api/rate":
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(content_length)
+                data = json.loads(body.decode("utf-8"))
+                record_id = int(data.get("id"))
+                raw_score = data.get("user_score")
+                user_score = None
+                if raw_score is not None and str(raw_score).strip() != "":
+                    user_score = max(0.0, min(10.0, round(float(raw_score), 1)))
+                ensure_db_columns(self.db_path)
+                with closing(sqlite3.connect(self.db_path)) as conn, conn:
+                    conn.execute("UPDATE photo_analyses SET user_score = ? WHERE id = ?", (user_score, record_id))
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(json.dumps({"success": True, "id": record_id, "user_score": user_score}, ensure_ascii=False).encode("utf-8"))
                 return
             except Exception as exc:
                 self.send_response(HTTPStatus.INTERNAL_SERVER_ERROR)
