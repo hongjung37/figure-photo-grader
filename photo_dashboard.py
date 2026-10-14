@@ -616,6 +616,7 @@ h1 span { font-size: 0.75rem; background: var(--teal); color: white; padding: 3p
     <div style="display:flex;gap:10px;align-items:center;">
       <button class="upload-btn" style="background:#f59e0b;" onclick="openTournamentModal()">🏆 블라인드 토너먼트 (B-3)</button>
       <button class="upload-btn" style="background:#0d9488;" onclick="exportAllXmp(this)">📥 라이트룸 XMP 내보내기</button>
+      <button class="upload-btn" style="background:#475569;" onclick="openUsageModal()">📊 API 사용량</button>
       <button class="upload-btn" onclick="openUploadModal()">+ 새 사진 분석하기</button>
     </div>
   </div>
@@ -718,6 +719,19 @@ h1 span { font-size: 0.75rem; background: var(--teal); color: white; padding: 3p
       <div id="tour-progress-bar" style="height:100%;width:0%;background:linear-gradient(90deg, #38bdf8, #818cf8);transition:width 0.3s ease;"></div>
     </div>
     <div class="tour-body" id="tour-body-container"></div>
+  </div>
+</div>
+
+<!-- API Usage Modal -->
+<div class="modal-overlay" id="usage-modal" onclick="closeUsageModal(event)">
+  <div class="modal-content" style="max-width:860px;max-height:88vh;overflow-y:auto;" onclick="event.stopPropagation()">
+    <button class="close-btn" onclick="closeUsageModal()">&times;</button>
+    <div style="display:flex;align-items:center;gap:12px;margin:0 0 6px;">
+      <h2 style="margin:0;">📊 Gemini API 사용량</h2>
+      <button class="upload-btn" style="padding:4px 12px;font-size:0.78rem;background:#475569;" onclick="refreshUsageStats()">새로고침</button>
+    </div>
+    <p style="color:var(--muted);font-size:0.85rem;margin:0 0 14px;">호출 횟수, 재시도/폴백, 토큰, 소요 시간을 기능별로 집계합니다. (중복 업로드로 생략된 호출은 집계되지 않습니다)</p>
+    <div id="usage-body"></div>
   </div>
 </div>
 
@@ -2270,6 +2284,7 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.key === 'Escape') {
     closeDetailModal();
+    closeUsageModal();
     closeUploadModal();
   } else if (e.key === 'ArrowRight' || e.key === 'k') {
     navigateDetail(1);
@@ -2399,6 +2414,76 @@ async function getFilesFromEntry(entry) {
     return subFiles;
   }
   return [];
+}
+
+function escapeUsageHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function openUsageModal() {
+  document.getElementById('usage-modal').style.display = 'flex';
+  await refreshUsageStats();
+}
+
+function closeUsageModal(e) {
+  if (!e || e.target.id === 'usage-modal') {
+    const m = document.getElementById('usage-modal');
+    if (m) m.style.display = 'none';
+  }
+}
+
+async function refreshUsageStats() {
+  const body = document.getElementById('usage-body');
+  body.innerHTML = '<p style="color:var(--muted);">불러오는 중...</p>';
+  try {
+    const res = await fetch('/api/usage-stats');
+    const d = await res.json();
+    if (!d.total_calls) {
+      body.innerHTML = '<p style="color:var(--muted);">아직 기록된 API 호출이 없습니다. 사진을 분석하면 여기에 쌓입니다.</p>';
+      return;
+    }
+    const sum = (k) => d.by_task.reduce((a, t) => a + (t[k] || 0), 0);
+    const totalIn = sum('input_tokens');
+    const totalOut = sum('output_tokens');
+    const failures = d.by_task.reduce((a, t) => a + (t.calls - (t.successes || 0)), 0);
+    const card = (label, value) => `<div style="background:rgba(148,163,184,0.12);border-radius:10px;padding:10px 14px;min-width:110px;"><div style="font-size:0.72rem;color:var(--muted);">${label}</div><div style="font-size:1.25rem;font-weight:800;">${value}</div></div>`;
+    const th = 'text-align:left;padding:6px 8px;border-bottom:1px solid rgba(148,163,184,0.3);font-size:0.78rem;color:var(--muted);';
+    const td = 'padding:6px 8px;border-bottom:1px solid rgba(148,163,184,0.15);font-size:0.82rem;';
+    const taskRows = d.by_task.map(t => `<tr>
+      <td style="${td}">${escapeUsageHtml(t.task)}</td>
+      <td style="${td}">${t.calls}</td>
+      <td style="${td}">${t.calls - (t.successes || 0)}</td>
+      <td style="${td}">${t.fallbacks || 0}</td>
+      <td style="${td}">${t.retries || 0}</td>
+      <td style="${td}">${(t.input_tokens || 0).toLocaleString()}</td>
+      <td style="${td}">${(t.output_tokens || 0).toLocaleString()}</td>
+      <td style="${td}">${((t.avg_ms || 0) / 1000).toFixed(1)}s</td>
+    </tr>`).join('');
+    const recentRows = d.recent.map(r => `<tr>
+      <td style="${td}">${escapeUsageHtml((r.created_at || '').replace('T', ' ').slice(5, 19))}</td>
+      <td style="${td}">${escapeUsageHtml(r.task)}</td>
+      <td style="${td}">${escapeUsageHtml(r.used_model)}${r.fallback ? ' (폴백)' : ''}</td>
+      <td style="${td}">${((r.duration_ms || 0) / 1000).toFixed(1)}s</td>
+      <td style="${td}">${r.input_tokens == null ? '-' : r.input_tokens.toLocaleString()} / ${r.output_tokens == null ? '-' : r.output_tokens.toLocaleString()}</td>
+      <td style="${td}color:${r.success ? 'var(--teal)' : '#e11d48'};" title="${escapeUsageHtml(r.error || '')}">${r.success ? '성공' : '실패'}</td>
+    </tr>`).join('');
+    body.innerHTML = `
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;">
+        ${card('총 호출', d.total_calls)}${card('실패', failures)}${card('입력 토큰', totalIn.toLocaleString())}${card('출력 토큰', totalOut.toLocaleString())}
+      </div>
+      <h3 style="margin:0 0 6px;font-size:0.95rem;">기능별 사용량</h3>
+      <table style="width:100%;border-collapse:collapse;margin-bottom:18px;">
+        <thead><tr><th style="${th}">작업</th><th style="${th}">호출</th><th style="${th}">실패</th><th style="${th}">폴백</th><th style="${th}">재시도</th><th style="${th}">입력 tok</th><th style="${th}">출력 tok</th><th style="${th}">평균 시간</th></tr></thead>
+        <tbody>${taskRows}</tbody>
+      </table>
+      <h3 style="margin:0 0 6px;font-size:0.95rem;">최근 호출 (30건)</h3>
+      <table style="width:100%;border-collapse:collapse;">
+        <thead><tr><th style="${th}">시각(UTC)</th><th style="${th}">작업</th><th style="${th}">모델</th><th style="${th}">소요</th><th style="${th}">입력/출력 tok</th><th style="${th}">결과</th></tr></thead>
+        <tbody>${recentRows}</tbody>
+      </table>`;
+  } catch (err) {
+    body.innerHTML = `<p style="color:#e11d48;">사용량을 불러오지 못했습니다: ${escapeUsageHtml(err.message)}</p>`;
+  }
 }
 
 let isBatchUploading = false;
