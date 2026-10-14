@@ -8,6 +8,7 @@ import os
 import sqlite3
 import sys
 import tempfile
+from contextlib import closing
 from http import HTTPStatus
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
@@ -171,7 +172,12 @@ h1 span { font-size: 0.75rem; background: var(--teal); color: white; padding: 3p
 .modal-content { background: white; border-radius: 24px; max-width: 1050px; width: 100%; max-height: 90vh; overflow-y: auto; padding: 32px; box-shadow: 0 25px 60px rgba(0,0,0,0.25); position: relative; }
 .close-btn { position: absolute; top: 20px; right: 24px; font-size: 1.8rem; background: transparent; border: none; cursor: pointer; color: var(--muted); }
 .modal-grid { display: grid; grid-template-columns: 1.05fr 1fr; gap: 28px; }
-.detail-img { width: 100%; max-height: 520px; object-fit: contain; background: #0f172a; border-radius: 16px; }
+.zoom-wrap { position: relative; overflow: hidden; border-radius: 16px; background: #0f172a; cursor: zoom-in; }
+.detail-img { width: 100%; max-height: 520px; object-fit: contain; display: block; transition: transform 0.15s ease-out; transform-origin: center center; }
+.detail-img.zoomed { transform: scale(2.4); cursor: zoom-out; }
+.zoom-hint { position: absolute; bottom: 10px; right: 12px; background: rgba(0,0,0,0.7); color: #e2e8f0; font-size: 0.74rem; padding: 4px 10px; border-radius: 999px; pointer-events: none; }
+.kbd-hint { font-size: 0.74rem; color: #94a3b8; margin-top: 8px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.kbd-key { background: #334155; color: #f1f5f9; padding: 1px 6px; border-radius: 4px; font-weight: 700; font-family: monospace; }
 .note-item { background: #f8fafc; border-left: 3px solid var(--blue); padding: 12px 16px; border-radius: 0 10px 10px 0; margin-bottom: 12px; font-size: 0.88rem; white-space: pre-wrap; }
 .note-item h4 { margin: 0 0 6px; font-size: 0.94rem; display: flex; justify-content: space-between; }
 .list-box { background: #f8fafc; padding: 14px 18px; border-radius: 12px; margin-top: 12px; }
@@ -179,7 +185,7 @@ h1 span { font-size: 0.75rem; background: var(--teal); color: white; padding: 3p
 .list-box ul { margin: 0; padding-left: 20px; font-size: 0.86rem; color: #475569; }
 
 /* Upload Modal */
-.upload-btn { background: var(--blue); color: white; border: none; padding: 9px 18px; border-radius: 10px; font-weight: 700; font-size: 0.88rem; cursor: pointer; display: flex; align-items: center; gap: 6px; }
+.upload-btn { background: var(--blue); color: white; border: none; padding: 9px 18px; border-radius: 10px; font-weight: 700; font-size: 0.88rem; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: background .15s; }
 .upload-btn:hover { background: #2563eb; }
 .drop-zone { border: 2px dashed #94a3b8; border-radius: 16px; padding: 36px 20px; text-align: center; color: var(--muted); cursor: pointer; margin: 18px 0; transition: border-color .15s; }
 .drop-zone:hover { border-color: var(--blue); background: #f8fafc; }
@@ -201,7 +207,10 @@ h1 span { font-size: 0.75rem; background: var(--teal); color: white; padding: 3p
       <div>평균 점수 <strong id="avg-score">0.0</strong>점</div>
       <div>우수(7.0+) <strong id="good-count">0</strong>장</div>
     </div>
-    <button class="upload-btn" onclick="openUploadModal()">+ 새 사진 분석하기</button>
+    <div style="display:flex;gap:10px;align-items:center;">
+      <button class="upload-btn" style="background:#0d9488;" onclick="exportAllXmp(this)">📥 라이트룸 XMP 내보내기</button>
+      <button class="upload-btn" onclick="openUploadModal()">+ 새 사진 분석하기</button>
+    </div>
   </div>
 </header>
 
@@ -303,6 +312,7 @@ h1 span { font-size: 0.75rem; background: var(--teal); color: white; padding: 3p
 let allData = [];
 let currentFilter = 'all';
 let currentCatFilter = 'all';
+let currentDetailId = null;
 
 function setCatFilter(cat, btn) {
   currentCatFilter = cat;
@@ -409,13 +419,24 @@ function renderTagPills(tags) {
 function openDetailModal(id) {
   const item = allData.find(d => d.id === id);
   if (!item) return;
+  currentDetailId = id;
   const modal = document.getElementById('detail-modal');
   const body = document.getElementById('modal-body');
 
   body.innerHTML = `
     <div>
-      <img class="detail-img" src="/api/image/${item.id}" alt="${item.filename}">
-      <div style="margin-top:14px;font-size:0.84rem;color:var(--muted)">
+      <div class="zoom-wrap" onclick="toggleZoom(event)" onmousemove="panZoom(event)">
+        <img class="detail-img" id="detail-modal-img" src="/api/image/${item.id}" alt="${item.filename}">
+        <span class="zoom-hint">🔍 클릭하여 초점/데칼 2.4배 확대</span>
+      </div>
+      <div class="kbd-hint">
+        <span>단축키:</span>
+        <span><span class="kbd-key">←</span>/<span class="kbd-key">J</span> 이전</span>
+        <span><span class="kbd-key">→</span>/<span class="kbd-key">K</span> 다음</span>
+        <span><span class="kbd-key">Space</span> 줌 토글</span>
+        <span><span class="kbd-key">Esc</span> 닫기</span>
+      </div>
+      <div style="margin-top:12px;font-size:0.84rem;color:var(--muted)">
         <div><b>해상도:</b> ${item.width} × ${item.height}px (${item.format})</div>
         <div><b>분석 모델:</b> ${item.model} · <b>분석시각:</b> ${item.created_at}</div>
         ${renderExifSummary(item.exif, item.detected_camera_settings)}
@@ -495,8 +516,85 @@ function renderExifSummary(exif, detectedSettings) {
   return html;
 }
 
-function closeDetailModal() { document.getElementById('detail-modal').style.display = 'none'; }
+function closeDetailModal() {
+  document.getElementById('detail-modal').style.display = 'none';
+  currentDetailId = null;
+}
 function closeModal(e) { if (e.target.id === 'detail-modal') closeDetailModal(); }
+
+function toggleZoom(e) {
+  const img = document.getElementById('detail-modal-img');
+  if (!img) return;
+  img.classList.toggle('zoomed');
+  if (img.classList.contains('zoomed') && e) {
+    panZoom(e);
+  } else {
+    img.style.transformOrigin = 'center center';
+  }
+}
+
+function panZoom(e) {
+  const img = document.getElementById('detail-modal-img');
+  if (!img || !img.classList.contains('zoomed')) return;
+  const rect = img.getBoundingClientRect();
+  const x = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100));
+  const y = Math.max(0, Math.min(100, ((e.clientY - rect.top) / rect.height) * 100));
+  img.style.transformOrigin = `${x}% ${y}%`;
+}
+
+function navigateDetail(dir) {
+  const modal = document.getElementById('detail-modal');
+  if (modal.style.display !== 'flex' || currentDetailId === null) return;
+  const filtered = sortList(filterList(allData));
+  const idx = filtered.findIndex(d => d.id === currentDetailId);
+  if (idx === -1) return;
+  const nextIdx = idx + dir;
+  if (nextIdx >= 0 && nextIdx < filtered.length) {
+    openDetailModal(filtered[nextIdx].id);
+  }
+}
+
+async function exportAllXmp(btn) {
+  const origText = btn ? btn.textContent : '';
+  if (btn) {
+    btn.textContent = 'XMP 생성 중...';
+    btn.disabled = true;
+  }
+  try {
+    const res = await fetch('/api/export-xmp', { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      alert(`총 ${data.count}개 사진의 Lightroom / Capture One 호환 XMP 사이드카 생성이 완료되었습니다!\n라이트룸에서 폴더를 새로고침하면 별점(1~5)과 색상 라벨이 즉시 표시됩니다.`);
+    } else {
+      alert(`XMP 내보내기 실패: ${data.error}`);
+    }
+  } catch (err) {
+    alert(`오류: ${err.message}`);
+  } finally {
+    if (btn) {
+      btn.textContent = origText;
+      btn.disabled = false;
+    }
+  }
+}
+
+window.addEventListener('keydown', (e) => {
+  if (['input', 'textarea', 'select'].includes(document.activeElement?.tagName?.toLowerCase())) return;
+  if (e.key === 'Escape') {
+    closeDetailModal();
+    closeUploadModal();
+  } else if (e.key === 'ArrowRight' || e.key === 'k') {
+    navigateDetail(1);
+  } else if (e.key === 'ArrowLeft' || e.key === 'j') {
+    navigateDetail(-1);
+  } else if (e.key === ' ' || e.code === 'Space') {
+    const modal = document.getElementById('detail-modal');
+    if (modal.style.display === 'flex') {
+      e.preventDefault();
+      toggleZoom();
+    }
+  }
+});
 
 function switchView(mode) {
   if (mode === 'gallery') {
@@ -753,6 +851,50 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     "analysis": analysis.model_dump(mode="json"),
                 }
                 self.wfile.write(json.dumps(res, ensure_ascii=False).encode("utf-8"))
+                return
+            except Exception as exc:
+                self.send_response(HTTPStatus.INTERNAL_SERVER_ERROR)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(json.dumps({"success": False, "error": str(exc)}).encode("utf-8"))
+                return
+
+        if parsed.path == "/api/export-xmp":
+            try:
+                from photo_xmp_manager import write_xmp_sidecar
+                exported_count = 0
+                with closing(sqlite3.connect(self.db_path)) as conn:
+                    conn.row_factory = sqlite3.Row
+                    rows = conn.execute("SELECT * FROM photo_analyses").fetchall()
+                    tag_rows = conn.execute("SELECT analysis_id, tag FROM photo_analysis_tags").fetchall()
+                tags_by_id = {}
+                for r in tag_rows:
+                    tags_by_id.setdefault(int(r["analysis_id"]), []).append(str(r["tag"]))
+
+                for r in rows:
+                    aid = int(r["id"])
+                    fname = r["source_filename"]
+                    analysis_data = json.loads(r["analysis_json"])
+                    # Search candidate locations
+                    target_dir = Path("test_photo") if (Path("test_photo") / fname).is_file() else Path(".")
+                    target_file = target_dir / fname
+                    xmp_file = target_file.with_suffix(".xmp")
+                    write_xmp_sidecar(
+                        photo_path=target_file,
+                        score=float(analysis_data.get("final_score", 0)),
+                        reason=analysis_data.get("final_reason", ""),
+                        figure_category=analysis_data.get("figure_category", "일반 피규어 촬영"),
+                        tags=tags_by_id.get(aid, []),
+                        strengths=analysis_data.get("strengths", []),
+                        improvements=analysis_data.get("improvements", []),
+                        target_xmp_path=xmp_file,
+                    )
+                    exported_count += 1
+
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(json.dumps({"success": True, "count": exported_count}).encode("utf-8"))
                 return
             except Exception as exc:
                 self.send_response(HTTPStatus.INTERNAL_SERVER_ERROR)

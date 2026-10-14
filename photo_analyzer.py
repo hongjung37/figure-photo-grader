@@ -724,14 +724,17 @@ def run_batch_pipeline(
     summary_html_path: Path | None,
     max_workers: int = 2,
     category: str = "auto",
+    generate_xmp: bool = False,
 ) -> int:
-    """Analyze multiple photos in parallel, save results to DB and generate reports."""
+    """Analyze multiple photos in parallel, save results to DB, generate reports and optional XMP sidecars."""
     print(f"=== 피규어 사진 일괄 분석 시작 ===", file=sys.stderr)
     print(f"대상 사진: {len(photo_paths)}장 | 모델: {model} | 동시 워커: {max_workers}", file=sys.stderr)
     print(f"SQLite DB: {db_path}", file=sys.stderr)
     if report_dir:
         report_dir.mkdir(parents=True, exist_ok=True)
         print(f"개별 HTML 폴더: {report_dir}", file=sys.stderr)
+    if generate_xmp:
+        print("Lightroom / Capture One 호환 XMP 사이드카 자동 생성 활성화됨", file=sys.stderr)
 
     results: list[dict[str, Any]] = []
 
@@ -752,6 +755,20 @@ def run_batch_pipeline(
                     rel_report = report_path.as_posix()
             else:
                 rel_report = report_path.as_posix()
+
+        if generate_xmp:
+            from photo_xmp_manager import write_xmp_sidecar
+            tags_list = [t for sub in analysis.aesthetic_tags.model_dump().values() for t in sub]
+            write_xmp_sidecar(
+                photo_path=photo_path,
+                score=analysis.final_score,
+                reason=analysis.final_reason,
+                figure_category=analysis.figure_category,
+                tags=tags_list,
+                strengths=analysis.strengths,
+                improvements=analysis.improvements,
+            )
+
         return {
             "path": photo_path,
             "filename": photo_path.name,
@@ -859,6 +876,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="폴더 일괄 분석 시 개별 사진 HTML 보고서를 저장할 폴더 (기본: <폴더>/reports)",
     )
+    parser.add_argument(
+        "--xmp",
+        action="store_true",
+        help="Lightroom / Capture One 호환 XMP 사이드카 파일(*.xmp)을 원본 사진 옆에 자동 생성",
+    )
     return parser
 
 
@@ -895,6 +917,7 @@ def main(argv: list[str] | None = None) -> int:
             summary_html_path=summary_html,
             max_workers=args.workers,
             category=args.category,
+            generate_xmp=args.xmp,
         )
 
     # Single file mode
@@ -923,6 +946,20 @@ def main(argv: list[str] | None = None) -> int:
         report_path = None
         if report_output is not None:
             report_path = save_html_report(photo, analysis, record_id, model, report_output)
+
+        if args.xmp:
+            from photo_xmp_manager import write_xmp_sidecar
+            tags_list = [t for sub in analysis.aesthetic_tags.model_dump().values() for t in sub]
+            xmp_out = write_xmp_sidecar(
+                photo_path=target_path,
+                score=analysis.final_score,
+                reason=analysis.final_reason,
+                figure_category=analysis.figure_category,
+                tags=tags_list,
+                strengths=analysis.strengths,
+                improvements=analysis.improvements,
+            )
+            print(f"XMP 사이드카 저장 완료: {xmp_out}", file=sys.stderr)
     except Exception as exc:
         print(f"오류: {exc}", file=sys.stderr)
         return 1
