@@ -851,7 +851,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"오류: 지정된 폴더에 지원하는 사진 파일이 없습니다: {target_path}", file=sys.stderr)
             return 1
 
-        summary_html = args.summary_html.expanduser().resolve() if args.summary_html else target_path / "comparison.html"
+        summary_html = (
+            args.summary_html.expanduser().resolve()
+            if args.summary_html
+            else (args.html_output.expanduser().resolve() if args.html_output else target_path / "comparison.html")
+        )
         report_dir = args.report_dir.expanduser().resolve() if args.report_dir else target_path / "reports"
 
         return run_batch_pipeline(
@@ -867,6 +871,13 @@ def main(argv: list[str] | None = None) -> int:
     # Single file mode
     try:
         if not target_path.is_file():
+            candidates = list(target_path.parent.glob(f"{target_path.name}.*"))
+            supported_exts = {f".{fmt.lower()}" for fmt in SUPPORTED_FORMATS} | {".jpg"}
+            valid_candidates = [c for c in candidates if c.suffix.lower() in supported_exts]
+            if valid_candidates:
+                raise FileNotFoundError(
+                    f"파일을 찾을 수 없습니다: {target_path} (혹시 '{valid_candidates[0].name}' 파일을 의미하셨나요? 확장자를 포함해 주세요.)"
+                )
             raise FileNotFoundError(f"파일을 찾을 수 없습니다: {target_path}")
         report_output = args.html_output.expanduser().resolve() if args.html_output else None
         if report_output is not None:
