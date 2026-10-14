@@ -482,6 +482,7 @@ function renderGallery() {
             <h3 class="card-title">${item.filename}</h3>
             <span style="display:inline-block;margin-top:4px;font-size:0.75rem;font-weight:700;color:#4f46e5;background:#eef2ff;padding:2px 7px;border-radius:6px;">${item.figure_category}</span>
             <span style="display:inline-block;margin-top:4px;margin-left:4px;font-size:0.75rem;font-weight:700;color:#0d9488;background:#f0fdfa;padding:2px 7px;border-radius:6px;">🎯 ${item.focus_status || '완벽 칼초점'}</span>
+            ${item.sns_advice ? '<span style="display:inline-block;margin-top:4px;margin-left:4px;font-size:0.75rem;font-weight:700;color:#0284c7;background:#e0f2fe;padding:2px 7px;border-radius:6px;">📱 SNS크롭</span>' : ''}
           </div>
           <div class="score-badge">
             <span class="score-num">${item.final_score.toFixed(1)}</span>
@@ -553,8 +554,13 @@ function openDetailModal(id) {
         </div>
       </div>
 
-      <div style="background:#eef2ff;padding:12px 16px;border-radius:12px;margin-bottom:16px;font-size:0.9rem;color:#3730a3">
+      <div style="background:#eef2ff;padding:12px 16px;border-radius:12px;margin-bottom:14px;font-size:0.9rem;color:#3730a3">
         <b>종합 총평:</b> ${item.final_reason}
+      </div>
+
+      <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;">
+        <button class="filter-btn" style="background:#312e81;color:white;border-color:#312e81;padding:5px 12px;font-size:0.8rem;" onclick="document.getElementById('lr-advice-box-section').scrollIntoView({behavior:'smooth'})">🛠️ 라이트룸 보정값 바로가기</button>
+        <button class="filter-btn" style="background:#0284c7;color:white;border-color:#0284c7;padding:5px 12px;font-size:0.8rem;" onclick="document.getElementById('sns-advice-box-section').scrollIntoView({behavior:'smooth'})">📱 SNS 크롭 & 캡션 바로가기</button>
       </div>
 
       <div class="note-item">
@@ -587,7 +593,7 @@ function openDetailModal(id) {
         <ul>${item.improvements.map(i => `<li>${i}</li>`).join('')}</ul>
       </div>
 
-      <div class="lr-advice-box" style="margin-top:16px;background:#f8fafc;border:1px solid #cbd5e1;border-radius:14px;padding:16px;">
+      <div class="lr-advice-box" id="lr-advice-box-section" style="margin-top:16px;background:#f8fafc;border:1px solid #cbd5e1;border-radius:14px;padding:16px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
           <h3 style="margin:0;font-size:1.02rem;display:flex;align-items:center;gap:6px;">
             <span style="background:#312e81;color:white;padding:2px 7px;border-radius:4px;font-size:0.78rem;">Lr</span>
@@ -603,7 +609,7 @@ function openDetailModal(id) {
       </div>
 
       <!-- SNS Crop & Caption Advice Box -->
-      <div class="sns-advice-box" style="margin-top:16px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:14px;padding:16px;">
+      <div class="sns-advice-box" id="sns-advice-box-section" style="margin-top:16px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:14px;padding:16px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
           <h3 style="margin:0;font-size:1.02rem;display:flex;align-items:center;gap:6px;color:#0369a1;">
             <span style="background:#0284c7;color:white;padding:2px 7px;border-radius:4px;font-size:0.78rem;">SNS</span>
@@ -657,7 +663,7 @@ function renderSnsAdviceContent(advice, recordId) {
       <div style="background:white;padding:12px 14px;border-radius:10px;font-size:0.85rem;border:1px solid #e0f2fe;margin-bottom:10px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
           <b style="color:#0369a1;">✍️ SNS 감성 캡션:</b>
-          <button class="filter-btn" style="padding:2px 8px;font-size:0.75rem;" onclick="copyText('${escape(advice.social_caption).replace(/'/g, "\\'")}', this)">📋 캡션 복사</button>
+          <button class="filter-btn" style="padding:2px 8px;font-size:0.75rem;" onclick="copyCaption(${recordId}, this)">📋 캡션 복사</button>
         </div>
         <div style="color:#1e293b;white-space:pre-wrap;background:#f8fafc;padding:8px 12px;border-radius:6px;">${advice.social_caption}</div>
       </div>
@@ -665,7 +671,7 @@ function renderSnsAdviceContent(advice, recordId) {
       <div style="background:white;padding:12px 14px;border-radius:10px;font-size:0.85rem;border:1px solid #e0f2fe;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
           <b style="color:#0369a1;">🏷️ 추천 해시태그:</b>
-          <button class="filter-btn" style="padding:2px 8px;font-size:0.75rem;" onclick="copyText('${advice.hashtags.join(' ')}', this)">📋 전체 복사</button>
+          <button class="filter-btn" style="padding:2px 8px;font-size:0.75rem;" onclick="copyHashtags(${recordId}, this)">📋 전체 복사</button>
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:6px;">
           ${advice.hashtags.map(t => `<span class="tag-pill" style="background:#e0f2fe;color:#0369a1;">${t}</span>`).join('')}
@@ -783,6 +789,19 @@ async function copyText(text, btn) {
     prompt('텍스트 복사:', text);
   }
 }
+
+async function copyCaption(recordId, btn) {
+  const item = allData.find(d => d.id === recordId);
+  if (!item || !item.sns_advice) return;
+  await copyText(item.sns_advice.social_caption, btn);
+}
+
+async function copyHashtags(recordId, btn) {
+  const item = allData.find(d => d.id === recordId);
+  if (!item || !item.sns_advice) return;
+  await copyText(item.sns_advice.hashtags.join(' '), btn);
+}
+
 
 async function requestSnsAdvice(recordId, btn) {
   const origText = btn.textContent;
