@@ -520,7 +520,105 @@ class PhotoAnalyzerTests(unittest.TestCase):
             self.assertIsNotNone(items[0]["sns_advice"])
             self.assertEqual(items[0]["sns_advice"]["social_caption"], "테스트 캡션입니다")
 
+    def test_dhash_calculation_and_hamming_distance(self) -> None:
+        from io import BytesIO
+        from PIL import Image
+        from photo_analyzer import compute_dhash_from_bytes, hamming_distance
 
+        img1 = Image.new("RGB", (100, 100), (200, 100, 50))
+        buf1 = BytesIO()
+        img1.save(buf1, format="WEBP")
+        h1 = compute_dhash_from_bytes(buf1.getvalue())
+
+        # Identical image -> distance 0
+        h1_same = compute_dhash_from_bytes(buf1.getvalue())
+        self.assertEqual(hamming_distance(h1, h1_same), 0)
+
+        # Very similar image (small noise)
+        img2 = Image.new("RGB", (100, 100), (202, 101, 52))
+        buf2 = BytesIO()
+        img2.save(buf2, format="WEBP")
+        h2 = compute_dhash_from_bytes(buf2.getvalue())
+        self.assertLessEqual(hamming_distance(h1, h2), 2)
+
+    def test_cluster_burst_groups_ranking_and_drop_reasons(self) -> None:
+        from photo_dashboard import cluster_burst_groups
+
+        analyses = [
+            {
+                "id": 1,
+                "filename": "fig_burst_01.jpg",
+                "final_score": 9.2,
+                "focus_status": "완벽 칼초점",
+                "composition_score": 9.0,
+                "lighting_score": 9.0,
+                "technique_score": 9.2,
+                "dhash": 0x1234567890ABCDEF,
+            },
+            {
+                "id": 2,
+                "filename": "fig_burst_02.jpg",
+                "final_score": 7.5,
+                "focus_status": "미세 앞핀",
+                "composition_score": 8.0,
+                "lighting_score": 7.5,
+                "technique_score": 7.0,
+                "dhash": 0x1234567890ABCDFF,  # distance 2 from id 1
+            },
+            {
+                "id": 3,
+                "filename": "fig_burst_03.jpg",
+                "final_score": 8.1,
+                "focus_status": "완벽 칼초점",
+                "composition_score": 7.5,
+                "lighting_score": 8.0,
+                "technique_score": 8.0,
+                "dhash": 0x1234567890ABCDEE,  # distance 1 from id 1
+            },
+            {
+                "id": 4,
+                "filename": "other_photo.jpg",
+                "final_score": 8.5,
+                "focus_status": "완벽 칼초점",
+                "composition_score": 8.5,
+                "lighting_score": 8.5,
+                "technique_score": 8.5,
+                "dhash": 0xFEDCBA0987654321,  # completely distinct hash
+            },
+        ]
+
+        clustered = cluster_burst_groups(analyses, max_hamming_dist=12)
+
+        # ID 1, 2, 3 should form a burst group of size 3
+        b1 = next(item for item in clustered if item["id"] == 1)
+        b2 = next(item for item in clustered if item["id"] == 2)
+        b3 = next(item for item in clustered if item["id"] == 3)
+        single = next(item for item in clustered if item["id"] == 4)
+
+        # Check Best Pick (ID 1 had highest score 9.2)
+        self.assertTrue(b1["is_burst"])
+        self.assertTrue(b1["is_best_pick"])
+        self.assertEqual(b1["burst_rank"], 1)
+        self.assertEqual(b1["burst_total"], 3)
+        self.assertEqual(b1["drop_reason"], "")
+
+        # Check B-cut #2 (ID 3 had score 8.1)
+        self.assertTrue(b3["is_burst"])
+        self.assertFalse(b3["is_best_pick"])
+        self.assertEqual(b3["burst_rank"], 2)
+        self.assertEqual(b3["burst_total"], 3)
+
+        # Check B-cut #3 (ID 2 had focus issue '미세 앞핀')
+        self.assertTrue(b2["is_burst"])
+        self.assertFalse(b2["is_best_pick"])
+        self.assertEqual(b2["burst_rank"], 3)
+        self.assertIn("초점 핀 열세", b2["drop_reason"])
+
+        # Check Singleton photo
+        self.assertFalse(single["is_burst"])
+        self.assertFalse(single["is_best_pick"])
+        self.assertIsNone(single["burst_group_id"])
+        self.assertEqual(single["burst_total"], 1)
 
 
 if __name__ == "__main__":

@@ -23,8 +23,10 @@ from photo_analyzer import (
     PreparedPhoto,
     SNSAdvice,
     analyze_with_gemini,
+    compute_dhash_from_bytes,
     generate_lightroom_advice,
     generate_sns_advice,
+    hamming_distance,
     prepare_photo,
     save_analysis,
 )
@@ -48,6 +50,120 @@ def ensure_db_columns(db_path: Path) -> None:
             conn.execute("ALTER TABLE photo_analyses ADD COLUMN review_status TEXT DEFAULT '미검토'")
         if "user_notes" not in cols:
             conn.execute("ALTER TABLE photo_analyses ADD COLUMN user_notes TEXT DEFAULT ''")
+        if "dhash" not in cols:
+            conn.execute("ALTER TABLE photo_analyses ADD COLUMN dhash INTEGER")
+
+        missing = conn.execute(
+            "SELECT id, thumbnail FROM photo_analyses WHERE dhash IS NULL AND thumbnail IS NOT NULL"
+        ).fetchall()
+        for mid, mthumb in missing:
+            try:
+                dh = compute_dhash_from_bytes(mthumb)
+                conn.execute("UPDATE photo_analyses SET dhash = ? WHERE id = ?", (dh, mid))
+            except Exception:
+                pass
+
+
+def cluster_burst_groups(analyses: list[dict], max_hamming_dist: int = 12) -> list[dict]:
+    """Cluster photos into Burst Groups based on perceptual dHash similarity.
+    Selects Best Pick (1st place) and tags B-cuts with concrete drop reasons.
+    """
+    if not analyses:
+        return []
+
+    n = len(analyses)
+    parent = list(range(n))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    def union(i: int, j: int) -> None:
+        root_i = find(i)
+        root_j = find(j)
+        if root_i != root_j:
+            parent[root_j] = root_i
+
+    for i in range(n):
+        h1 = analyses[i].get("dhash")
+        if h1 is None:
+            continue
+        for j in range(i + 1, n):
+            h2 = analyses[j].get("dhash")
+            if h2 is None:
+                continue
+            dist = bin(h1 ^ h2).count("1")
+            if dist <= max_hamming_dist:
+                union(i, j)
+
+    groups: dict[int, list[int]] = {}
+    for idx in range(n):
+        r = find(idx)
+        groups.setdefault(r, []).append(idx)
+
+    focus_priority = {
+        "완벽 칼초점": 1,
+        "미세 앞핀": 2,
+        "미세 뒤핀": 2,
+        "판별 불가": 3,
+        "초점 이탈": 4,
+    }
+
+    for root_id, member_indices in groups.items():
+        if len(member_indices) >= 2:
+            sorted_indices = sorted(
+                member_indices,
+                key=lambda idx: (
+                    analyses[idx].get("final_score", 0),
+                    -focus_priority.get(analyses[idx].get("focus_status", "완벽 칼초점"), 3),
+                    analyses[idx].get("technique_score", 0),
+                ),
+                reverse=True,
+            )
+            group_id = f"burst_{min(analyses[idx]['id'] for idx in member_indices)}"
+            best_idx = sorted_indices[0]
+            best_item = analyses[best_idx]
+
+            for rank, idx in enumerate(sorted_indices, start=1):
+                item = analyses[idx]
+                item["is_burst"] = True
+                item["burst_group_id"] = group_id
+                item["burst_rank"] = rank
+                item["burst_total"] = len(sorted_indices)
+
+                if rank == 1:
+                    item["is_best_pick"] = True
+                    item["drop_reason"] = ""
+                else:
+                    item["is_best_pick"] = False
+                    best_f = best_item.get("focus_status", "완벽 칼초점")
+                    cur_f = item.get("focus_status", "완벽 칼초점")
+                    if best_f == "완벽 칼초점" and cur_f != "완벽 칼초점":
+                        item["drop_reason"] = f"초점 핀 열세 ({cur_f})"
+                    elif (best_item.get("lighting_score", 0) - item.get("lighting_score", 0)) >= 0.4:
+                        diff = best_item.get("lighting_score", 0) - item.get("lighting_score", 0)
+                        item["drop_reason"] = f"조명/노출 밸런스 열세 (-{diff:.1f}점)"
+                    elif (best_item.get("composition_score", 0) - item.get("composition_score", 0)) >= 0.4:
+                        diff = best_item.get("composition_score", 0) - item.get("composition_score", 0)
+                        item["drop_reason"] = f"구도 안정성 열세 (-{diff:.1f}점)"
+                    elif (best_item.get("technique_score", 0) - item.get("technique_score", 0)) >= 0.4:
+                        diff = best_item.get("technique_score", 0) - item.get("technique_score", 0)
+                        item["drop_reason"] = f"기술/선예도 디테일 열세 (-{diff:.1f}점)"
+                    else:
+                        score_diff = best_item.get("final_score", 0) - item.get("final_score", 0)
+                        item["drop_reason"] = f"종합 점수 차이 (-{score_diff:.1f}점)" if score_diff > 0 else "미세 디테일 차이"
+        else:
+            idx = member_indices[0]
+            analyses[idx]["is_burst"] = False
+            analyses[idx]["is_best_pick"] = False
+            analyses[idx]["burst_group_id"] = None
+            analyses[idx]["burst_rank"] = 1
+            analyses[idx]["burst_total"] = 1
+            analyses[idx]["drop_reason"] = ""
+
+    return analyses
 
 
 
@@ -113,6 +229,13 @@ def get_all_analyses(db_path: Path) -> list[dict]:
             except Exception:
                 pass
 
+        dhash_val = row["dhash"] if "dhash" in row.keys() and row["dhash"] is not None else None
+        if dhash_val is None and row["thumbnail"]:
+            try:
+                dhash_val = compute_dhash_from_bytes(row["thumbnail"])
+            except Exception:
+                dhash_val = None
+
         final_score = float(analysis_data.get("final_score", 0))
         results.append(
             {
@@ -147,9 +270,10 @@ def get_all_analyses(db_path: Path) -> list[dict]:
                 "lr_advice": lr_advice,
                 "sns_advice": sns_advice,
                 "exif": exif_data,
+                "dhash": dhash_val,
             }
         )
-    return results
+    return cluster_burst_groups(results)
 
 
 DASHBOARD_HTML = """<!doctype html>
@@ -221,28 +345,38 @@ h1 span { font-size: 0.75rem; background: var(--teal); color: white; padding: 3p
 .zoom-hint { position: absolute; bottom: 10px; right: 12px; background: rgba(0,0,0,0.7); color: #e2e8f0; font-size: 0.74rem; padding: 4px 10px; border-radius: 999px; pointer-events: none; }
 .kbd-hint { font-size: 0.74rem; color: #94a3b8; margin-top: 8px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .kbd-key { background: #334155; color: #f1f5f9; padding: 1px 6px; border-radius: 4px; font-weight: 700; font-family: monospace; }
-.note-item { background: #f8fafc; border-left: 3px solid var(--blue); padding: 12px 16px; border-radius: 0 10px 10px 0; margin-bottom: 12px; font-size: 0.88rem; white-space: pre-wrap; }
-.note-item h4 { margin: 0 0 6px; font-size: 0.94rem; display: flex; justify-content: space-between; }
-.list-box { background: #f8fafc; padding: 14px 18px; border-radius: 12px; margin-top: 12px; }
-.list-box h4 { margin: 0 0 8px; font-size: 0.92rem; }
-.list-box ul { margin: 0; padding-left: 20px; font-size: 0.86rem; color: #475569; }
-.lr-metric { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px; text-align: center; }
-.lr-metric span { display: block; font-size: 0.72rem; color: var(--muted); margin-bottom: 2px; }
-.lr-metric strong { display: block; font-size: 0.95rem; color: #1e293b; font-weight: 700; }
+.note-item { background: #f8fafc; border-left: 3px solid var(--blue); padding: 7px 12px; border-radius: 0 8px 8px 0; margin-bottom: 6px; font-size: 0.82rem; line-height: 1.4; white-space: pre-wrap; }
+.note-item h4 { margin: 0 0 2px; font-size: 0.86rem; display: flex; justify-content: space-between; }
+.list-box { background: #f8fafc; padding: 8px 12px; border-radius: 8px; margin-top: 6px; }
+.list-box h4 { margin: 0 0 3px; font-size: 0.86rem; }
+.list-box ul { margin: 0; padding-left: 18px; font-size: 0.80rem; line-height: 1.35; color: #475569; }
+.lr-metric { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 6px 8px; text-align: center; }
+.lr-metric span { display: block; font-size: 0.70rem; color: var(--muted); margin-bottom: 1px; }
+.lr-metric strong { display: block; font-size: 0.90rem; color: #1e293b; font-weight: 700; }
 
 /* Score Summary Card & Bars */
-.score-summary-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 14px; padding: 16px 18px; margin-bottom: 16px; }
-.score-bars-list { display: flex; flex-direction: column; gap: 10px; }
-.score-bar-row { display: flex; flex-direction: column; gap: 4px; }
-.score-bar-label { display: flex; justify-content: space-between; font-size: 0.83rem; }
+.score-summary-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 10px 14px; margin-bottom: 8px; }
+.score-bars-list { display: flex; flex-direction: column; gap: 6px; }
+.score-bar-row { display: flex; flex-direction: column; gap: 2px; }
+.score-bar-label { display: flex; justify-content: space-between; font-size: 0.81rem; }
 .score-bar-label span { font-weight: 600; color: #334155; }
-.score-bar-label strong { font-weight: 800; font-size: 0.88rem; }
-.score-bar-track { background: #e2e8f0; height: 9px; border-radius: 999px; overflow: hidden; position: relative; }
+.score-bar-label strong { font-weight: 800; font-size: 0.85rem; }
+.score-bar-track { background: #e2e8f0; height: 7px; border-radius: 999px; overflow: hidden; position: relative; }
 .score-bar-fill { height: 100%; border-radius: 999px; transition: width 0.35s ease; }
 .score-bar-comp { background: linear-gradient(90deg, #3b82f6, #60a5fa); }
 .score-bar-light { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
 .score-bar-color { background: linear-gradient(90deg, #ec4899, #f472b6); }
 .score-bar-tech { background: linear-gradient(90deg, #10b981, #34d399); }
+
+/* Burst Culling Badges & Banner */
+.badge-best-pick { display: inline-block; background: linear-gradient(135deg, #059669 0%, #10b981 100%); color: white; font-size: 0.72rem; font-weight: 700; padding: 2px 8px; border-radius: 6px; box-shadow: 0 2px 4px rgba(5,150,105,0.2); }
+.badge-b-cut { display: inline-block; background: #fff1f2; color: #e11d48; border: 1px solid #fecdd3; font-size: 0.72rem; font-weight: 700; padding: 2px 8px; border-radius: 6px; }
+.burst-banner { background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px; padding: 10px 14px; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+.burst-banner.is-b-cut { background: #fff1f2; border-color: #fecdd3; }
+.burst-thumb-link { width: 36px; height: 36px; border-radius: 8px; object-fit: cover; border: 2px solid #cbd5e1; cursor: pointer; transition: all .15s; }
+.burst-thumb-link:hover { transform: scale(1.1); }
+.burst-thumb-link.current { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37,99,235,0.4); }
+.burst-thumb-link.is-best { border-color: #10b981; }
 
 /* Crop Overlay Box */
 .crop-box-overlay {
@@ -326,6 +460,12 @@ h1 span { font-size: 0.75rem; background: var(--teal); color: white; padding: 3p
       <button class="filter-btn cat-btn" onclick="setCatFilter('일상/야외 스냅', this)">🌿 일상/야외 스냅</button>
       <button class="filter-btn cat-btn" onclick="setCatFilter('스튜디오 연출/디오라마', this)">🎬 스튜디오 연출</button>
       <button class="filter-btn cat-btn" onclick="setCatFilter('일반 피규어 촬영', this)">📷 일반 촬영</button>
+    </div>
+    <div class="filter-group" style="margin-top:8px;">
+      <span style="font-size:0.84rem;font-weight:700;color:var(--muted)">연사 선별(B-1):</span>
+      <button class="filter-btn active burst-btn" onclick="setBurstFilter('all', this)">전체 컷</button>
+      <button class="filter-btn burst-btn" onclick="setBurstFilter('best_only', this)" style="color:#065f46;">👑 Best Pick만 보기</button>
+      <button class="filter-btn burst-btn" onclick="setBurstFilter('stack', this)" style="color:#0369a1;">🗂️ 연사 묶어보기 (Stack)</button>
     </div>
 
     <div style="display:flex;gap:12px;align-items:center;">
@@ -449,9 +589,29 @@ function updateStats() {
   document.getElementById('good-count').textContent = good;
 }
 
+let currentBurstFilter = 'all'; // 'all', 'best_only', 'stack'
+let expandedBurstGroups = new Set();
+
+function setBurstFilter(mode, btn) {
+  currentBurstFilter = mode;
+  document.querySelectorAll('.burst-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderGallery();
+}
+
+function toggleExpandBurstGroup(groupId, e) {
+  if (e) e.stopPropagation();
+  if (expandedBurstGroups.has(groupId)) {
+    expandedBurstGroups.delete(groupId);
+  } else {
+    expandedBurstGroups.add(groupId);
+  }
+  renderGallery();
+}
+
 function setFilter(filter, btn) {
   currentFilter = filter;
-  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.filter-btn:not(.burst-btn):not(.cat-btn)').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   renderGallery();
 }
@@ -466,6 +626,13 @@ function filterList(list) {
   if (currentCatFilter !== 'all') {
     res = res.filter(d => d.figure_category === currentCatFilter);
   }
+
+  if (currentBurstFilter === 'best_only') {
+    res = res.filter(d => !d.is_burst || d.is_best_pick);
+  } else if (currentBurstFilter === 'stack') {
+    res = res.filter(d => !d.is_burst || d.is_best_pick || expandedBurstGroups.has(d.burst_group_id));
+  }
+
   return res;
 }
 
@@ -496,6 +663,10 @@ function renderGallery() {
             <h3 class="card-title">${item.filename}</h3>
             <span style="display:inline-block;margin-top:4px;font-size:0.75rem;font-weight:700;color:#4f46e5;background:#eef2ff;padding:2px 7px;border-radius:6px;">${item.figure_category}</span>
             <span style="display:inline-block;margin-top:4px;margin-left:4px;font-size:0.75rem;font-weight:700;color:#0d9488;background:#f0fdfa;padding:2px 7px;border-radius:6px;">🎯 ${item.focus_status || '완벽 칼초점'}</span>
+            ${item.is_burst ? (item.is_best_pick ?
+              `<span class="badge-best-pick" style="display:inline-block;margin-top:4px;margin-left:4px;">👑 Best Pick (${item.burst_total}장 1위)</span>` :
+              `<span class="badge-b-cut" style="display:inline-block;margin-top:4px;margin-left:4px;" title="${item.drop_reason}">⚠️ B컷 (${item.drop_reason})</span>`
+            ) : ''}
             ${item.sns_advice ? '<span style="display:inline-block;margin-top:4px;margin-left:4px;font-size:0.75rem;font-weight:700;color:#0284c7;background:#e0f2fe;padding:2px 7px;border-radius:6px;">📱 SNS크롭</span>' : ''}
           </div>
           <div class="score-badge">
@@ -513,6 +684,14 @@ function renderGallery() {
         <div class="tag-pills">
           ${renderTagPills(item.aesthetic_tags)}
         </div>
+        ${currentBurstFilter === 'stack' && item.is_burst && item.is_best_pick ? `
+          <div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);display:flex;justify-content:space-between;align-items:center;" onclick="event.stopPropagation()">
+            <span style="font-size:0.74rem;color:var(--muted);font-weight:600;">🗂️ 연사 묶음 (${item.burst_total}장)</span>
+            <button class="filter-btn" style="padding:2px 8px;font-size:0.72rem;background:#f0f9ff;border-color:#bae6fd;color:#0369a1;" onclick="toggleExpandBurstGroup('${item.burst_group_id}', event)">
+              ${expandedBurstGroups.has(item.burst_group_id) ? '▲ B컷 접기' : `▼ B컷 ${item.burst_total - 1}장 펼치기`}
+            </button>
+          </div>
+        ` : ''}
       </div>
     </article>
   `).join('');
@@ -529,6 +708,17 @@ function renderTagPills(tags) {
   return pills.slice(0, 4).join('');
 }
 
+function renderBurstThumbnails(groupId, currentId) {
+  if (!groupId) return '';
+  const groupItems = allData.filter(d => d.burst_group_id === groupId).sort((a, b) => a.burst_rank - b.burst_rank);
+  return groupItems.map(m => `
+    <img src="/api/image/${m.id}"
+         class="burst-thumb-link ${m.id === currentId ? 'current' : ''} ${m.is_best_pick ? 'is-best' : ''}"
+         title="${m.is_best_pick ? '👑 1위 Best Pick' : `${m.burst_rank}위 B컷 (${m.drop_reason})`}"
+         onclick="event.stopPropagation(); openDetailModal(${m.id})">
+  `).join('');
+}
+
 function openDetailModal(id) {
   const item = allData.find(d => d.id === id);
   if (!item) return;
@@ -537,6 +727,24 @@ function openDetailModal(id) {
   const body = document.getElementById('modal-body');
 
   body.innerHTML = `
+    ${item.is_burst ? `
+      <div class="burst-banner ${item.is_best_pick ? '' : 'is-b-cut'}" style="grid-column: 1 / -1;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span style="font-size:1.4rem;">${item.is_best_pick ? '👑' : '🗂️'}</span>
+          <div>
+            <div style="font-size:0.92rem;font-weight:800;color:${item.is_best_pick ? '#065f46' : '#991b1b'};">
+              ${item.is_best_pick ? `👑 연사 묶음 베스트 컷 (총 ${item.burst_total}장 중 1위 선정)` : `⚠️ 연사 묶음 B컷 (${item.burst_rank}/${item.burst_total}위 · 탈락 사유: ${item.drop_reason})`}
+            </div>
+            <div style="font-size:0.77rem;color:var(--muted);">동일 구도 및 포즈로 연속 촬영된 연사 세트 중 AI 디테일(초점·조명·완성도) 비교 결과입니다.</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <span style="font-size:0.78rem;font-weight:700;color:var(--muted);">묶음 컷:</span>
+          ${renderBurstThumbnails(item.burst_group_id, item.id)}
+        </div>
+      </div>
+    ` : ''}
+
     <div>
       <div class="zoom-wrap" id="zoom-wrap-container" onclick="toggleZoom(event)" onmousemove="panZoom(event)">
         <img class="detail-img" id="detail-modal-img" src="/api/image/${item.id}" alt="${item.filename}" onload="repositionCropOverlay()">
@@ -606,17 +814,17 @@ function openDetailModal(id) {
         </div>
       </div>
 
-      <div style="background:#eef2ff;padding:12px 16px;border-radius:12px;margin-bottom:14px;font-size:0.9rem;color:#3730a3">
+      <div style="background:#eef2ff;padding:8px 12px;border-radius:10px;margin-bottom:8px;font-size:0.84rem;line-height:1.42;color:#3730a3">
         <b>종합 총평:</b> ${item.final_reason}
       </div>
 
       <!-- 세부 평가 요소 점수 요약 그래프 (우측 상단) -->
       <div class="score-summary-card">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-          <h3 style="margin:0;font-size:0.96rem;font-weight:800;color:var(--navy);display:flex;align-items:center;gap:6px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <h3 style="margin:0;font-size:0.94rem;font-weight:800;color:var(--navy);display:flex;align-items:center;gap:6px;">
             📊 세부 평가 요소 점수 요약
           </h3>
-          <span style="font-size:0.75rem;color:var(--muted);font-weight:600;">10점 만점 기준</span>
+          <span style="font-size:0.74rem;color:var(--muted);font-weight:600;">10점 만점 기준</span>
         </div>
         <div class="score-bars-list">
           <div class="score-bar-row">
@@ -684,13 +892,13 @@ function openDetailModal(id) {
         <h4 style="color:var(--teal)">✓ 주요 장점</h4>
         <ul>${item.strengths.map(s => `<li>${s}</li>`).join('')}</ul>
       </div>
-      <div class="list-box" style="margin-top:8px;">
+      <div class="list-box" style="margin-top:6px;">
         <h4 style="color:#e11d48">✗ 단점 및 다음 촬영 개선점</h4>
         <ul>${item.improvements.map(i => `<li>${i}</li>`).join('')}</ul>
       </div>
 
-      <div style="margin-top:14px;">
-        <span style="font-size:0.8rem;font-weight:700;color:var(--muted);display:block;margin-bottom:6px;">🏷️ 분위기 & 스타일 태그</span>
+      <div style="margin-top:8px;">
+        <span style="font-size:0.78rem;font-weight:700;color:var(--muted);display:block;margin-bottom:4px;">🏷️ 분위기 & 스타일 태그</span>
         <div class="tag-pills">
           ${renderTagPills(item.aesthetic_tags)}
         </div>

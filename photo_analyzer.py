@@ -197,6 +197,23 @@ class SNSAdvice(BaseModel):
     hashtags: list[str] = Field(description="피규어 특화 추천 해시태그 목록 (#피규어, #figurephotography 등 8~12개)")
 
 
+def compute_dhash_from_bytes(image_bytes: bytes, hash_size: int = 8) -> int:
+    """Compute 64-bit difference hash (dHash) from image bytes."""
+    with Image.open(BytesIO(image_bytes)) as img:
+        gray = img.convert("L").resize((hash_size + 1, hash_size), Image.Resampling.BILINEAR)
+        pixels = gray.tobytes()
+        diff = 0
+        for row in range(hash_size):
+            r_start = row * (hash_size + 1)
+            for col in range(hash_size):
+                if pixels[r_start + col] > pixels[r_start + col + 1]:
+                    diff |= 1 << (row * hash_size + col)
+        return diff
+
+
+def hamming_distance(h1: int, h2: int) -> int:
+    """Compute Hamming distance between two 64-bit perceptual hashes."""
+    return bin(h1 ^ h2).count("1")
 
 
 @dataclass(frozen=True)
@@ -210,6 +227,7 @@ class PreparedPhoto:
     upload_bytes: bytes
     upload_mime_type: str
     thumbnail_bytes: bytes | None = None
+    dhash: int | None = None
 
 
 def _json_safe(value: Any) -> Any:
@@ -389,6 +407,7 @@ def prepare_photo(image_path: str | Path) -> PreparedPhoto:
             thumb_img = thumb_img.convert("RGB")
         thumb_img.save(thumb_buf, format="WEBP", quality=82)
         thumbnail_bytes = thumb_buf.getvalue()
+        dhash_val = compute_dhash_from_bytes(thumbnail_bytes)
 
     return PreparedPhoto(
         source_filename=path.name,
@@ -400,6 +419,7 @@ def prepare_photo(image_path: str | Path) -> PreparedPhoto:
         upload_bytes=upload_bytes,
         upload_mime_type=upload_mime_type,
         thumbnail_bytes=thumbnail_bytes,
+        dhash=dhash_val,
     )
 
 
@@ -773,16 +793,25 @@ def save_analysis(
             connection.execute("ALTER TABLE photo_analyses ADD COLUMN lr_advice_json TEXT")
         if "sns_advice_json" not in existing_cols:
             connection.execute("ALTER TABLE photo_analyses ADD COLUMN sns_advice_json TEXT")
+        if "dhash" not in existing_cols:
+            connection.execute("ALTER TABLE photo_analyses ADD COLUMN dhash INTEGER")
         ensure_tag_tables(connection)
         connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_photo_analyses_sha256 "
             "ON photo_analyses (sha256)"
         )
+        dhash_to_save = getattr(photo, "dhash", None)
+        if dhash_to_save is None and thumb_data:
+            try:
+                dhash_to_save = compute_dhash_from_bytes(thumb_data)
+            except Exception:
+                dhash_to_save = None
+
         cursor = connection.execute(
             """INSERT INTO photo_analyses (
                 sha256, source_filename, width, height, image_format,
-                model, exif_json, analysis_json, created_at, thumbnail
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                model, exif_json, analysis_json, created_at, thumbnail, dhash
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 photo.sha256,
                 photo.source_filename,
@@ -794,6 +823,7 @@ def save_analysis(
                 analysis.model_dump_json(),
                 datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 thumb_data,
+                dhash_to_save,
             ),
         )
         record_id = int(cursor.lastrowid)
