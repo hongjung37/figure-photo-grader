@@ -149,6 +149,7 @@ class PreparedPhoto:
     safe_exif: dict[str, Any]
     upload_bytes: bytes
     upload_mime_type: str
+    thumbnail_bytes: bytes | None = None
 
 
 def _json_safe(value: Any) -> Any:
@@ -321,6 +322,14 @@ def prepare_photo(image_path: str | Path) -> PreparedPhoto:
             safe_upload_exif,
         )
 
+        thumb_img = oriented.copy()
+        thumb_img.thumbnail((800, 800), Image.Resampling.LANCZOS)
+        thumb_buf = BytesIO()
+        if thumb_img.mode not in ("RGB", "RGBA"):
+            thumb_img = thumb_img.convert("RGB")
+        thumb_img.save(thumb_buf, format="WEBP", quality=82)
+        thumbnail_bytes = thumb_buf.getvalue()
+
     return PreparedPhoto(
         source_filename=path.name,
         sha256=_sha256_file(path),
@@ -330,6 +339,7 @@ def prepare_photo(image_path: str | Path) -> PreparedPhoto:
         safe_exif=safe_exif,
         upload_bytes=upload_bytes,
         upload_mime_type=upload_mime_type,
+        thumbnail_bytes=thumbnail_bytes,
     )
 
 
@@ -518,10 +528,12 @@ def save_analysis(
     photo: PreparedPhoto,
     model: str,
     analysis: PhotoAnalysis,
+    thumbnail: bytes | None = None,
 ) -> int:
-    """Persist the privacy-filtered EXIF and validated analysis JSON in SQLite."""
+    """Persist the privacy-filtered EXIF and validated analysis JSON in SQLite, with lightweight thumbnail."""
     database = Path(db_path).expanduser()
     database.parent.mkdir(parents=True, exist_ok=True)
+    thumb_data = thumbnail if thumbnail is not None else getattr(photo, "thumbnail_bytes", None)
     with closing(sqlite3.connect(database)) as connection, connection:
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute(
@@ -535,9 +547,13 @@ def save_analysis(
                 model TEXT NOT NULL,
                 exif_json TEXT NOT NULL,
                 analysis_json TEXT NOT NULL,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                thumbnail BLOB
             )"""
         )
+        existing_cols = [r[1] for r in connection.execute("PRAGMA table_info(photo_analyses)").fetchall()]
+        if "thumbnail" not in existing_cols:
+            connection.execute("ALTER TABLE photo_analyses ADD COLUMN thumbnail BLOB")
         ensure_tag_tables(connection)
         connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_photo_analyses_sha256 "
@@ -546,8 +562,8 @@ def save_analysis(
         cursor = connection.execute(
             """INSERT INTO photo_analyses (
                 sha256, source_filename, width, height, image_format,
-                model, exif_json, analysis_json, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                model, exif_json, analysis_json, created_at, thumbnail
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 photo.sha256,
                 photo.source_filename,
@@ -558,6 +574,7 @@ def save_analysis(
                 json.dumps(photo.safe_exif, ensure_ascii=False, sort_keys=True),
                 analysis.model_dump_json(),
                 datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                thumb_data,
             ),
         )
         record_id = int(cursor.lastrowid)

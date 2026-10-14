@@ -17,6 +17,7 @@ from photo_analyzer import (
     DEFAULT_DB_PATH,
     MODEL_PRESETS,
     PhotoAnalysis,
+    PreparedPhoto,
     analyze_with_gemini,
     prepare_photo,
     save_analysis,
@@ -24,6 +25,22 @@ from photo_analyzer import (
 from photo_tag_schema import AESTHETIC_TAG_CATEGORIES, get_score_grade
 
 PORT = 8080
+
+
+def make_thumbnail_bytes(image_path_or_bytes: Path | bytes, max_dim: int = 800, quality: int = 82) -> bytes:
+    import io
+    from PIL import Image, ImageOps
+    if isinstance(image_path_or_bytes, (str, Path)):
+        img = Image.open(image_path_or_bytes)
+    else:
+        img = Image.open(io.BytesIO(image_path_or_bytes))
+    img = ImageOps.exif_transpose(img)
+    if img.mode not in ("RGB", "RGBA"):
+        img = img.convert("RGB")
+    img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+    out = io.BytesIO()
+    img.save(out, format="WEBP", quality=quality)
+    return out.getvalue()
 
 
 def get_all_analyses(db_path: Path) -> list[dict]:
@@ -256,10 +273,19 @@ h1 span { font-size: 0.75rem; background: var(--teal); color: white; padding: 3p
     <p style="color:var(--muted);font-size:0.88rem;margin:0 0 16px;">사진 파일을 선택하면 피규어 비평 기준에 따라 자동 분석 후 SQLite에 저장합니다.</p>
     
     <label style="font-weight:700;font-size:0.84rem;display:block;margin-bottom:6px;">분석 모델 티어 선택:</label>
-    <select class="select-input" id="upload-tier" style="width:100%;margin-bottom:14px;">
+    <select class="select-input" id="upload-tier" style="width:100%;margin-bottom:12px;">
       <option value="lite">Flash-Lite (초고속 스크리닝 / 기본)</option>
       <option value="standard">2.5-Flash (균형 잡힌 화질 평가)</option>
-      <option value="pro">2.5-Pro (전문가급 심층 비평)</option>
+      <option value="pro">3.1-Pro (전문가급 심층 비평)</option>
+    </select>
+
+    <label style="font-weight:700;font-size:0.84rem;display:block;margin-bottom:6px;">피규어 촬영 세부 유형:</label>
+    <select class="select-input" id="upload-category" style="width:100%;margin-bottom:14px;">
+      <option value="auto">자동 판별 (Gemini가 사진을 분석하여 자동 분류)</option>
+      <option value="macro">🔍 접사/디테일 (도색, 접합선, 데칼 초점 심사)</option>
+      <option value="snap">🌿 일상/야외 스냅 (배경 조화, 자연광, 생활감 심사)</option>
+      <option value="staging">🎬 스튜디오 연출/디오라마 (드라마틱 조명, 콘트라스트)</option>
+      <option value="general">📷 일반 피규어 촬영 (기본 전시/조형 중심)</option>
     </select>
 
     <div class="drop-zone" onclick="document.getElementById('file-input').click()">
@@ -532,6 +558,7 @@ async function handleFileSelect(e) {
   const file = e.target.files[0];
   if (!file) return;
   const tier = document.getElementById('upload-tier').value;
+  const category = document.getElementById('upload-category').value;
   const status = document.getElementById('upload-status');
   status.textContent = 'Gemini API 분석 중입니다 (수 초 소요)...';
   status.style.color = 'var(--blue)';
@@ -539,6 +566,7 @@ async function handleFileSelect(e) {
   const formData = new FormData();
   formData.append('image', file);
   formData.append('tier', tier);
+  formData.append('category', category);
 
   try {
     const res = await fetch('/api/analyze', { method: 'POST', body: formData });
@@ -592,30 +620,50 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
         if path.startswith("/api/image/"):
             try:
                 record_id = int(path.split("/")[-1])
-                # Check SQLite record and return uploaded photo bytes if stored or re-read from test_photo
+                from contextlib import closing
                 with closing(sqlite3.connect(self.db_path)) as conn:
                     row = conn.execute(
-                        "SELECT source_filename FROM photo_analyses WHERE id = ?", (record_id,)
+                        "SELECT thumbnail, source_filename FROM photo_analyses WHERE id = ?", (record_id,)
                     ).fetchone()
-                if row:
-                    fname = row[0]
-                    # Search for photo file locally
-                    for search_dir in (Path("test_photo"), Path("."), Path("outputs")):
-                        cand = search_dir / fname
-                        if cand.is_file():
-                            mime, _ = mimetypes.guess_type(str(cand))
-                            data = cand.read_bytes()
+                    if row:
+                        thumb_blob, fname = row[0], row[1]
+                        if thumb_blob:
                             self.send_response(HTTPStatus.OK)
-                            self.send_header("Content-Type", mime or "image/jpeg")
-                            self.send_header("Content-Length", str(len(data)))
+                            self.send_header("Content-Type", "image/webp")
+                            self.send_header("Content-Length", str(len(thumb_blob)))
+                            self.send_header("Cache-Control", "public, max-age=86400")
                             self.end_headers()
-                            self.wfile.write(data)
+                            self.wfile.write(thumb_blob)
                             return
+
+                        # Fallback: search local files, generate thumbnail and cache into DB
+                        for search_dir in (Path("test_photo"), Path("."), Path("outputs")):
+                            cand = search_dir / fname
+                            if cand.is_file():
+                                thumb_bytes = make_thumbnail_bytes(cand)
+                                conn.execute("UPDATE photo_analyses SET thumbnail = ? WHERE id = ?", (thumb_bytes, record_id))
+                                conn.commit()
+                                self.send_response(HTTPStatus.OK)
+                                self.send_header("Content-Type", "image/webp")
+                                self.send_header("Content-Length", str(len(thumb_bytes)))
+                                self.send_header("Cache-Control", "public, max-age=86400")
+                                self.end_headers()
+                                self.wfile.write(thumb_bytes)
+                                return
             except Exception:
                 pass
-            # Return transparent placeholder if not found
-            self.send_response(HTTPStatus.NOT_FOUND)
+            # Placeholder SVG if image is not found
+            svg = (
+                '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" viewBox="0 0 400 300">'
+                '<rect width="100%" height="100%" fill="#0f172a"/>'
+                '<text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#64748b" font-size="16" font-family="sans-serif">사진 미리보기 없음</text>'
+                '</svg>'
+            ).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "image/svg+xml")
+            self.send_header("Content-Length", str(len(svg)))
             self.end_headers()
+            self.wfile.write(svg)
             return
 
         super().do_GET()
@@ -635,10 +683,13 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 file_bytes = None
                 filename = "uploaded.webp"
                 tier = "lite"
+                category_param = "auto"
 
                 for part in parts:
                     if b'name="tier"' in part:
-                        tier = part.split(b"\r\n\r\n")[1].split(b"\r\n")[0].decode("utf-8")
+                        tier = part.split(b"\r\n\r\n")[1].split(b"\r\n")[0].decode("utf-8").strip()
+                    elif b'name="category"' in part:
+                        category_param = part.split(b"\r\n\r\n")[1].split(b"\r\n")[0].decode("utf-8").strip()
                     elif b'name="image"' in part:
                         header, data = part.split(b"\r\n\r\n", 1)
                         data = data.rstrip(b"\r\n")
@@ -656,15 +707,20 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     tmp.write(file_bytes)
 
                 try:
-                    photo = prepare_photo(tmp_path)
-                    photo = prepare_photo(tmp_path).__dict__
-                    photo["source_filename"] = filename
-                    from photo_analyzer import PreparedPhoto
-                    prepared = PreparedPhoto(**photo)
+                    photo_obj = prepare_photo(tmp_path)
+                    prepared = PreparedPhoto(
+                        source_filename=filename,
+                        sha256=photo_obj.sha256,
+                        width=photo_obj.width,
+                        height=photo_obj.height,
+                        image_format=photo_obj.image_format,
+                        safe_exif=photo_obj.safe_exif,
+                        upload_bytes=photo_obj.upload_bytes,
+                        upload_mime_type=photo_obj.upload_mime_type,
+                        thumbnail_bytes=photo_obj.thumbnail_bytes,
+                    )
                     model = MODEL_PRESETS.get(tier, MODEL_PRESETS["lite"])
-                    category_hint = None
-                    if category_param and category_param != "auto":
-                        category_hint = category_param
+                    category_hint = category_param if category_param != "auto" else None
                     analysis = analyze_with_gemini(prepared, model=model, category_hint=category_hint)
                     record_id = save_analysis(self.db_path, prepared, model, analysis)
                 finally:
