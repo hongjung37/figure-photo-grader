@@ -212,5 +212,35 @@ class PhotoExcelManagerTests(unittest.TestCase):
             self.assertEqual(tag_count, 0)
 
 
+    def test_tournament_winner_status_roundtrip(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            database, record_id = self._create_database(directory)
+            # Simulate column added by dashboard or prior import
+            with closing(sqlite3.connect(database)) as connection:
+                connection.execute("ALTER TABLE photo_analyses ADD COLUMN review_status TEXT DEFAULT '미검토'")
+                connection.execute(
+                    "UPDATE photo_analyses SET review_status = '토너먼트 1위' WHERE id = ?",
+                    (record_id,),
+                )
+                connection.commit()
+
+            workbook_path = directory / "tournament.xlsx"
+            export_to_excel(database, workbook_path)
+
+            workbook = load_workbook(workbook_path)
+            sheet = workbook[SHEET_NAME]
+            headers = {cell.value: cell.column for cell in sheet[1]}
+            self.assertEqual(sheet.cell(2, headers[STATUS_HEADER]).value, "토너먼트 1위")
+
+            # Re-import should succeed without validation errors
+            self.assertEqual(import_from_excel(database, workbook_path), 1)
+            with closing(sqlite3.connect(database)) as connection:
+                status = connection.execute(
+                    "SELECT review_status FROM photo_analyses WHERE id = ?", (record_id,)
+                ).fetchone()[0]
+            self.assertEqual(status, "토너먼트 1위")
+
+
 if __name__ == "__main__":
     unittest.main()

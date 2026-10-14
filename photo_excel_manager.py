@@ -30,7 +30,7 @@ HELP_SHEET_NAME = "사용 안내"
 ID_HEADER = "ID"
 STATUS_HEADER = "검토 상태"
 USER_NOTES_HEADER = "사용자 메모"
-REVIEW_STATUSES = ("미검토", "확인 필요", "검토 완료")
+REVIEW_STATUSES = ("미검토", "확인 필요", "검토 완료", "토너먼트 1위")
 
 BASE_COLUMNS = (
     ID_HEADER,
@@ -270,14 +270,15 @@ def _format_workbook(path: Path, row_count: int) -> None:
         sheet.add_table(table)
 
         status_column = header_positions[STATUS_HEADER]
+        status_list_str = ",".join(REVIEW_STATUSES)
         validation = DataValidation(
             type="list",
-            formula1='"미검토,확인 필요,검토 완료"',
+            formula1=f'"{status_list_str}"',
             allow_blank=False,
         )
         validation.error = "목록에서 검토 상태를 선택해 주세요."
         validation.errorTitle = "검토 상태 확인"
-        validation.prompt = "미검토 / 확인 필요 / 검토 완료 중에서 선택합니다."
+        validation.prompt = f"{' / '.join(REVIEW_STATUSES)} 중에서 선택합니다."
         validation.promptTitle = "검토 상태"
         sheet.add_data_validation(validation)
         validation.add(f"{sheet.cell(2, status_column).coordinate}:{sheet.cell(max(row_count + 1, 1000), status_column).coordinate}")
@@ -309,7 +310,7 @@ def _format_workbook(path: Path, row_count: int) -> None:
         ("반영 방법", "저장한 뒤 photo_excel_manager.py import 명령으로 가져옵니다."),
         ("안전 장치", "가져오기는 ID로 기존 행만 갱신합니다. 새 행 추가·행 삭제는 DB에 반영하지 않습니다."),
         ("검증", "중복/미등록 ID, 잘못된 점수(0~10), 누락 열 또는 잘못된 상태가 있으면 전체 가져오기가 취소됩니다."),
-        ("검토 상태", "미검토 / 확인 필요 / 검토 완료"),
+        ("검토 상태", " / ".join(REVIEW_STATUSES)),
         ("개인정보", "촬영 정보에는 DB에 저장된 허용 EXIF만 포함되며 GPS·촬영 시각 등 제외 정보는 내보내지 않습니다."),
         ("공유 주의", "파일명, 평가 및 촬영 설정이 포함될 수 있으니 엑셀 파일을 안전하게 보관하세요."),
     ]

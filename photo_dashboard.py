@@ -944,6 +944,7 @@ function renderBurstThumbnails(groupId, currentId) {
 }
 
 function openDetailModal(id) {
+  clearCropOverlay();
   const item = allData.find(d => d.id === id);
   if (!item) return;
   currentDetailId = id;
@@ -1414,7 +1415,9 @@ function selectCropRatio(ratioKey, recordId) {
     currentCropBox = box;
     repositionCropOverlay();
   } else {
-    clearCropOverlay();
+    currentCropBox = null;
+    const overlay = document.getElementById('crop-box-overlay');
+    if (overlay) overlay.style.display = 'none';
   }
 }
 
@@ -1687,6 +1690,7 @@ function renderExifSummary(exif, detectedSettings) {
 }
 
 function closeDetailModal() {
+  clearCropOverlay();
   document.getElementById('detail-modal').style.display = 'none';
   currentDetailId = null;
 }
@@ -2621,6 +2625,9 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 data = json.loads(body.decode("utf-8"))
                 record_id = int(data.get("id"))
                 new_status = str(data.get("status", "토너먼트 1위"))
+                from photo_excel_manager import REVIEW_STATUSES
+                if new_status not in REVIEW_STATUSES:
+                    raise ValueError(f"유효하지 않은 검토 상태입니다: {new_status}")
                 ensure_db_columns(self.db_path)
                 with closing(sqlite3.connect(self.db_path)) as conn, conn:
                     conn.execute("UPDATE photo_analyses SET review_status = ? WHERE id = ?", (new_status, record_id))
