@@ -694,9 +694,14 @@ def generate_sns_advice(photo: PreparedPhoto, model: str = DEFAULT_MODEL) -> SNS
 4. x_crop_3_4: X(트위터) 세로 최적화 (3:4 세로 비율)
    - 모바일 X 앱에서 풀 세로로 시원하게 보이는 비율.
 
-[좌표 작성 규칙]
+[좌표 작성 규칙 및 실제 픽셀 비율 지침]
 - ymin, xmin, ymax, xmax는 0.0 이상 1.0 이하의 실수값으로 작성하세요 (소수점 4자리 권장).
 - 0.0 <= ymin < ymax <= 1.0, 0.0 <= xmin < xmax <= 1.0 이어야 합니다.
+- ★중요(실제 픽셀 비율): 원본 해상도는 {photo.width}(가로) × {photo.height}(세로)입니다.
+  정규화 좌표 기준 실제 픽셀 크기는 가로 = (xmax - xmin) * {photo.width}, 세로 = (ymax - ymin) * {photo.height} 입니다.
+  단순 정규화 수치가 아닌, 실제 픽셀 비율(가로/세로)이 각 플랫폼 목표 종횡비와 최대한 일치하도록 좌표를 지정하세요.
+  (예: 세로가 긴 사진에서 1:1이나 16:9로 자를 때 정규화 폭/높이를 같게 두면 세로 직사각형이 됩니다. 반드시 실제 픽셀 기준으로 목표 비율을 맞추세요.)
+- ★핵심(헤드룸 보존 및 안면 중심 프레이밍): 피규어 인물 사진에서 시선 집중의 핵심은 '얼굴과 눈'입니다. 가로 비율(1:1, 16:9)로 자를 때는 정수리 위 적정 여백(헤드룸)을 남기고 하단(다리/스탠드 베이스)을 덜어내어 얼굴이 프레임 상단~중앙에 오도록 ymin을 머리 위 적정 위치로 잡으세요. 절대로 얼굴을 잘라내고 몸통만 남기지 마세요.
 - composition_tip에는 "왜 이렇게 잘라야 피규어가 돋보이는지"에 대한 친절한 1~2줄 코멘트를 작성하세요.
 
 [소셜 캡션 및 해시태그]
@@ -778,18 +783,22 @@ def generate_single_sns_crop(photo: PreparedPhoto, ratio_key: str, model: str = 
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY를 .env 파일 또는 환경변수에 설정해 주세요.")
 
+    target_ratio = cfg["w"] / cfg["h"]
     prompt = f"""당신은 피규어 사진 및 SNS(Instagram, X/Twitter) 비주얼 디렉터입니다.
 제시된 피규어 사진(원본 해상도: {photo.width} × {photo.height})을 분석하고,
 **[{cfg['name']}] ({cfg['aspect']})** 규격에 가장 이상적인 크롭 영역(정규화 좌표 0.0~1.0)과 구도 연출 조언을 JSON으로 제안하세요.
 
 [플랫폼별 구도 최적화 지침]
-- 대상 비율: {cfg['aspect']} (가로:세로 = {cfg['w']}:{cfg['h']})
+- 대상 비율: {cfg['aspect']} (가로:세로 = {cfg['w']}:{cfg['h']}, 목표 픽셀 종횡비 = {target_ratio:.4f})
 - 연출 가이드: {cfg['guide']}
 
 [좌표 및 필드 작성 규칙]
 - ymin, xmin, ymax, xmax는 0.0 이상 1.0 이하 실수값으로 작성하세요 (소수점 4자리 권장).
 - 반드시 0.0 <= ymin < ymax <= 1.0, 0.0 <= xmin < xmax <= 1.0 을 만족해야 합니다.
-- 피규어의 핵심 포인트(얼굴, 조형 디테일)가 잘리지 않고 프레임 내 최적의 위치에 놓이도록 하세요.
+- ★중요(실제 픽셀 비율): 원본 해상도는 {photo.width}(가로) × {photo.height}(세로)입니다.
+  실제 픽셀 가로 = (xmax - xmin) * {photo.width}, 실제 픽셀 세로 = (ymax - ymin) * {photo.height} 입니다.
+  실제 픽셀 비율 ((xmax - xmin) * {photo.width}) / ((ymax - ymin) * {photo.height}) 이 목표 종횡비 {cfg['w']}:{cfg['h']} ({target_ratio:.4f})에 최대한 근접하도록 폭과 높이를 조율하세요.
+- ★핵심(헤드룸 보존 및 안면 중심 프레이밍): 피규어의 핵심 포인트는 얼굴과 상반신 조형입니다. 가로로 넓은 비율(1:1, 16:9)로 자를 때는 정수리 위 여백(헤드룸)을 자연스럽게 살리고 하단(베이스/다리)을 덜어내어 얼굴과 눈이 프레임 상단 3분할선 또는 중앙에 안정적으로 배치되도록 ymin을 조율하세요.
 - ratio_label: '{cfg['name']} ({cfg['aspect']})'
 - composition_tip: 이 비율에서 왜 이 위치로 잘라야 피규어가 가장 돋보이는지 미학적 의도를 친절히 1~2줄로 설명하세요.
 """

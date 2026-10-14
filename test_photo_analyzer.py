@@ -744,6 +744,49 @@ class PhotoAnalyzerTests(unittest.TestCase):
         self.assertIsNone(single["burst_group_id"])
         self.assertEqual(single["burst_total"], 1)
 
+    def test_sns_crop_framing_headroom_and_prompt(self) -> None:
+        import subprocess
+        import photo_analyzer
+        import photo_dashboard
+
+        # 1. Verify prompt guidelines in photo_analyzer
+        cfg = photo_analyzer.SNS_CROP_RATIO_CONFIGS["instagram_crop_1_1"]
+        self.assertEqual(cfg["w"], 1)
+        self.assertEqual(cfg["h"], 1)
+
+        # 2. Test calculateExactCrop in node against tall portrait photo
+        with open("photo_dashboard.py", encoding="utf-8") as f:
+            code = f.read()
+        func_body = "function calculateExactCrop" + code.split("function calculateExactCrop")[1].split("function selectCropRatio")[0]
+        node_script = """
+        const TARGET_CROP_RATIOS = {
+          instagram_crop_1_1: { name: '1:1', tag: '1:1', w: 1, h: 1, ratio: 1.0 },
+          x_crop_16_9: { name: '16:9', tag: '16:9', w: 16, h: 9, ratio: 16/9 }
+        };
+        """ + func_body
+        full_script = f"""
+        {node_script}
+        // Test vertical portrait photo (4672 x 7008), figure head at ymin = 0.12
+        const box = {{ ymin: 0.12, xmin: 0.10, ymax: 0.88, xmax: 0.86 }};
+        const crop1 = calculateExactCrop('instagram_crop_1_1', box, 4672, 7008);
+        const crop169 = calculateExactCrop('x_crop_16_9', box, 4672, 7008);
+        console.log(JSON.stringify({{ crop1, crop169 }}));
+        """
+        res = subprocess.run(["node", "-e", full_script], capture_output=True, text=True, check=True)
+        data = json.loads(res.stdout.strip())
+        
+        # In 1:1 crop, sy must be <= box.ymin * naturalH (head is inside crop with headroom)
+        self.assertLessEqual(data["crop1"]["sy"], 0.12 * 7008)
+        self.assertGreater(data["crop1"]["sy"], 0)
+        self.assertEqual(data["crop1"]["sw"], 4672)
+        self.assertEqual(data["crop1"]["sh"], 4672)
+
+        # In 16:9 crop, sy must also be <= box.ymin * naturalH (head is not cut off)
+        self.assertLessEqual(data["crop169"]["sy"], 0.12 * 7008)
+        self.assertGreater(data["crop169"]["sy"], 0)
+        self.assertEqual(data["crop169"]["sw"], 4672)
+        self.assertEqual(data["crop169"]["sh"], 2628)
+
 
 if __name__ == "__main__":
     unittest.main()

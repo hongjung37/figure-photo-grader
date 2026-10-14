@@ -1364,7 +1364,19 @@ function calculateExactCrop(ratioKey, box, naturalW, naturalH) {
   }
 
   let sx = cx - cropW / 2;
-  let sy = cy - cropH / 2;
+  let sy;
+  if (cropH < rawH) {
+    // When height trimming is required (e.g. portrait photo into 1:1 or 16:9),
+    // anchor near box.ymin (the top of the subject / intended headroom) rather than
+    // blind midpoint centering which cuts off the head and centers on the belly.
+    const headroomBuffer = Math.min(box.ymin * naturalH, cropH * 0.05);
+    sy = (box.ymin * naturalH) - headroomBuffer;
+    if (sy + cropH > naturalH) {
+      sy = naturalH - cropH;
+    }
+  } else {
+    sy = cy - cropH / 2;
+  }
 
   if (sx < 0) sx = 0;
   if (sx + cropW > naturalW) sx = naturalW - cropW;
