@@ -1246,7 +1246,7 @@ function renderSnsAdviceContent(advice, recordId) {
   return `
     <div>
       <div style="font-size:0.83rem;font-weight:700;color:#0369a1;margin-bottom:6px;">
-        📐 원하는 비율을 먼저 선택하세요 (해당 비율만 단독 분석하여 토큰 절약 & 1:1/16:9 정확도 극대화):
+        📐 원하는 비율을 선택하세요 (1회 호출로 4대 규격 일괄 분석 & 탭 전환 즉시 미리보기):
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">
         ${buttonsHtml}
@@ -1274,8 +1274,9 @@ function renderCropRatioDetailArea(ratioKey, currentAdv, recordId) {
       <div id="crop-tip-box" style="background:white;padding:12px 14px;border-radius:10px;font-size:0.85rem;border:1px solid #e0f2fe;box-shadow:0 1px 3px rgba(0,0,0,0.04);">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:6px;">
           <b id="crop-tip-title" style="color:#0369a1;font-size:0.92rem;">${box.ratio_label || target.tag}</b>
-          <div style="display:flex;gap:6px;align-items:center;">
-            <button class="filter-btn" style="padding:4px 9px;font-size:0.76rem;background:#f0f9ff;color:#0284c7;border-color:#bae6fd;" onclick="requestSingleSnsCrop('${ratioKey}', ${recordId}, this, true)">🔄 이 비율 다시 제안</button>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+            <button class="filter-btn" style="padding:4px 9px;font-size:0.76rem;background:#f0f9ff;color:#0284c7;border-color:#bae6fd;" onclick="requestSingleSnsCrop('${ratioKey}', ${recordId}, this, true)">🔄 이 비율만 다시 제안</button>
+            <button class="filter-btn" style="padding:4px 9px;font-size:0.76rem;background:#f8fafc;color:#475569;border-color:#cbd5e1;" onclick="requestAllSnsCrops(${recordId}, this)">🔄 전체 4종 일괄 재분석</button>
             <button class="upload-btn" id="btn-crop-download" style="padding:5px 12px;font-size:0.78rem;background:#0284c7;" onclick="downloadCroppedImage('${ratioKey}', ${recordId})">✂️ 이 비율로 잘라 다운로드</button>
           </div>
         </div>
@@ -1287,13 +1288,13 @@ function renderCropRatioDetailArea(ratioKey, currentAdv, recordId) {
   return `
     <div id="crop-tip-box" style="background:#f8fafc;padding:16px;border-radius:10px;font-size:0.85rem;border:1px dashed #93c5fd;text-align:center;">
       <div style="color:#0369a1;font-weight:700;margin-bottom:6px;font-size:0.92rem;">
-        현재 [${target.tag}] 규격의 크롭 제안이 아직 없습니다.
+        SNS 최적 크롭 제안이 아직 생성되지 않았습니다.
       </div>
       <div style="color:#64748b;font-size:0.8rem;margin-bottom:12px;">
-        선택한 비율 1개만 단독 분석하여 불필요한 토큰 낭비 없이 피규어 최적의 구도를 정밀 제안합니다.
+        단 1회의 Gemini 호출로 4대 규격(인스타 4:5, 1:1, X 16:9, 3:4)을 한 번에 분석하여 토큰을 대폭 절약합니다.
       </div>
-      <button class="upload-btn" style="background:#0284c7;padding:8px 18px;font-size:0.84rem;margin:0 auto;display:inline-flex;" onclick="requestSingleSnsCrop('${ratioKey}', ${recordId}, this, false)">
-        ✨ ${target.tag} 맞춤 크롭 제안 받기
+      <button class="upload-btn" style="background:#0284c7;padding:8px 20px;font-size:0.86rem;margin:0 auto;display:inline-flex;" onclick="requestSingleSnsCrop('${ratioKey}', ${recordId}, this, false)">
+        ✨ SNS 4대 규격 맞춤 크롭 일괄 제안 받기 (1회 호출)
       </button>
     </div>
   `;
@@ -1624,6 +1625,38 @@ async function requestSingleSnsCrop(ratioKey, recordId, btn, force=false) {
           container.innerHTML = renderSnsAdviceContent(item.sns_advice, recordId);
         }
         selectCropRatio(ratioKey, recordId);
+      }
+    } else {
+      alert(`크롭 제안 생성 실패: ${data.error || '알 수 없는 오류'}`);
+      btn.textContent = origText;
+      btn.disabled = false;
+    }
+  } catch (err) {
+    alert(`오류: ${err.message}`);
+    btn.textContent = origText;
+    btn.disabled = false;
+  }
+}
+
+async function requestAllSnsCrops(recordId, btn) {
+  const origText = btn.textContent;
+  btn.textContent = 'Gemini 4종 구도 일괄 분석 중...';
+  btn.disabled = true;
+
+  try {
+    const url = `/api/sns-crop/all/${recordId}?force=true`;
+    const res = await fetch(url, { method: 'POST' });
+    const data = await res.json();
+    if (data.success && data.advice) {
+      const item = allData.find(d => d.id === recordId);
+      if (item) {
+        if (!item.sns_advice) item.sns_advice = {};
+        Object.assign(item.sns_advice, data.advice);
+        const container = document.getElementById('sns-advice-content');
+        if (container) {
+          container.innerHTML = renderSnsAdviceContent(item.sns_advice, recordId);
+        }
+        selectCropRatio(currentCropRatioKey || 'instagram_crop_4_5', recordId);
       }
     } else {
       alert(`크롭 제안 생성 실패: ${data.error || '알 수 없는 오류'}`);
@@ -3041,13 +3074,18 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     else:
                         raise ValueError(f"사진 파일 '{fname}'을 찾을 수 없으며 DB 썸네일도 없습니다.")
 
-                    if ratio_key not in SNS_CROP_RATIO_CONFIGS:
+                    if ratio_key == "all":
+                        crop_set = generate_all_sns_crops(prepared, model=MODEL_PRESETS["lite"])
+                        for key, box in crop_set.model_dump(mode="json").items():
+                            cached_advice[key] = box
+                        crop_dict = cached_advice.get("instagram_crop_4_5", {})
+                    elif ratio_key not in SNS_CROP_RATIO_CONFIGS:
                         raise ValueError(f"지원하지 않는 SNS 크롭 비율 키입니다: {ratio_key}")
-
-                    if force:
+                    elif force:
                         # Explicit regenerate: refresh only the requested ratio.
                         crop_box = generate_single_sns_crop(prepared, ratio_key=ratio_key, model=MODEL_PRESETS["lite"])
                         cached_advice[ratio_key] = crop_box.model_dump(mode="json")
+                        crop_dict = cached_advice[ratio_key]
                     else:
                         # First crop request for this photo: get all 4 ratios in ONE call and cache them,
                         # so the other ratio buttons need no further API calls.
@@ -3055,7 +3093,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                         for key, box in crop_set.model_dump(mode="json").items():
                             if key == ratio_key or not cached_advice.get(key):
                                 cached_advice[key] = box
-                    crop_dict = cached_advice[ratio_key]
+                        crop_dict = cached_advice[ratio_key]
                     advice_json = json.dumps(cached_advice, ensure_ascii=False)
 
                     with conn:
