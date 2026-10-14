@@ -520,6 +520,24 @@ class PhotoAnalyzerTests(unittest.TestCase):
             self.assertIsNotNone(items[0]["sns_advice"])
             self.assertEqual(items[0]["sns_advice"]["social_caption"], "테스트 캡션입니다")
 
+    def test_single_sns_crop_ratio_config_and_caption_schema(self) -> None:
+        from photo_analyzer import SNS_CROP_RATIO_CONFIGS, SNSCaptionAndTags, CropBox
+
+        for ratio_key in ("instagram_crop_4_5", "instagram_crop_1_1", "x_crop_16_9", "x_crop_3_4"):
+            self.assertIn(ratio_key, SNS_CROP_RATIO_CONFIGS)
+            cfg = SNS_CROP_RATIO_CONFIGS[ratio_key]
+            self.assertIn("name", cfg)
+            self.assertIn("guide", cfg)
+            self.assertGreater(cfg["w"], 0)
+            self.assertGreater(cfg["h"], 0)
+
+        caption_model = SNSCaptionAndTags(
+            social_caption="단독 캡션 생성 테스트 ✨",
+            hashtags=["#피규어", "#키덜트", "#figurephotography"]
+        )
+        self.assertEqual(caption_model.social_caption, "단독 캡션 생성 테스트 ✨")
+        self.assertEqual(len(caption_model.hashtags), 3)
+
     def test_dhash_calculation_and_hamming_distance(self) -> None:
         from io import BytesIO
         from PIL import Image

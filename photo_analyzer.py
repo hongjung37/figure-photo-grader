@@ -184,17 +184,26 @@ class CropBox(BaseModel):
     composition_tip: str = Field(description="해당 비율 크롭 시 피규어 시선/여백/프레이밍 의도 및 연출 팁")
 
 
+class SNSCaptionAndTags(BaseModel):
+    """Pydantic model for on-demand SNS caption & hashtags generation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    social_caption: str = Field(description="인스타 및 X 피드용 감성적인 짧은 캡션 (2~3줄, 이모지 포함)")
+    hashtags: list[str] = Field(description="피규어 특화 추천 해시태그 목록 (#피규어, #figurephotography 등 8~12개)")
+
+
 class SNSAdvice(BaseModel):
     """Pydantic model for on-demand SNS platform crops (Instagram, X) and social captions."""
 
     model_config = ConfigDict(extra="forbid")
 
-    instagram_crop_4_5: CropBox = Field(description="인스타그램 피드 표준 4:5 세로 크롭 영역 (ymin, xmin, ymax, xmax)")
-    instagram_crop_1_1: CropBox = Field(description="인스타그램 1:1 정방형 크롭 영역")
-    x_crop_16_9: CropBox = Field(description="X(트위터) 타임라인 최적화 16:9 가로 크롭 영역")
-    x_crop_3_4: CropBox = Field(description="X(트위터) 세로 최적화 3:4 크롭 영역")
-    social_caption: str = Field(description="인스타 및 X 피드용 감성적인 짧은 캡션 (2~3줄, 이모지 포함)")
-    hashtags: list[str] = Field(description="피규어 특화 추천 해시태그 목록 (#피규어, #figurephotography 등 8~12개)")
+    instagram_crop_4_5: CropBox | None = Field(default=None, description="인스타그램 피드 표준 4:5 세로 크롭 영역 (ymin, xmin, ymax, xmax)")
+    instagram_crop_1_1: CropBox | None = Field(default=None, description="인스타그램 1:1 정방형 크롭 영역")
+    x_crop_16_9: CropBox | None = Field(default=None, description="X(트위터) 타임라인 최적화 16:9 가로 크롭 영역")
+    x_crop_3_4: CropBox | None = Field(default=None, description="X(트위터) 세로 최적화 3:4 크롭 영역")
+    social_caption: str | None = Field(default=None, description="인스타 및 X 피드용 감성적인 짧은 캡션 (2~3줄, 이모지 포함)")
+    hashtags: list[str] | None = Field(default=None, description="피규어 특화 추천 해시태그 목록 (#피규어, #figurephotography 등 8~12개)")
 
 
 def compute_dhash_from_bytes(image_bytes: bytes, hash_size: int = 8) -> int:
@@ -686,6 +695,173 @@ def generate_sns_advice(photo: PreparedPhoto, model: str = DEFAULT_MODEL) -> SNS
             if not output_text:
                 raise RuntimeError("Gemini가 SNS 크롭 및 캡션 제안 JSON을 반환하지 않았습니다.")
             return SNSAdvice.model_validate_json(output_text)
+        except Exception as exc:
+            err_msg = str(exc)
+            is_transient = any(
+                code in err_msg
+                for code in ("503", "429", "high demand", "ResourceExhausted", "UNAVAILABLE", "service_unavailable")
+            )
+            if is_transient and attempt < max_retries:
+                print(f"[재시도 {attempt}/{max_retries}] API 일시적 지연/오류 발생. {backoff:.1f}초 후 재시도합니다...", file=sys.stderr)
+                time.sleep(backoff)
+                backoff *= 2.0
+            else:
+                raise
+
+
+SNS_CROP_RATIO_CONFIGS: dict[str, dict[str, Any]] = {
+    "instagram_crop_4_5": {
+        "name": "인스타그램 4:5 세로피드",
+        "aspect": "4:5 (세로)",
+        "w": 4,
+        "h": 5,
+        "guide": (
+            "인스타그램 세로 피드(4:5) 최적화: 피규어의 안면, 눈동자 데칼, 시선 방향 여백을 최우선으로 살릴 것. "
+            "정수리 위 여백을 자연스럽게 살짝 남기고, 손/소품이나 무릎선이 애매하게 잘리지 않도록 미학적인 상하 컷 라인을 조율할 것."
+        ),
+    },
+    "instagram_crop_1_1": {
+        "name": "인스타그램 1:1 정방형",
+        "aspect": "1:1 (정사각형)",
+        "w": 1,
+        "h": 1,
+        "guide": (
+            "인스타그램 1:1 정방형 피드 최적화: 피규어의 상반신 또는 핵심 조형 포인트가 중앙 또는 3분할 교차점에 오도록 집중 프레이밍할 것. "
+            "불필요한 주변 빈 공간을 과감히 덜어내고 피규어 본체와 실루엣에 시선이 즉각 꽂히는 밀도 높은 정사각형 구도를 잡을 것."
+        ),
+    },
+    "x_crop_16_9": {
+        "name": "X(트위터) 16:9 가로타임라인",
+        "aspect": "16:9 (와이드 가로)",
+        "w": 16,
+        "h": 9,
+        "guide": (
+            "X(트위터) 가로 타임라인 미리보기(16:9) 최적화: 모바일 및 PC X 타임라인 썸네일에서 피규어의 얼굴과 상체가 잘려나가지 않아야 함. "
+            "피규어의 시선 방향이나 동세를 고려해 좌우 여백을 시네마틱하게 배치하여 피드 스크롤 중 한눈에 들어오는 가로 파노라마 구도를 조율할 것."
+        ),
+    },
+    "x_crop_3_4": {
+        "name": "X(트위터) 3:4 모바일세로",
+        "aspect": "3:4 (모바일 세로)",
+        "w": 3,
+        "h": 4,
+        "guide": (
+            "X(트위터) 모바일 세로 풀뷰(3:4) 최적화: 스마트폰 X 앱에서 시원하게 꽉 찬 세로 화면으로 입체감이 돋보이게 할 것. "
+            "피규어의 전신 또는 3/4 샷을 안정적으로 담을 수 있도록 위아래 균형을 맞춘 시원한 세로 프레임을 구성할 것."
+        ),
+    },
+}
+
+
+def generate_single_sns_crop(photo: PreparedPhoto, ratio_key: str, model: str = DEFAULT_MODEL) -> CropBox:
+    """Generate a single focused SNS crop recommendation for a specific aspect ratio."""
+    if ratio_key not in SNS_CROP_RATIO_CONFIGS:
+        raise ValueError(f"지원하지 않는 SNS 크롭 비율 키입니다: {ratio_key}")
+
+    cfg = SNS_CROP_RATIO_CONFIGS[ratio_key]
+    load_dotenv(dotenv_path=ENV_FILE_PATH, override=False)
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY를 .env 파일 또는 환경변수에 설정해 주세요.")
+
+    prompt = f"""당신은 피규어 사진 및 SNS(Instagram, X/Twitter) 비주얼 디렉터입니다.
+제시된 피규어 사진(원본 해상도: {photo.width} × {photo.height})을 분석하고,
+**[{cfg['name']}] ({cfg['aspect']})** 규격에 가장 이상적인 크롭 영역(정규화 좌표 0.0~1.0)과 구도 연출 조언을 JSON으로 제안하세요.
+
+[플랫폼별 구도 최적화 지침]
+- 대상 비율: {cfg['aspect']} (가로:세로 = {cfg['w']}:{cfg['h']})
+- 연출 가이드: {cfg['guide']}
+
+[좌표 및 필드 작성 규칙]
+- ymin, xmin, ymax, xmax는 0.0 이상 1.0 이하 실수값으로 작성하세요 (소수점 4자리 권장).
+- 반드시 0.0 <= ymin < ymax <= 1.0, 0.0 <= xmin < xmax <= 1.0 을 만족해야 합니다.
+- 피규어의 핵심 포인트(얼굴, 조형 디테일)가 잘리지 않고 프레임 내 최적의 위치에 놓이도록 하세요.
+- ratio_label: '{cfg['name']} ({cfg['aspect']})'
+- composition_tip: 이 비율에서 왜 이 위치로 잘라야 피규어가 가장 돋보이는지 미학적 의도를 친절히 1~2줄로 설명하세요.
+"""
+
+    client = genai.Client(api_key=api_key)
+    max_retries = 5
+    backoff = 3.0
+    for attempt in range(1, max_retries + 1):
+        try:
+            interaction = client.interactions.create(
+                model=model,
+                input=[
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "image",
+                        "data": base64.b64encode(photo.upload_bytes).decode("ascii"),
+                        "mime_type": photo.upload_mime_type,
+                    },
+                ],
+                response_format={
+                    "type": "text",
+                    "mime_type": "application/json",
+                    "schema": CropBox.model_json_schema(),
+                },
+                store=False,
+            )
+            output_text = interaction.output_text
+            if not output_text:
+                raise RuntimeError(f"Gemini가 {cfg['name']} 크롭 제안 JSON을 반환하지 않았습니다.")
+            return CropBox.model_validate_json(output_text)
+        except Exception as exc:
+            err_msg = str(exc)
+            is_transient = any(
+                code in err_msg
+                for code in ("503", "429", "high demand", "ResourceExhausted", "UNAVAILABLE", "service_unavailable")
+            )
+            if is_transient and attempt < max_retries:
+                print(f"[재시도 {attempt}/{max_retries}] API 일시적 지연/오류 발생. {backoff:.1f}초 후 재시도합니다...", file=sys.stderr)
+                time.sleep(backoff)
+                backoff *= 2.0
+            else:
+                raise
+
+
+def generate_sns_caption_and_tags(photo: PreparedPhoto, model: str = DEFAULT_MODEL) -> SNSCaptionAndTags:
+    """Generate social caption and hashtags on-demand without re-analyzing crops."""
+    load_dotenv(dotenv_path=ENV_FILE_PATH, override=False)
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY를 .env 파일 또는 환경변수에 설정해 주세요.")
+
+    prompt = f"""당신은 피규어 사진 및 서브컬처 소셜 미디어(Instagram, X/Twitter) 전문 큐레이터입니다.
+제시된 피규어 사진(원본 해상도: {photo.width} × {photo.height})의 분위기, 조명, 캐릭터 표정을 분석하여
+SNS에 바로 복사해 올릴 수 있는 세련된 한국어 감성 캡션과 피규어 특화 해시태그를 JSON으로 제안하세요.
+
+[요구사항]
+- social_caption: 인스타/X에 바로 복사해 올릴 수 있는 센스 있는 2~3줄 캡션 (이모지 포함, 한국어).
+- hashtags: 한국어/일본어/영어 피규어 특화 해시태그 8~12개 (예: #피규어, #피규어사진, #figurephotography, #toyphotography, #フィギュア 등).
+"""
+
+    client = genai.Client(api_key=api_key)
+    max_retries = 5
+    backoff = 3.0
+    for attempt in range(1, max_retries + 1):
+        try:
+            interaction = client.interactions.create(
+                model=model,
+                input=[
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "image",
+                        "data": base64.b64encode(photo.upload_bytes).decode("ascii"),
+                        "mime_type": photo.upload_mime_type,
+                    },
+                ],
+                response_format={
+                    "type": "text",
+                    "mime_type": "application/json",
+                    "schema": SNSCaptionAndTags.model_json_schema(),
+                },
+                store=False,
+            )
+            output_text = interaction.output_text
+            if not output_text:
+                raise RuntimeError("Gemini가 SNS 캡션 및 해시태그 JSON을 반환하지 않았습니다.")
+            return SNSCaptionAndTags.model_validate_json(output_text)
         except Exception as exc:
             err_msg = str(exc)
             is_transient = any(
