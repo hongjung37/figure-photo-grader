@@ -57,6 +57,7 @@ ANALYSIS_HEADERS = {
     "강점(줄바꿈 구분)": "strengths",
     "개선점(줄바꿈 구분)": "improvements",
     "피규어 유형": "figure_category",
+    "워터마크 촬영 정보(JSON)": "detected_camera_settings",
 }
 AESTHETIC_TAG_HEADERS = {
     f"{category_label} 태그(줄바꿈 구분)": category_key
@@ -175,7 +176,14 @@ def _excel_record(row: dict[str, Any]) -> dict[str, Any]:
     analysis_data = analysis.model_dump(mode="json")
     for header, field in ANALYSIS_HEADERS.items():
         value = analysis_data[field]
-        record[header] = "\n".join(value) if isinstance(value, list) else value
+        if isinstance(value, dict):
+            record[header] = json.dumps(value, ensure_ascii=False) if value else ""
+        elif isinstance(value, list):
+            record[header] = "\n".join(value)
+        elif value is None:
+            record[header] = ""
+        else:
+            record[header] = value
     tag_data = analysis.aesthetic_tags.model_dump(mode="python")
     for header, category_key in AESTHETIC_TAG_HEADERS.items():
         record[header] = "\n".join(tag_data[category_key])
@@ -215,6 +223,7 @@ def _format_workbook(path: Path, row_count: int) -> None:
         "촬영 기술 점수": 15,
         "최종 점수": 12,
         "피규어 유형": 18,
+        "워터마크 촬영 정보(JSON)": 32,
         STATUS_HEADER: 14,
         USER_NOTES_HEADER: 36,
     }
@@ -401,6 +410,15 @@ def _parse_analysis_record(record: pd.Series, row_number: int) -> PhotoAnalysis:
         elif header in LIST_HEADERS:
             text = _required_text(value, header, row_number)
             payload[field] = [line.strip() for line in text.splitlines() if line.strip()]
+        elif field == "detected_camera_settings":
+            if _is_blank(value) or not str(value).strip():
+                payload[field] = None
+            else:
+                try:
+                    parsed_json = json.loads(str(value).strip())
+                    payload[field] = parsed_json if isinstance(parsed_json, dict) else None
+                except Exception:
+                    payload[field] = None
         else:
             payload[field] = _required_text(value, header, row_number)
 

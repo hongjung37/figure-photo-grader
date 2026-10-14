@@ -94,6 +94,14 @@ class PhotoHtmlReportTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 save_html_report(photo, analysis, 1, "test-model", Path(temporary_directory) / "result.txt")
 
+    def test_report_renders_watermark_settings_when_present(self) -> None:
+        photo, analysis = self._sample()
+        analysis.detected_camera_settings = {"Camera": "SONY A7M4", "FNumber": "F/1.4"}
+        report = render_html_report(photo, analysis, record_id=19, model="test-model")
+        self.assertIn("사진 내 워터마크 감지", report)
+        self.assertIn("SONY A7M4", report)
+        self.assertIn("F/1.4", report)
+
 
 if __name__ == "__main__":
     unittest.main()

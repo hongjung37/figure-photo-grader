@@ -68,6 +68,13 @@ def render_html_report(
     final_score = float(analysis.final_score)
     final_grade = escape(get_score_grade(final_score))
     category_label = escape(getattr(analysis, 'figure_category', '일반 피규어 촬영'))
+
+    watermark_badge = ""
+    detected_settings = getattr(analysis, "detected_camera_settings", None)
+    if detected_settings and isinstance(detected_settings, dict):
+        sp_text = " · ".join(f"{v}" for v in detected_settings.values() if v)
+        if sp_text:
+            watermark_badge = f'<div style="margin-top:8px;font-size:0.82rem;color:#4338ca;background:#eef2ff;padding:4px 10px;border-radius:6px;display:inline-block"><b>🔍 사진 내 워터마크 감지:</b> {escape(sp_text)}</div>'
     return f"""<!doctype html>
 <html lang="ko">
 <head>
@@ -153,7 +160,7 @@ footer {{ margin-top:24px; color:var(--muted); font-size:.8rem; text-align:cente
   </header>
 
   <section class="section content-grid" aria-label="사진과 종합 평가">
-    <div class="panel photo-panel"><img src="{image_source}" alt="분석한 사진 미리보기"><div class="photo-caption">보고서에 삽입된 미리보기는 EXIF 민감 정보를 제거한 분석용 이미지입니다.</div></div>
+    <div class="panel photo-panel"><img src="{image_source}" alt="분석한 사진 미리보기"><div class="photo-caption">보고서에 삽입된 미리보기는 EXIF 민감 정보를 제거한 분석용 이미지입니다.{watermark_badge}</div></div>
     <div>
       <div class="section-title"><h2>전체 평가</h2></div>
       <article class="panel reason"><strong>한줄 총평</strong><p>{escape(analysis.final_reason)}</p></article>

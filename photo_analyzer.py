@@ -106,6 +106,10 @@ class PhotoAnalysis(BaseModel):
         default="일반 피규어 촬영",
         description="피규어 사진 하위 유형: '접사/디테일', '일상/야외 스냅', '스튜디오 연출/디오라마', '일반 피규어 촬영' 중 택1",
     )
+    detected_camera_settings: dict[str, str] | None = Field(
+        default=None,
+        description="사진 하단 프레임이나 워터마크에 인쇄된 시각적 촬영 설정(카메라, 조리개, 셔터, ISO, 렌즈 등) 추출 결과. 없거나 불확실하면 null",
+    )
     aesthetic_tags: AestheticTags = Field(
         default_factory=AestheticTags.empty,
         description="시각적 근거에 기반한 범주별 미학 태그",
@@ -413,6 +417,14 @@ figure_category 값에 반드시 '{cat_info['label']}'을 입력하고, 아래 �
 {tag_taxonomy}
 
 모든 점수는 0.0~10.0 범위의 숫자로 작성하세요. 최종 점수는 네 항목을 기계적으로 단순 산술평균하지 말고 전체 인상과 완성도를 위 점수 기준에 맞춰 반영하세요. EXIF가 없거나 불완전하면 추정하지 말고 이미지에서 확인되는 내용만 평가하세요. 답변의 텍스트 값은 한국어로 작성하세요.
+
+[시각적 워터마크/하단 프레임 촬영 설정 감지 지침]
+- WebP 변환 등으로 인해 파일 자체의 EXIF가 비어있더라도, 사진 하단 테두리/여백/워터마크에 카메라 모델명 및 촬영 파라미터(조리개 F값, 셔터스피드, ISO, 초점거리, 렌즈명 등)가 시각적으로 인쇄되어 있는 경우가 있습니다.
+- 만약 해당 텍스트가 사진 내에 명백하게 시각적으로 존재한다면:
+  1. 이를 촬영 기술(technique_notes) 평가의 객관적 근거로 참고하세요.
+  2. detected_camera_settings 필드에 감지된 설정들을 키-값 객체(예: {{"Camera": "SONY A7M4", "Lens": "FE 50mm F1.2 GM", "FNumber": "F/1.4", "ExposureTime": "1/250s", "ISO": "100"}})로 추출하세요.
+  3. 주의: 작가 서명, SNS 아이디, 캐릭터명, 제작사 로고 등은 제외하고 순수 광학 촬영 정보만 추출하세요.
+- 만약 사진에 그러한 인쇄 텍스트가 전혀 없거나 불확실하면 절대로 지어내지 말고 detected_camera_settings를 반드시 null로 두세요.
 
 촬영 관련 안전 EXIF (GPS, 촬영 시각, 소유자/일련번호 등은 제외됨):
 {camera_settings}

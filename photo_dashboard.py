@@ -101,6 +101,7 @@ def get_all_analyses(db_path: Path) -> list[dict]:
                 "strengths": analysis_data.get("strengths", []),
                 "improvements": analysis_data.get("improvements", []),
                 "aesthetic_tags": tags_by_id.get(aid, analysis_data.get("aesthetic_tags", {})),
+                "detected_camera_settings": analysis_data.get("detected_camera_settings"),
                 "exif": exif_data,
             }
         )
@@ -417,7 +418,7 @@ function openDetailModal(id) {
       <div style="margin-top:14px;font-size:0.84rem;color:var(--muted)">
         <div><b>해상도:</b> ${item.width} × ${item.height}px (${item.format})</div>
         <div><b>분석 모델:</b> ${item.model} · <b>분석시각:</b> ${item.created_at}</div>
-        ${renderExifSummary(item.exif)}
+        ${renderExifSummary(item.exif, item.detected_camera_settings)}
       </div>
     </div>
     <div>
@@ -466,15 +467,32 @@ function openDetailModal(id) {
   modal.style.display = 'flex';
 }
 
-function renderExifSummary(exif) {
-  if (!exif || !Object.keys(exif).length) return '<div style="margin-top:4px;"><b>EXIF:</b> 안전 촬영 메타데이터 없음</div>';
+function renderExifSummary(exif, detectedSettings) {
   const parts = [];
-  if (exif.Make || exif.Model) parts.push(`${exif.Make || ''} ${exif.Model || ''}`.trim());
-  if (exif.FNumber) parts.push(`F/${exif.FNumber}`);
-  if (exif.ExposureTime) parts.push(`${exif.ExposureTime}s`);
-  if (exif.ISOSpeedRatings) parts.push(`ISO ${exif.ISOSpeedRatings}`);
-  if (exif.FocalLength) parts.push(`${exif.FocalLength}mm`);
-  return `<div style="margin-top:4px;"><b>촬영 설정:</b> ${parts.join(' · ')}</div>`;
+  if (exif && Object.keys(exif).length) {
+    if (exif.Make || exif.Model) parts.push(`${exif.Make || ''} ${exif.Model || ''}`.trim());
+    if (exif.FNumber) parts.push(`F/${exif.FNumber}`);
+    if (exif.ExposureTime) parts.push(`${exif.ExposureTime}s`);
+    if (exif.ISOSpeedRatings) parts.push(`ISO ${exif.ISOSpeedRatings}`);
+    if (exif.FocalLength) parts.push(`${exif.FocalLength}mm`);
+  }
+  let html = '';
+  if (parts.length) {
+    html += `<div style="margin-top:4px;"><b>촬영 설정(EXIF):</b> ${parts.join(' · ')}</div>`;
+  } else {
+    html += '<div style="margin-top:4px;color:var(--muted);"><b>EXIF:</b> 파일 메타데이터 없음</div>';
+  }
+
+  if (detectedSettings && typeof detectedSettings === 'object' && Object.keys(detectedSettings).length) {
+    const dParts = [];
+    for (const [k, v] of Object.entries(detectedSettings)) {
+      if (v) dParts.push(`${v}`);
+    }
+    if (dParts.length) {
+      html += `<div style="margin-top:6px;background:#eef2ff;color:#4338ca;padding:4px 10px;border-radius:6px;font-size:0.8rem;display:inline-block;border:1px solid #c7d2fe;"><b>🔍 워터마크 감지 스펙:</b> ${dParts.join(' · ')}</div>`;
+    }
+  }
+  return html;
 }
 
 function closeDetailModal() { document.getElementById('detail-modal').style.display = 'none'; }

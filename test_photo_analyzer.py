@@ -355,6 +355,25 @@ class PhotoAnalyzerTests(unittest.TestCase):
         self.assertEqual(analysis.figure_category, "일반 피규어 촬영")
         self.assertIn("figure_category", PhotoAnalysis.model_fields)
 
+    def test_photo_analysis_detected_camera_settings(self) -> None:
+        analysis = self._valid_analysis()
+        self.assertIsNone(analysis.detected_camera_settings)
+
+        analysis_with_settings = analysis.model_copy(
+            update={"detected_camera_settings": {"Camera": "SONY A7M4", "FNumber": "F/1.4", "ISO": "100"}}
+        )
+        self.assertEqual(analysis_with_settings.detected_camera_settings["Camera"], "SONY A7M4")
+        self.assertEqual(analysis_with_settings.detected_camera_settings["FNumber"], "F/1.4")
+
+    def test_prompt_includes_watermark_detection_guidelines(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            image_path = Path(temporary_directory) / "sample.jpg"
+            self._make_jpeg(image_path)
+            photo = prepare_photo(image_path)
+            prompt = photo_analyzer._build_prompt(photo)
+            self.assertIn("시각적 워터마크/하단 프레임 촬영 설정 감지 지침", prompt)
+            self.assertIn("detected_camera_settings", prompt)
+
 
 if __name__ == "__main__":
     unittest.main()
