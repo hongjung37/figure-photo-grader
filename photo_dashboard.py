@@ -701,9 +701,9 @@ h1 span { font-size: 0.75rem; background: var(--teal); color: white; padding: 3p
     
     <label style="font-weight:700;font-size:0.84rem;display:block;margin-bottom:6px;">분석 모델 티어 선택:</label>
     <select class="select-input" id="upload-tier" style="width:100%;margin-bottom:12px;">
-      <option value="lite">Flash-Lite 3.1 (초고속 스크리닝 / 기본)</option>
+      <option value="lite" selected>Flash-Lite 3.1 / 3.5 (초고속 스크리닝 / 기본값)</option>
       <option value="standard">Flash-Lite 3.5 (균형 잡힌 표준 화질 평가)</option>
-      <option value="pro">Flash 3.8 (고화질 심층 비평)</option>
+      <option value="pro">Flash 3.8 (고화질 심층 비평 / 과부하시 자동 전환)</option>
     </select>
 
     <label style="font-weight:700;font-size:0.84rem;display:block;margin-bottom:6px;">피규어 촬영 세부 유형:</label>

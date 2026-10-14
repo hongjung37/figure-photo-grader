@@ -32,10 +32,11 @@ from photo_tag_schema import (
     get_score_grade,
 )
 
+FALLBACK_MODEL = "gemini-3.5-flash-lite"
 MODEL_PRESETS = {
-    "lite": "gemini-3.1-flash-lite",      # 빠르고 가벼운 대량 분류/스크리닝 모드 (기본값)
+    "lite": "gemini-3.1-flash-lite",      # 빠르고 가벼운 대량 분류/스크리닝 모드 (과부하시 자동 폴백)
     "standard": "gemini-3.5-flash-lite",   # 균형 잡힌 표준 화질 평가 모드
-    "pro": "gemini-3.8-flash",            # 고화질 심층 비평 모드 (사용자 지정)
+    "pro": "gemini-3.8-flash",            # 고화질 심층 비평 모드 (서버 과부하시 자동 폴백)
 }
 DEFAULT_TIER = "lite"
 DEFAULT_MODEL = MODEL_PRESETS[DEFAULT_TIER]
@@ -531,14 +532,72 @@ def _format_gemini_error(model: str, exc: Exception) -> RuntimeError:
     if "429" in err_msg or "ResourceExhausted" in err_msg or "quota" in err_msg.lower():
         return RuntimeError(
             f"[{model}] 호출 실패: 프로젝트의 API 할당량(Quota/Rate Limit)을 초과했습니다. "
-            f"잠시 후 다시 시도하시거나 '--tier lite'(gemini-3.1-flash-lite)를 사용해 보세요. (상세: {err_msg})"
+            f"잠시 후 다시 시도하시거나 '--tier lite'(gemini-3.5-flash-lite)를 사용해 보세요. (상세: {err_msg})"
         )
     elif "404" in err_msg or "not found" in err_msg.lower() or "no longer available" in err_msg.lower():
         return RuntimeError(
             f"[{model}] 호출 실패: 해당 모델은 현재 프로젝트/API 키에서 지원되지 않거나 사용이 중단되었습니다. "
-            f"'--tier lite'(gemini-3.1-flash-lite) 또는 standard를 권장합니다. (상세: {err_msg})"
+            f"'--tier lite'(gemini-3.5-flash-lite) 또는 standard를 권장합니다. (상세: {err_msg})"
+        )
+    elif "503" in err_msg or "high demand" in err_msg.lower() or "unavailable" in err_msg.lower():
+        return RuntimeError(
+            f"[{model}] 호출 실패: Google Gemini API 서버가 일시적 트래픽 급증(503 과부하) 상태입니다. "
+            f"잠시 후 다시 시도하시거나 standard/lite 모드를 사용해 보세요. (상세: {err_msg})"
         )
     return RuntimeError(f"[{model}] Gemini API 호출 중 오류 발생: {err_msg}")
+
+
+def _call_gemini_interaction(
+    client: genai.Client,
+    model: str,
+    input_payload: list[dict[str, Any]],
+    schema: Any,
+    task_desc: str,
+) -> str:
+    """Execute Gemini interactions.create with automatic fallback to stable model on 503/429 spikes."""
+    active_model = model
+    max_retries = 3
+    backoff = 2.0
+    for attempt in range(1, max_retries + 1):
+        try:
+            interaction = client.interactions.create(
+                model=active_model,
+                input=input_payload,
+                response_format={
+                    "type": "text",
+                    "mime_type": "application/json",
+                    "schema": schema,
+                },
+                store=False,
+            )
+            output_text = interaction.output_text
+            if not output_text:
+                raise RuntimeError(f"Gemini가 {task_desc} JSON 결과를 반환하지 않았습니다.")
+            return output_text
+        except Exception as exc:
+            err_msg = str(exc)
+            is_transient = any(
+                code in err_msg
+                for code in ("503", "429", "high demand", "ResourceExhausted", "UNAVAILABLE", "service_unavailable")
+            )
+            if is_transient and active_model != FALLBACK_MODEL:
+                print(
+                    f"[{active_model}] 서버 과부하/일시 장애 감지 -> 대체 안정 모델({FALLBACK_MODEL})로 자동 전환합니다...",
+                    file=sys.stderr,
+                )
+                active_model = FALLBACK_MODEL
+                time.sleep(1.0)
+                continue
+            if is_transient and attempt < max_retries:
+                print(
+                    f"[재시도 {attempt}/{max_retries}] API 일시적 지연 ({active_model}). {backoff:.1f}초 후 재시도합니다...",
+                    file=sys.stderr,
+                )
+                time.sleep(backoff)
+                backoff *= 1.5
+            else:
+                raise _format_gemini_error(active_model, exc) from exc
+    raise RuntimeError(f"{task_desc} 처리 중 알 수 없는 오류로 완료하지 못했습니다.")
 
 
 def analyze_with_gemini(photo: PreparedPhoto, model: str = DEFAULT_MODEL, category_hint: str | None = None) -> PhotoAnalysis:
@@ -548,44 +607,22 @@ def analyze_with_gemini(photo: PreparedPhoto, model: str = DEFAULT_MODEL, catego
         raise RuntimeError("GEMINI_API_KEY를 .env 파일 또는 환경변수에 설정해 주세요.")
 
     client = genai.Client(api_key=api_key)
-    max_retries = 5
-    backoff = 3.0
-    for attempt in range(1, max_retries + 1):
-        try:
-            interaction = client.interactions.create(
-                model=model,
-                input=[
-                    {"type": "text", "text": _build_prompt(photo, category_hint=category_hint)},
-                    {
-                        "type": "image",
-                        "data": base64.b64encode(photo.upload_bytes).decode("ascii"),
-                        "mime_type": photo.upload_mime_type,
-                    },
-                ],
-                response_format={
-                    "type": "text",
-                    "mime_type": "application/json",
-                    "schema": PhotoAnalysis.model_json_schema(),
-                },
-                # Do not persist the Interaction object server-side.
-                store=False,
-            )
-            output_text = interaction.output_text
-            if not output_text:
-                raise RuntimeError("Gemini가 JSON 분석 결과를 반환하지 않았습니다.")
-            return PhotoAnalysis.model_validate_json(output_text)
-        except Exception as exc:
-            err_msg = str(exc)
-            is_transient = any(
-                code in err_msg
-                for code in ("503", "429", "high demand", "ResourceExhausted", "UNAVAILABLE", "service_unavailable")
-            )
-            if is_transient and attempt < max_retries:
-                print(f"[재시도 {attempt}/{max_retries}] API 일시적 지연/오류 발생 ({model}). {backoff:.1f}초 후 재시도합니다...", file=sys.stderr)
-                time.sleep(backoff)
-                backoff *= 2.0
-            else:
-                raise _format_gemini_error(model, exc) from exc
+    input_payload = [
+        {"type": "text", "text": _build_prompt(photo, category_hint=category_hint)},
+        {
+            "type": "image",
+            "data": base64.b64encode(photo.upload_bytes).decode("ascii"),
+            "mime_type": photo.upload_mime_type,
+        },
+    ]
+    output_text = _call_gemini_interaction(
+        client=client,
+        model=model,
+        input_payload=input_payload,
+        schema=PhotoAnalysis.model_json_schema(),
+        task_desc="사진 분석",
+    )
+    return PhotoAnalysis.model_validate_json(output_text)
 
 
 def generate_lightroom_advice(photo: PreparedPhoto, model: str = DEFAULT_MODEL) -> LightroomAdvice:
@@ -617,43 +654,22 @@ Lightroom 기본 현상(Basic Tone) 슬라이더 추천 수치와 세부 리터�
 출력은 반드시 지정된 JSON 스키마를 준수하고 한국어로 작성하세요."""
 
     client = genai.Client(api_key=api_key)
-    max_retries = 5
-    backoff = 3.0
-    for attempt in range(1, max_retries + 1):
-        try:
-            interaction = client.interactions.create(
-                model=model,
-                input=[
-                    {"type": "text", "text": prompt},
-                    {
-                        "type": "image",
-                        "data": base64.b64encode(photo.upload_bytes).decode("ascii"),
-                        "mime_type": photo.upload_mime_type,
-                    },
-                ],
-                response_format={
-                    "type": "text",
-                    "mime_type": "application/json",
-                    "schema": LightroomAdvice.model_json_schema(),
-                },
-                store=False,
-            )
-            output_text = interaction.output_text
-            if not output_text:
-                raise RuntimeError("Gemini가 Lightroom 보정 제안 JSON을 반환하지 않았습니다.")
-            return LightroomAdvice.model_validate_json(output_text)
-        except Exception as exc:
-            err_msg = str(exc)
-            is_transient = any(
-                code in err_msg
-                for code in ("503", "429", "high demand", "ResourceExhausted", "UNAVAILABLE", "service_unavailable")
-            )
-            if is_transient and attempt < max_retries:
-                print(f"[재시도 {attempt}/{max_retries}] API 일시적 지연/오류 발생 ({model}). {backoff:.1f}초 후 재시도합니다...", file=sys.stderr)
-                time.sleep(backoff)
-                backoff *= 2.0
-            else:
-                raise _format_gemini_error(model, exc) from exc
+    input_payload = [
+        {"type": "text", "text": prompt},
+        {
+            "type": "image",
+            "data": base64.b64encode(photo.upload_bytes).decode("ascii"),
+            "mime_type": photo.upload_mime_type,
+        },
+    ]
+    output_text = _call_gemini_interaction(
+        client=client,
+        model=model,
+        input_payload=input_payload,
+        schema=LightroomAdvice.model_json_schema(),
+        task_desc="Lightroom 보정 제안",
+    )
+    return LightroomAdvice.model_validate_json(output_text)
 
 
 def generate_sns_advice(photo: PreparedPhoto, model: str = DEFAULT_MODEL) -> SNSAdvice:
@@ -689,43 +705,22 @@ def generate_sns_advice(photo: PreparedPhoto, model: str = DEFAULT_MODEL) -> SNS
 """
 
     client = genai.Client(api_key=api_key)
-    max_retries = 5
-    backoff = 3.0
-    for attempt in range(1, max_retries + 1):
-        try:
-            interaction = client.interactions.create(
-                model=model,
-                input=[
-                    {"type": "text", "text": prompt},
-                    {
-                        "type": "image",
-                        "data": base64.b64encode(photo.upload_bytes).decode("ascii"),
-                        "mime_type": photo.upload_mime_type,
-                    },
-                ],
-                response_format={
-                    "type": "text",
-                    "mime_type": "application/json",
-                    "schema": SNSAdvice.model_json_schema(),
-                },
-                store=False,
-            )
-            output_text = interaction.output_text
-            if not output_text:
-                raise RuntimeError("Gemini가 SNS 크롭 및 캡션 제안 JSON을 반환하지 않았습니다.")
-            return SNSAdvice.model_validate_json(output_text)
-        except Exception as exc:
-            err_msg = str(exc)
-            is_transient = any(
-                code in err_msg
-                for code in ("503", "429", "high demand", "ResourceExhausted", "UNAVAILABLE", "service_unavailable")
-            )
-            if is_transient and attempt < max_retries:
-                print(f"[재시도 {attempt}/{max_retries}] API 일시적 지연/오류 발생 ({model}). {backoff:.1f}초 후 재시도합니다...", file=sys.stderr)
-                time.sleep(backoff)
-                backoff *= 2.0
-            else:
-                raise _format_gemini_error(model, exc) from exc
+    input_payload = [
+        {"type": "text", "text": prompt},
+        {
+            "type": "image",
+            "data": base64.b64encode(photo.upload_bytes).decode("ascii"),
+            "mime_type": photo.upload_mime_type,
+        },
+    ]
+    output_text = _call_gemini_interaction(
+        client=client,
+        model=model,
+        input_payload=input_payload,
+        schema=SNSAdvice.model_json_schema(),
+        task_desc="SNS 크롭 및 캡션 제안",
+    )
+    return SNSAdvice.model_validate_json(output_text)
 
 
 SNS_CROP_RATIO_CONFIGS: dict[str, dict[str, Any]] = {
@@ -800,43 +795,22 @@ def generate_single_sns_crop(photo: PreparedPhoto, ratio_key: str, model: str = 
 """
 
     client = genai.Client(api_key=api_key)
-    max_retries = 5
-    backoff = 3.0
-    for attempt in range(1, max_retries + 1):
-        try:
-            interaction = client.interactions.create(
-                model=model,
-                input=[
-                    {"type": "text", "text": prompt},
-                    {
-                        "type": "image",
-                        "data": base64.b64encode(photo.upload_bytes).decode("ascii"),
-                        "mime_type": photo.upload_mime_type,
-                    },
-                ],
-                response_format={
-                    "type": "text",
-                    "mime_type": "application/json",
-                    "schema": CropBox.model_json_schema(),
-                },
-                store=False,
-            )
-            output_text = interaction.output_text
-            if not output_text:
-                raise RuntimeError(f"Gemini가 {cfg['name']} 크롭 제안 JSON을 반환하지 않았습니다.")
-            return CropBox.model_validate_json(output_text)
-        except Exception as exc:
-            err_msg = str(exc)
-            is_transient = any(
-                code in err_msg
-                for code in ("503", "429", "high demand", "ResourceExhausted", "UNAVAILABLE", "service_unavailable")
-            )
-            if is_transient and attempt < max_retries:
-                print(f"[재시도 {attempt}/{max_retries}] API 일시적 지연/오류 발생 ({model}). {backoff:.1f}초 후 재시도합니다...", file=sys.stderr)
-                time.sleep(backoff)
-                backoff *= 2.0
-            else:
-                raise _format_gemini_error(model, exc) from exc
+    input_payload = [
+        {"type": "text", "text": prompt},
+        {
+            "type": "image",
+            "data": base64.b64encode(photo.upload_bytes).decode("ascii"),
+            "mime_type": photo.upload_mime_type,
+        },
+    ]
+    output_text = _call_gemini_interaction(
+        client=client,
+        model=model,
+        input_payload=input_payload,
+        schema=CropBox.model_json_schema(),
+        task_desc=f"{cfg['name']} 크롭 제안",
+    )
+    return CropBox.model_validate_json(output_text)
 
 
 def generate_sns_caption_and_tags(photo: PreparedPhoto, model: str = DEFAULT_MODEL) -> SNSCaptionAndTags:
@@ -856,43 +830,22 @@ SNS에 바로 복사해 올릴 수 있는 세련된 한국어 감성 캡션과 �
 """
 
     client = genai.Client(api_key=api_key)
-    max_retries = 5
-    backoff = 3.0
-    for attempt in range(1, max_retries + 1):
-        try:
-            interaction = client.interactions.create(
-                model=model,
-                input=[
-                    {"type": "text", "text": prompt},
-                    {
-                        "type": "image",
-                        "data": base64.b64encode(photo.upload_bytes).decode("ascii"),
-                        "mime_type": photo.upload_mime_type,
-                    },
-                ],
-                response_format={
-                    "type": "text",
-                    "mime_type": "application/json",
-                    "schema": SNSCaptionAndTags.model_json_schema(),
-                },
-                store=False,
-            )
-            output_text = interaction.output_text
-            if not output_text:
-                raise RuntimeError("Gemini가 SNS 캡션 및 해시태그 JSON을 반환하지 않았습니다.")
-            return SNSCaptionAndTags.model_validate_json(output_text)
-        except Exception as exc:
-            err_msg = str(exc)
-            is_transient = any(
-                code in err_msg
-                for code in ("503", "429", "high demand", "ResourceExhausted", "UNAVAILABLE", "service_unavailable")
-            )
-            if is_transient and attempt < max_retries:
-                print(f"[재시도 {attempt}/{max_retries}] API 일시적 지연/오류 발생 ({model}). {backoff:.1f}초 후 재시도합니다...", file=sys.stderr)
-                time.sleep(backoff)
-                backoff *= 2.0
-            else:
-                raise _format_gemini_error(model, exc) from exc
+    input_payload = [
+        {"type": "text", "text": prompt},
+        {
+            "type": "image",
+            "data": base64.b64encode(photo.upload_bytes).decode("ascii"),
+            "mime_type": photo.upload_mime_type,
+        },
+    ]
+    output_text = _call_gemini_interaction(
+        client=client,
+        model=model,
+        input_payload=input_payload,
+        schema=SNSCaptionAndTags.model_json_schema(),
+        task_desc="SNS 캡션 및 해시태그",
+    )
+    return SNSCaptionAndTags.model_validate_json(output_text)
 
 
 
