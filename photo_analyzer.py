@@ -8,6 +8,7 @@ import os
 import re
 import sqlite3
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import closing
@@ -566,6 +567,134 @@ def _format_gemini_error(model: str, exc: Exception) -> RuntimeError:
     return RuntimeError(f"[{model}] Gemini API 호출 중 오류 발생: {err_msg}")
 
 
+_CLIENT_LOCK = threading.Lock()
+_CLIENT_CACHE: dict[str, Any] = {}
+# Cap concurrent Gemini requests so parallel uploads/batches don't burn the rate limit.
+MAX_CONCURRENT_GEMINI_CALLS = 3
+_GEMINI_SEMAPHORE = threading.BoundedSemaphore(MAX_CONCURRENT_GEMINI_CALLS)
+_USAGE_LOG_DB: Path | None = None
+
+
+def _get_client(api_key: str) -> genai.Client:
+    """Return a process-wide genai client (one per API key) instead of rebuilding per call."""
+    with _CLIENT_LOCK:
+        client = _CLIENT_CACHE.get(api_key)
+        if client is None:
+            client = genai.Client(api_key=api_key)
+            _CLIENT_CACHE[api_key] = client
+        return client
+
+
+def set_usage_log_db(db_path: str | Path | None) -> None:
+    """Enable API usage logging into the given SQLite DB (None disables it)."""
+    global _USAGE_LOG_DB
+    _USAGE_LOG_DB = Path(db_path) if db_path else None
+
+
+def _log_api_usage(
+    task: str,
+    requested_model: str,
+    used_model: str,
+    attempts: int,
+    duration_ms: int,
+    input_tokens: int | None,
+    output_tokens: int | None,
+    success: bool,
+    error: str | None,
+) -> None:
+    """Best-effort usage record; logging failures must never break an analysis."""
+    db_path = _USAGE_LOG_DB
+    if db_path is None:
+        return
+    try:
+        with closing(sqlite3.connect(db_path, timeout=10)) as connection, connection:
+            connection.execute(
+                """CREATE TABLE IF NOT EXISTS api_usage_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_at TEXT NOT NULL,
+                    task TEXT NOT NULL,
+                    requested_model TEXT NOT NULL,
+                    used_model TEXT NOT NULL,
+                    fallback INTEGER NOT NULL,
+                    attempts INTEGER NOT NULL,
+                    duration_ms INTEGER NOT NULL,
+                    input_tokens INTEGER,
+                    output_tokens INTEGER,
+                    success INTEGER NOT NULL,
+                    error TEXT
+                )"""
+            )
+            connection.execute(
+                """INSERT INTO api_usage_log (
+                    created_at, task, requested_model, used_model, fallback, attempts,
+                    duration_ms, input_tokens, output_tokens, success, error
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                    task,
+                    requested_model,
+                    used_model,
+                    1 if used_model != requested_model else 0,
+                    attempts,
+                    duration_ms,
+                    input_tokens,
+                    output_tokens,
+                    1 if success else 0,
+                    (error or "")[:500] or None,
+                ),
+            )
+    except Exception as log_exc:  # noqa: BLE001
+        print(f"[api_usage_log] 기록 실패: {log_exc}", file=sys.stderr)
+
+
+def get_usage_stats(db_path: str | Path) -> dict[str, Any]:
+    """Aggregate api_usage_log by task for the dashboard."""
+    path = Path(db_path)
+    empty: dict[str, Any] = {"total_calls": 0, "by_task": [], "recent": []}
+    if not path.is_file():
+        return empty
+    with closing(sqlite3.connect(path)) as connection:
+        connection.row_factory = sqlite3.Row
+        exists = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='api_usage_log'"
+        ).fetchone()
+        if not exists:
+            return empty
+        by_task = [
+            dict(r)
+            for r in connection.execute(
+                """SELECT task,
+                          COUNT(*) AS calls,
+                          SUM(success) AS successes,
+                          SUM(fallback) AS fallbacks,
+                          SUM(attempts - 1) AS retries,
+                          COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                          COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                          CAST(AVG(duration_ms) AS INTEGER) AS avg_ms
+                   FROM api_usage_log GROUP BY task ORDER BY calls DESC"""
+            ).fetchall()
+        ]
+        recent = [
+            dict(r)
+            for r in connection.execute(
+                """SELECT created_at, task, used_model, fallback, attempts, duration_ms,
+                          input_tokens, output_tokens, success, error
+                   FROM api_usage_log ORDER BY id DESC LIMIT 30"""
+            ).fetchall()
+        ]
+        return {"total_calls": sum(t["calls"] for t in by_task), "by_task": by_task, "recent": recent}
+
+
+def _extract_usage(interaction: Any) -> tuple[int | None, int | None]:
+    usage = getattr(interaction, "usage", None)
+    if usage is None:
+        return None, None
+    return (
+        getattr(usage, "total_input_tokens", None),
+        getattr(usage, "total_output_tokens", None),
+    )
+
+
 def _call_gemini_interaction(
     client: genai.Client,
     model: str,
@@ -573,25 +702,38 @@ def _call_gemini_interaction(
     schema: Any,
     task_desc: str,
 ) -> str:
-    """Execute Gemini interactions.create with automatic fallback to stable model on 503/429 spikes."""
+    """Execute Gemini interactions.create with automatic fallback to stable model on 503/429 spikes.
+
+    Calls are concurrency-limited and each call (success or failure) is logged to api_usage_log.
+    """
     active_model = model
     max_retries = 3
     backoff = 2.0
+    started = time.monotonic()
+    attempts = 0
+
+    def _elapsed_ms() -> int:
+        return int((time.monotonic() - started) * 1000)
+
     for attempt in range(1, max_retries + 1):
+        attempts += 1
         try:
-            interaction = client.interactions.create(
-                model=active_model,
-                input=input_payload,
-                response_format={
-                    "type": "text",
-                    "mime_type": "application/json",
-                    "schema": schema,
-                },
-                store=False,
-            )
+            with _GEMINI_SEMAPHORE:
+                interaction = client.interactions.create(
+                    model=active_model,
+                    input=input_payload,
+                    response_format={
+                        "type": "text",
+                        "mime_type": "application/json",
+                        "schema": schema,
+                    },
+                    store=False,
+                )
             output_text = interaction.output_text
             if not output_text:
                 raise RuntimeError(f"Gemini가 {task_desc} JSON 결과를 반환하지 않았습니다.")
+            in_tok, out_tok = _extract_usage(interaction)
+            _log_api_usage(task_desc, model, active_model, attempts, _elapsed_ms(), in_tok, out_tok, True, None)
             return output_text
         except Exception as exc:
             err_msg = str(exc)
@@ -615,7 +757,9 @@ def _call_gemini_interaction(
                 time.sleep(backoff)
                 backoff *= 1.5
             else:
+                _log_api_usage(task_desc, model, active_model, attempts, _elapsed_ms(), None, None, False, err_msg)
                 raise _format_gemini_error(active_model, exc) from exc
+    _log_api_usage(task_desc, model, active_model, attempts, _elapsed_ms(), None, None, False, "retries exhausted")
     raise RuntimeError(f"{task_desc} 처리 중 알 수 없는 오류로 완료하지 못했습니다.")
 
 
@@ -625,7 +769,7 @@ def analyze_with_gemini(photo: PreparedPhoto, model: str = DEFAULT_MODEL, catego
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY를 .env 파일 또는 환경변수에 설정해 주세요.")
 
-    client = genai.Client(api_key=api_key)
+    client = _get_client(api_key)
     input_payload = [
         {"type": "text", "text": _build_prompt(photo, category_hint=category_hint)},
         {
@@ -672,7 +816,7 @@ Lightroom 기본 현상(Basic Tone) 슬라이더 추천 수치와 세부 리터�
 
 출력은 반드시 지정된 JSON 스키마를 준수하고 한국어로 작성하세요."""
 
-    client = genai.Client(api_key=api_key)
+    client = _get_client(api_key)
     input_payload = [
         {"type": "text", "text": prompt},
         {
@@ -728,7 +872,7 @@ def generate_sns_advice(photo: PreparedPhoto, model: str = DEFAULT_MODEL) -> SNS
 - hashtags: 한국어/일본어/영어 피규어 특화 해시태그 8~12개 (예: #피규어, #피규어사진, #figurephotography, #toyphotography, #フィギュア 등).
 """
 
-    client = genai.Client(api_key=api_key)
+    client = _get_client(api_key)
     input_payload = [
         {"type": "text", "text": prompt},
         {
@@ -822,7 +966,7 @@ def generate_single_sns_crop(photo: PreparedPhoto, ratio_key: str, model: str = 
 - composition_tip: 이 비율에서 왜 이 위치로 잘라야 피규어가 가장 돋보이는지 미학적 의도를 친절히 1~2줄로 설명하세요.
 """
 
-    client = genai.Client(api_key=api_key)
+    client = _get_client(api_key)
     input_payload = [
         {"type": "text", "text": prompt},
         {
@@ -857,7 +1001,7 @@ SNS에 바로 복사해 올릴 수 있는 세련된 한국어 감성 캡션과 �
 - hashtags: 한국어/일본어/영어 피규어 특화 해시태그 8~12개 (예: #피규어, #피규어사진, #figurephotography, #toyphotography, #フィギュア 등).
 """
 
-    client = genai.Client(api_key=api_key)
+    client = _get_client(api_key)
     input_payload = [
         {"type": "text", "text": prompt},
         {
@@ -1302,6 +1446,7 @@ def main(argv: list[str] | None = None) -> int:
     target_path = args.target.expanduser().resolve()
     model = args.model if args.model else MODEL_PRESETS[args.tier]
     db_path = args.db.expanduser().resolve()
+    set_usage_log_db(db_path)
 
     if target_path.is_dir():
         # Batch folder mode

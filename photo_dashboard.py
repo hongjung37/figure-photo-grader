@@ -33,13 +33,35 @@ from photo_analyzer import (
     generate_single_sns_crop,
     generate_sns_advice,
     generate_sns_caption_and_tags,
+    get_usage_stats,
     hamming_distance,
     prepare_photo,
     save_analysis,
+    set_usage_log_db,
 )
 from photo_tag_schema import AESTHETIC_TAG_CATEGORIES, get_score_grade
 
 PORT = 8080
+
+
+def find_existing_analysis(db_path: Path, sha256: str) -> tuple[int, dict] | None:
+    """Return (record_id, analysis dict) of the latest stored analysis with the same file hash."""
+    if not db_path.is_file():
+        return None
+    with closing(sqlite3.connect(db_path)) as conn:
+        try:
+            row = conn.execute(
+                "SELECT id, analysis_json FROM photo_analyses WHERE sha256 = ? ORDER BY id DESC LIMIT 1",
+                (sha256,),
+            ).fetchone()
+        except sqlite3.OperationalError:
+            return None
+    if not row:
+        return None
+    try:
+        return int(row[0]), json.loads(row[1])
+    except (TypeError, ValueError):
+        return None
 
 
 def ensure_db_columns(db_path: Path) -> None:
@@ -2481,7 +2503,8 @@ async function processBatchUpload(files) {
       const result = await res.json();
       if (result.success) {
         successCount++;
-        status.textContent = `✓ [${currentNum}/${total}] ${file.name} 완료 (${result.analysis.final_score.toFixed(1)}점 - ${result.analysis.figure_category})`;
+        const dupNote = result.duplicate ? ' (이미 분석된 사진 - API 호출 생략)' : '';
+        status.textContent = `✓ [${currentNum}/${total}] ${file.name} 완료${dupNote} (${result.analysis.final_score.toFixed(1)}점 - ${result.analysis.figure_category})`;
         status.style.color = 'var(--teal)';
       } else {
         failCount++;
@@ -2539,6 +2562,14 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             except Exception:
                 burst_dist = 15
             data = get_all_analyses(self.db_path, max_hamming_dist=burst_dist)
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
+            return
+
+        if parsed.path == "/api/usage-stats":
+            data = get_usage_stats(self.db_path)
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.end_headers()
@@ -2657,10 +2688,18 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                         thumbnail_bytes=photo_obj.thumbnail_bytes,
                         dhash=photo_obj.dhash,
                     )
-                    model = MODEL_PRESETS.get(tier, MODEL_PRESETS["lite"])
-                    category_hint = category_param if category_param != "auto" else None
-                    analysis = analyze_with_gemini(prepared, model=model, category_hint=category_hint)
-                    record_id = save_analysis(self.db_path, prepared, model, analysis)
+                    force_reanalyze = parse_qs(parsed.query).get("force", ["false"])[0].lower() in ("1", "true", "yes")
+                    existing = None if force_reanalyze else find_existing_analysis(self.db_path, prepared.sha256)
+                    if existing is not None:
+                        record_id, analysis_dict = existing
+                        duplicate = True
+                    else:
+                        model = MODEL_PRESETS.get(tier, MODEL_PRESETS["lite"])
+                        category_hint = category_param if category_param != "auto" else None
+                        analysis = analyze_with_gemini(prepared, model=model, category_hint=category_hint)
+                        record_id = save_analysis(self.db_path, prepared, model, analysis)
+                        analysis_dict = analysis.model_dump(mode="json")
+                        duplicate = False
                 finally:
                     tmp_path.unlink(missing_ok=True)
 
@@ -2670,7 +2709,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 res = {
                     "success": True,
                     "record_id": record_id,
-                    "analysis": analysis.model_dump(mode="json"),
+                    "analysis": analysis_dict,
+                    "duplicate": duplicate,
                 }
                 self.wfile.write(json.dumps(res, ensure_ascii=False).encode("utf-8"))
                 return
@@ -3079,6 +3119,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
 def run_dashboard(port: int = PORT, db_path: Path = DEFAULT_DB_PATH) -> None:
     DashboardRequestHandler.db_path = db_path.resolve()
+    set_usage_log_db(DashboardRequestHandler.db_path)
     server = ThreadingHTTPServer(("0.0.0.0", port), DashboardRequestHandler)
     print(f"============================================================")
     print(f" 피규어 포토 그레이더 Culling 대시보드 서버가 시작되었습니다.")

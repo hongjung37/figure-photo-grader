@@ -813,5 +813,68 @@ class PhotoAnalyzerTests(unittest.TestCase):
         self.assertEqual(data["crop169"]["sh"], 2628)
 
 
+    def test_usage_logging_fallback_and_stats(self) -> None:
+        import photo_analyzer
+        from types import SimpleNamespace
+
+        class FakeInteractions:
+            def __init__(self) -> None:
+                self.models: list[str] = []
+
+            def create(self, model, **kwargs):
+                self.models.append(model)
+                if model != photo_analyzer.FALLBACK_MODEL:
+                    raise RuntimeError("503 UNAVAILABLE high demand")
+                return SimpleNamespace(
+                    output_text="{}",
+                    usage=SimpleNamespace(total_input_tokens=120, total_output_tokens=30),
+                )
+
+        fake = SimpleNamespace(interactions=FakeInteractions())
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            db_path = Path(temporary_directory) / "usage.sqlite3"
+            photo_analyzer.set_usage_log_db(db_path)
+            try:
+                out = photo_analyzer._call_gemini_interaction(
+                    client=fake, model="primary-model", input_payload=[], schema={}, task_desc="테스트 호출"
+                )
+            finally:
+                photo_analyzer.set_usage_log_db(None)
+            self.assertEqual(out, "{}")
+            stats = photo_analyzer.get_usage_stats(db_path)
+            self.assertEqual(stats["total_calls"], 1)
+            row = stats["by_task"][0]
+            self.assertEqual(row["task"], "테스트 호출")
+            self.assertEqual(row["fallbacks"], 1)
+            self.assertEqual(row["retries"], 1)
+            self.assertEqual(row["input_tokens"], 120)
+            self.assertEqual(row["output_tokens"], 30)
+
+    def test_get_client_is_reused_per_key(self) -> None:
+        import photo_analyzer
+
+        photo_analyzer._CLIENT_CACHE.clear()
+        c1 = photo_analyzer._get_client("test-key-a")
+        c2 = photo_analyzer._get_client("test-key-a")
+        c3 = photo_analyzer._get_client("test-key-b")
+        photo_analyzer._CLIENT_CACHE.clear()
+        self.assertIs(c1, c2)
+        self.assertIsNot(c1, c3)
+
+    def test_find_existing_analysis_by_sha256(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            db_path = Path(temporary_directory) / "dup.sqlite3"
+            self.assertIsNone(photo_dashboard.find_existing_analysis(db_path, "x"))
+            image_path = Path(temporary_directory) / "dup.jpg"
+            self._make_jpeg(image_path)
+            photo = prepare_photo(image_path)
+            rec_id = save_analysis(db_path, photo, "test-model", self._valid_analysis())
+            found = photo_dashboard.find_existing_analysis(db_path, photo.sha256)
+            self.assertIsNotNone(found)
+            self.assertEqual(found[0], rec_id)
+            self.assertIn("final_score", found[1])
+            self.assertIsNone(photo_dashboard.find_existing_analysis(db_path, "missing"))
+
+
 if __name__ == "__main__":
     unittest.main()
