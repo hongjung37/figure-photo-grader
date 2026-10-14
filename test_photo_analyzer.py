@@ -397,6 +397,31 @@ class PhotoAnalyzerTests(unittest.TestCase):
             self.assertEqual(items[0]["final_score"], 7.8)
             self.assertEqual(items[0]["grade"], "우수")
 
+    def test_dashboard_delete_analysis_removes_record_and_tags(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            dir_path = Path(temporary_directory)
+            db_path = dir_path / "dash_delete_test.sqlite3"
+            image_path = dir_path / "sample.jpg"
+            self._make_jpeg(image_path)
+            photo = prepare_photo(image_path)
+            record_id = save_analysis(db_path, photo, "test-model", self._valid_analysis())
+
+            # Verify tag exists
+            with closing(sqlite3.connect(db_path)) as conn:
+                tag_count = conn.execute("SELECT COUNT(*) FROM photo_analysis_tags WHERE analysis_id = ?", (record_id,)).fetchone()[0]
+                self.assertGreater(tag_count, 0)
+
+            # Delete record
+            with closing(sqlite3.connect(db_path)) as conn, conn:
+                conn.execute("DELETE FROM photo_analysis_tags WHERE analysis_id = ?", (record_id,))
+                conn.execute("DELETE FROM photo_analyses WHERE id = ?", (record_id,))
+
+            items = photo_dashboard.get_all_analyses(db_path)
+            self.assertEqual(len(items), 0)
+            with closing(sqlite3.connect(db_path)) as conn:
+                tag_count = conn.execute("SELECT COUNT(*) FROM photo_analysis_tags WHERE analysis_id = ?", (record_id,)).fetchone()[0]
+                self.assertEqual(tag_count, 0)
+
 
     def test_figure_categories_defined(self) -> None:
         from photo_tag_schema import FIGURE_CATEGORIES

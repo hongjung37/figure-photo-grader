@@ -419,7 +419,10 @@ h1 span { font-size: 0.75rem; background: var(--teal); color: white; padding: 3p
 
 /* Gallery Grid */
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 20px; margin-top: 22px; }
-.card { background: var(--card); border: 1px solid var(--line); border-radius: 18px; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,0.04); transition: transform .15s, box-shadow .15s; display: flex; flex-direction: column; cursor: pointer; }
+.card { position: relative; background: var(--card); border: 1px solid var(--line); border-radius: 18px; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,0.04); transition: transform .15s, box-shadow .15s; display: flex; flex-direction: column; cursor: pointer; }
+.card-delete-btn { position: absolute; top: 10px; right: 10px; background: rgba(255, 255, 255, 0.92); border: 1px solid #fecaca; color: #dc2626; width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 0.9rem; cursor: pointer; opacity: 0; transition: opacity .15s, background .15s, transform .15s; z-index: 10; box-shadow: 0 2px 6px rgba(0,0,0,0.12); }
+.card:hover .card-delete-btn { opacity: 1; }
+.card-delete-btn:hover { background: #fee2e2; transform: scale(1.12); color: #b91c1c; }
 .card:hover { transform: translateY(-3px); box-shadow: 0 10px 28px rgba(0,0,0,0.08); border-color: #cbd5e1; }
 .card-thumb { width: 100%; height: 260px; object-fit: contain; background: #0f172a; display: block; }
 .card-body { padding: 18px; flex: 1; display: flex; flex-direction: column; }
@@ -847,6 +850,7 @@ function renderGallery() {
   }
   container.innerHTML = filtered.map(item => `
     <article class="card" onclick="openDetailModal(${item.id})">
+      <button class="card-delete-btn" title="이 분석 기록 삭제" onclick="event.stopPropagation(); deleteAnalysisRecord(${item.id})">🗑️</button>
       <img class="card-thumb" src="/api/image/${item.id}" alt="${item.filename}" loading="lazy">
       <div class="card-body">
         <div class="card-header">
@@ -991,9 +995,12 @@ function openDetailModal(id) {
         ${renderExifSummary(item.exif, item.detected_camera_settings)}
       </div>
 
-      <div style="display:flex;gap:8px;margin-top:14px;margin-bottom:12px;flex-wrap:wrap;">
-        <button class="filter-btn" style="background:#312e81;color:white;border-color:#312e81;padding:5px 12px;font-size:0.8rem;" onclick="document.getElementById('lr-advice-box-section').scrollIntoView({behavior:'smooth'})">🛠️ 라이트룸 보정값 바로가기</button>
-        <button class="filter-btn" style="background:#0284c7;color:white;border-color:#0284c7;padding:5px 12px;font-size:0.8rem;" onclick="document.getElementById('sns-advice-box-section').scrollIntoView({behavior:'smooth'})">📱 SNS 크롭 & 캡션 바로가기</button>
+      <div style="display:flex;gap:8px;margin-top:14px;margin-bottom:12px;flex-wrap:wrap;justify-content:space-between;align-items:center;">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="filter-btn" style="background:#312e81;color:white;border-color:#312e81;padding:5px 12px;font-size:0.8rem;" onclick="document.getElementById('lr-advice-box-section').scrollIntoView({behavior:'smooth'})">🛠️ 라이트룸 보정값 바로가기</button>
+          <button class="filter-btn" style="background:#0284c7;color:white;border-color:#0284c7;padding:5px 12px;font-size:0.8rem;" onclick="document.getElementById('sns-advice-box-section').scrollIntoView({behavior:'smooth'})">📱 SNS 크롭 & 캡션 바로가기</button>
+        </div>
+        <button class="filter-btn" style="background:#fee2e2;color:#b91c1c;border-color:#fca5a5;padding:5px 12px;font-size:0.8rem;font-weight:700;" onclick="deleteAnalysisRecord(${item.id})">🗑️ 이 평가 기록 삭제</button>
       </div>
 
       <!-- Adobe Lightroom Advice Box (사진 바로 아래 배치) -->
@@ -1726,6 +1733,36 @@ function navigateDetail(dir) {
   const nextIdx = idx + dir;
   if (nextIdx >= 0 && nextIdx < filtered.length) {
     openDetailModal(filtered[nextIdx].id);
+  }
+}
+
+async function deleteAnalysisRecord(id) {
+  const item = allData.find(d => d.id === id);
+  const name = item ? `"${item.filename}"` : `ID ${id}`;
+  if (!confirm(`${name} 사진의 분석 기록을 삭제하시겠습니까?\n이 사진의 분석 데이터는 DB에서 영구히 삭제됩니다.`)) {
+    return;
+  }
+  try {
+    const res = await fetch('/api/delete-analysis', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: id })
+    });
+    const result = await res.json();
+    if (result.success) {
+      if (currentDetailId === id) {
+        closeDetailModal();
+      }
+      allData = allData.filter(d => d.id !== id);
+      renderGallery();
+      updateStats();
+      renderCategoryFilters();
+      renderTagFilters();
+    } else {
+      alert(`삭제 실패: ${result.error || '알 수 없는 오류'}`);
+    }
+  } catch (err) {
+    alert(`삭제 통신 오류: ${err.message}`);
   }
 }
 
@@ -2653,6 +2690,36 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.end_headers()
                 self.wfile.write(json.dumps({"success": False, "error": str(exc)}).encode("utf-8"))
+                return
+
+        if parsed.path == "/api/delete-analysis":
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(content_length)
+                data = json.loads(body.decode("utf-8"))
+                record_ids = []
+                if "ids" in data:
+                    record_ids = [int(i) for i in data["ids"]]
+                elif "id" in data:
+                    record_ids = [int(data["id"])]
+                if not record_ids:
+                    raise ValueError("삭제할 기록 ID가 지정되지 않았습니다.")
+                ensure_db_columns(self.db_path)
+                with closing(sqlite3.connect(self.db_path)) as conn, conn:
+                    conn.execute("PRAGMA foreign_keys = ON")
+                    placeholders = ",".join("?" for _ in record_ids)
+                    conn.execute(f"DELETE FROM photo_analysis_tags WHERE analysis_id IN ({placeholders})", record_ids)
+                    conn.execute(f"DELETE FROM photo_analyses WHERE id IN ({placeholders})", record_ids)
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(json.dumps({"success": True, "deleted_ids": record_ids, "count": len(record_ids)}).encode("utf-8"))
+                return
+            except Exception as exc:
+                self.send_response(HTTPStatus.INTERNAL_SERVER_ERROR)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(json.dumps({"success": False, "error": str(exc)}, ensure_ascii=False).encode("utf-8"))
                 return
 
         if parsed.path == "/api/export-xmp":
