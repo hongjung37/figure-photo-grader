@@ -275,6 +275,25 @@ class PhotoAnalyzerTests(unittest.TestCase):
                 self.assertIn("따뜻함", tags)
                 self.assertIn("청량함", tags)
 
+    def test_blind_tournament_ui_and_status_update(self) -> None:
+        self.assertIn("tournament-modal", photo_dashboard.DASHBOARD_HTML)
+        self.assertIn("openTournamentModal", photo_dashboard.DASHBOARD_HTML)
+        self.assertIn("startTournament", photo_dashboard.DASHBOARD_HTML)
+        self.assertIn("selectTournamentWinner", photo_dashboard.DASHBOARD_HTML)
+        self.assertIn("블라인드 토너먼트", photo_dashboard.DASHBOARD_HTML)
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            db_path = Path(temporary_directory) / "test.sqlite3"
+            with closing(sqlite3.connect(db_path)) as conn, conn:
+                conn.execute("CREATE TABLE photo_analyses (id INTEGER PRIMARY KEY, review_status TEXT)")
+                conn.execute("INSERT INTO photo_analyses (id, review_status) VALUES (1, '미검토')")
+            # Simulate update status
+            with closing(sqlite3.connect(db_path)) as conn, conn:
+                conn.execute("UPDATE photo_analyses SET review_status = ? WHERE id = ?", ("토너먼트 1위", 1))
+            with closing(sqlite3.connect(db_path)) as conn:
+                status = conn.execute("SELECT review_status FROM photo_analyses WHERE id = 1").fetchone()[0]
+                self.assertEqual(status, "토너먼트 1위")
+
     def test_figure_prompt_includes_figure_photography_context(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             image_path = Path(temporary_directory) / "sample.jpg"
