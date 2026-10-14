@@ -212,9 +212,9 @@ h1 span { font-size: 0.75rem; background: var(--teal); color: white; padding: 3p
 
 /* Detail Modal */
 .modal-overlay { position: fixed; inset: 0; background: rgba(15,23,42,0.7); backdrop-filter: blur(4px); display: none; align-items: center; justify-content: center; z-index: 1000; padding: 20px; }
-.modal-content { background: white; border-radius: 24px; max-width: 1050px; width: 100%; max-height: 90vh; overflow-y: auto; padding: 32px; box-shadow: 0 25px 60px rgba(0,0,0,0.25); position: relative; }
+.modal-content { background: white; border-radius: 24px; max-width: 1240px; width: 100%; max-height: 90vh; overflow-y: auto; padding: 32px; box-shadow: 0 25px 60px rgba(0,0,0,0.25); position: relative; }
 .close-btn { position: absolute; top: 20px; right: 24px; font-size: 1.8rem; background: transparent; border: none; cursor: pointer; color: var(--muted); }
-.modal-grid { display: grid; grid-template-columns: 1.05fr 1fr; gap: 28px; }
+.modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; align-items: start; }
 .zoom-wrap { position: relative; overflow: hidden; border-radius: 16px; background: #0f172a; cursor: zoom-in; }
 .detail-img { width: 100%; max-height: 520px; object-fit: contain; display: block; transition: transform 0.15s ease-out; transform-origin: center center; }
 .detail-img.zoomed { transform: scale(2.4); cursor: zoom-out; }
@@ -229,6 +229,20 @@ h1 span { font-size: 0.75rem; background: var(--teal); color: white; padding: 3p
 .lr-metric { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px; text-align: center; }
 .lr-metric span { display: block; font-size: 0.72rem; color: var(--muted); margin-bottom: 2px; }
 .lr-metric strong { display: block; font-size: 0.95rem; color: #1e293b; font-weight: 700; }
+
+/* Score Summary Card & Bars */
+.score-summary-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 14px; padding: 16px 18px; margin-bottom: 16px; }
+.score-bars-list { display: flex; flex-direction: column; gap: 10px; }
+.score-bar-row { display: flex; flex-direction: column; gap: 4px; }
+.score-bar-label { display: flex; justify-content: space-between; font-size: 0.83rem; }
+.score-bar-label span { font-weight: 600; color: #334155; }
+.score-bar-label strong { font-weight: 800; font-size: 0.88rem; }
+.score-bar-track { background: #e2e8f0; height: 9px; border-radius: 999px; overflow: hidden; position: relative; }
+.score-bar-fill { height: 100%; border-radius: 999px; transition: width 0.35s ease; }
+.score-bar-comp { background: linear-gradient(90deg, #3b82f6, #60a5fa); }
+.score-bar-light { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+.score-bar-color { background: linear-gradient(90deg, #ec4899, #f472b6); }
+.score-bar-tech { background: linear-gradient(90deg, #10b981, #34d399); }
 
 /* Crop Overlay Box */
 .crop-box-overlay {
@@ -541,7 +555,45 @@ function openDetailModal(id) {
         <div><b>분석 모델:</b> ${item.model} · <b>분석시각:</b> ${item.created_at}</div>
         ${renderExifSummary(item.exif, item.detected_camera_settings)}
       </div>
+
+      <div style="display:flex;gap:8px;margin-top:14px;margin-bottom:12px;flex-wrap:wrap;">
+        <button class="filter-btn" style="background:#312e81;color:white;border-color:#312e81;padding:5px 12px;font-size:0.8rem;" onclick="document.getElementById('lr-advice-box-section').scrollIntoView({behavior:'smooth'})">🛠️ 라이트룸 보정값 바로가기</button>
+        <button class="filter-btn" style="background:#0284c7;color:white;border-color:#0284c7;padding:5px 12px;font-size:0.8rem;" onclick="document.getElementById('sns-advice-box-section').scrollIntoView({behavior:'smooth'})">📱 SNS 크롭 & 캡션 바로가기</button>
+      </div>
+
+      <!-- Adobe Lightroom Advice Box (사진 바로 아래 배치) -->
+      <div class="lr-advice-box" id="lr-advice-box-section" style="margin-top:12px;background:#f8fafc;border:1px solid #cbd5e1;border-radius:14px;padding:16px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+          <h3 style="margin:0;font-size:1.02rem;display:flex;align-items:center;gap:6px;">
+            <span style="background:#312e81;color:white;padding:2px 7px;border-radius:4px;font-size:0.78rem;">Lr</span>
+            Adobe Lightroom 추천 보정 수치
+          </h3>
+          <button class="filter-btn" style="background:#4f46e5;color:white;border-color:#4f46e5;" onclick="requestLrAdvice(${item.id}, this)">
+            ${item.lr_advice ? '🔄 보정 수치 다시 제안' : '🛠️ 라이트룸 보정 수치 제안 받기'}
+          </button>
+        </div>
+        <div id="lr-advice-content">
+          ${renderLrAdviceContent(item.lr_advice)}
+        </div>
+      </div>
+
+      <!-- SNS Crop & Caption Advice Box (사진 바로 아래 배치) -->
+      <div class="sns-advice-box" id="sns-advice-box-section" style="margin-top:16px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:14px;padding:16px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+          <h3 style="margin:0;font-size:1.02rem;display:flex;align-items:center;gap:6px;color:#0369a1;">
+            <span style="background:#0284c7;color:white;padding:2px 7px;border-radius:4px;font-size:0.78rem;">SNS</span>
+            인스타 · X(트위터) 규격 크롭 & 캡션 제안
+          </h3>
+          <button class="filter-btn" style="background:#0284c7;color:white;border-color:#0284c7;" onclick="requestSnsAdvice(${item.id}, this)">
+            ${item.sns_advice ? '🔄 크롭/캡션 다시 제안' : '📱 SNS 크롭 & 캡션 제안 받기'}
+          </button>
+        </div>
+        <div id="sns-advice-content">
+          ${renderSnsAdviceContent(item.sns_advice, item.id)}
+        </div>
+      </div>
     </div>
+
     <div>
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;">
         <div>
@@ -558,11 +610,55 @@ function openDetailModal(id) {
         <b>종합 총평:</b> ${item.final_reason}
       </div>
 
-      <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;">
-        <button class="filter-btn" style="background:#312e81;color:white;border-color:#312e81;padding:5px 12px;font-size:0.8rem;" onclick="document.getElementById('lr-advice-box-section').scrollIntoView({behavior:'smooth'})">🛠️ 라이트룸 보정값 바로가기</button>
-        <button class="filter-btn" style="background:#0284c7;color:white;border-color:#0284c7;padding:5px 12px;font-size:0.8rem;" onclick="document.getElementById('sns-advice-box-section').scrollIntoView({behavior:'smooth'})">📱 SNS 크롭 & 캡션 바로가기</button>
+      <!-- 세부 평가 요소 점수 요약 그래프 (우측 상단) -->
+      <div class="score-summary-card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <h3 style="margin:0;font-size:0.96rem;font-weight:800;color:var(--navy);display:flex;align-items:center;gap:6px;">
+            📊 세부 평가 요소 점수 요약
+          </h3>
+          <span style="font-size:0.75rem;color:var(--muted);font-weight:600;">10점 만점 기준</span>
+        </div>
+        <div class="score-bars-list">
+          <div class="score-bar-row">
+            <div class="score-bar-label">
+              <span>📐 구도 (Composition)</span>
+              <strong style="color:#2563eb;">${item.composition_score.toFixed(1)} <small style="color:var(--muted);font-weight:500;">/ 10</small></strong>
+            </div>
+            <div class="score-bar-track">
+              <div class="score-bar-fill score-bar-comp" style="width:${Math.min(100, Math.max(0, item.composition_score * 10))}%;"></div>
+            </div>
+          </div>
+          <div class="score-bar-row">
+            <div class="score-bar-label">
+              <span>💡 조명/노출 (Lighting)</span>
+              <strong style="color:#d97706;">${item.lighting_score.toFixed(1)} <small style="color:var(--muted);font-weight:500;">/ 10</small></strong>
+            </div>
+            <div class="score-bar-track">
+              <div class="score-bar-fill score-bar-light" style="width:${Math.min(100, Math.max(0, item.lighting_score * 10))}%;"></div>
+            </div>
+          </div>
+          <div class="score-bar-row">
+            <div class="score-bar-label">
+              <span>🎨 색감/톤 (Color)</span>
+              <strong style="color:#db2777;">${item.color_score.toFixed(1)} <small style="color:var(--muted);font-weight:500;">/ 10</small></strong>
+            </div>
+            <div class="score-bar-track">
+              <div class="score-bar-fill score-bar-color" style="width:${Math.min(100, Math.max(0, item.color_score * 10))}%;"></div>
+            </div>
+          </div>
+          <div class="score-bar-row">
+            <div class="score-bar-label">
+              <span>📷 촬영 기술 (Technique)</span>
+              <strong style="color:#059669;">${item.technique_score.toFixed(1)} <small style="color:var(--muted);font-weight:500;">/ 10</small></strong>
+            </div>
+            <div class="score-bar-track">
+              <div class="score-bar-fill score-bar-tech" style="width:${Math.min(100, Math.max(0, item.technique_score * 10))}%;"></div>
+            </div>
+          </div>
+        </div>
       </div>
 
+      <!-- 세부 평가 요소별 코멘트 (그래프 바로 아래) -->
       <div class="note-item">
         <h4><span>📐 구도 평가</span> <strong>${item.composition_score.toFixed(1)}</strong></h4>
         <div>${item.composition_notes}</div>
@@ -593,34 +689,10 @@ function openDetailModal(id) {
         <ul>${item.improvements.map(i => `<li>${i}</li>`).join('')}</ul>
       </div>
 
-      <div class="lr-advice-box" id="lr-advice-box-section" style="margin-top:16px;background:#f8fafc;border:1px solid #cbd5e1;border-radius:14px;padding:16px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
-          <h3 style="margin:0;font-size:1.02rem;display:flex;align-items:center;gap:6px;">
-            <span style="background:#312e81;color:white;padding:2px 7px;border-radius:4px;font-size:0.78rem;">Lr</span>
-            Adobe Lightroom 추천 보정 수치
-          </h3>
-          <button class="filter-btn" style="background:#4f46e5;color:white;border-color:#4f46e5;" onclick="requestLrAdvice(${item.id}, this)">
-            ${item.lr_advice ? '🔄 보정 수치 다시 제안' : '🛠️ 라이트룸 보정 수치 제안 받기'}
-          </button>
-        </div>
-        <div id="lr-advice-content">
-          ${renderLrAdviceContent(item.lr_advice)}
-        </div>
-      </div>
-
-      <!-- SNS Crop & Caption Advice Box -->
-      <div class="sns-advice-box" id="sns-advice-box-section" style="margin-top:16px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:14px;padding:16px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
-          <h3 style="margin:0;font-size:1.02rem;display:flex;align-items:center;gap:6px;color:#0369a1;">
-            <span style="background:#0284c7;color:white;padding:2px 7px;border-radius:4px;font-size:0.78rem;">SNS</span>
-            인스타 · X(트위터) 규격 크롭 & 캡션 제안
-          </h3>
-          <button class="filter-btn" style="background:#0284c7;color:white;border-color:#0284c7;" onclick="requestSnsAdvice(${item.id}, this)">
-            ${item.sns_advice ? '🔄 크롭/캡션 다시 제안' : '📱 SNS 크롭 & 캡션 제안 받기'}
-          </button>
-        </div>
-        <div id="sns-advice-content">
-          ${renderSnsAdviceContent(item.sns_advice, item.id)}
+      <div style="margin-top:14px;">
+        <span style="font-size:0.8rem;font-weight:700;color:var(--muted);display:block;margin-bottom:6px;">🏷️ 분위기 & 스타일 태그</span>
+        <div class="tag-pills">
+          ${renderTagPills(item.aesthetic_tags)}
         </div>
       </div>
     </div>
