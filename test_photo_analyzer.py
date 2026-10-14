@@ -16,8 +16,9 @@ from PIL.TiffImagePlugin import IFDRational
 from pydantic import ValidationError
 
 import photo_analyzer
+import photo_dashboard
 from photo_analyzer import PhotoAnalysis, analyze_with_gemini, prepare_photo, save_analysis
-from photo_tag_schema import AestheticTags
+from photo_tag_schema import AESTHETIC_TAG_OPTIONS, AestheticTags, get_score_grade
 
 
 class PhotoAnalyzerTests(unittest.TestCase):
@@ -130,6 +131,12 @@ class PhotoAnalyzerTests(unittest.TestCase):
                     set(schema["$defs"]["AestheticTags"]["required"]),
                     set(AestheticTags.model_fields),
                 )
+                tag_properties = schema["$defs"]["AestheticTags"]["properties"]
+                for category_key, allowed_tags in AESTHETIC_TAG_OPTIONS.items():
+                    self.assertEqual(
+                        tag_properties[category_key]["items"]["enum"],
+                        list(allowed_tags),
+                    )
 
                 sent_image = base64.b64decode(request["input"][1]["data"])
                 with Image.open(BytesIO(sent_image)) as uploaded_image:
@@ -211,6 +218,142 @@ class PhotoAnalyzerTests(unittest.TestCase):
                 [("composition_space", "삼분할 구도"), ("mood", "고요함"), ("viewpoint", "정면")],
             )
             self.assertGreater(catalog_count, 0)
+
+
+    def test_score_grading_benchmark_tiers(self) -> None:
+        self.assertEqual(get_score_grade(9.5), "프로사진작가 및 전문가급")
+        self.assertEqual(get_score_grade(9.0), "프로사진작가 및 전문가급")
+        self.assertEqual(get_score_grade(8.9), "매우 우수")
+        self.assertEqual(get_score_grade(8.0), "매우 우수")
+        self.assertEqual(get_score_grade(7.5), "우수")
+        self.assertEqual(get_score_grade(7.0), "우수")
+        self.assertEqual(get_score_grade(6.8), "보통 (일반 스냅)")
+        self.assertEqual(get_score_grade(5.0), "보통 (일반 스냅)")
+        self.assertEqual(get_score_grade(4.9), "개선 필요 (기초 미흡)")
+        self.assertEqual(get_score_grade(0.0), "개선 필요 (기초 미흡)")
+
+    def test_prompt_enforces_pros_cons_and_grading_benchmarks(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            image_path = Path(temporary_directory) / "sample.jpg"
+            self._make_jpeg(image_path)
+            photo = prepare_photo(image_path)
+            prompt = photo_analyzer._build_prompt(photo)
+
+            self.assertIn("7.0 ~ 7.9: [우수]", prompt)
+            self.assertIn("8.0 ~ 8.9: [매우 우수]", prompt)
+            self.assertIn("9.0 ~ 10.0: [프로사진작가 및 전문가급]", prompt)
+            self.assertIn("[장점]", prompt)
+            self.assertIn("[단점]", prompt)
+            self.assertIn("과도하게 칭찬하거나 호의적으로만 평가하지 마세요", prompt)
+
+
+    def test_model_presets_tiers(self) -> None:
+        self.assertIn("lite", photo_analyzer.MODEL_PRESETS)
+        self.assertIn("standard", photo_analyzer.MODEL_PRESETS)
+        self.assertIn("pro", photo_analyzer.MODEL_PRESETS)
+        self.assertEqual(photo_analyzer.MODEL_PRESETS["lite"], "gemini-3.1-flash-lite")
+        self.assertEqual(photo_analyzer.MODEL_PRESETS["standard"], "gemini-2.5-flash")
+        self.assertEqual(photo_analyzer.MODEL_PRESETS["pro"], "gemini-3.1-pro-preview")
+
+    def test_figure_prompt_includes_figure_photography_context(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            image_path = Path(temporary_directory) / "sample.jpg"
+            self._make_jpeg(image_path)
+            photo = prepare_photo(image_path)
+            prompt = photo_analyzer._build_prompt(photo)
+            self.assertIn("피규어 및 캐릭터 모델 사진(Figure Photography)", prompt)
+            self.assertIn("접사/디테일", prompt)
+            self.assertIn("일상/야외 스냅", prompt)
+            self.assertIn("스튜디오 연출/디오라마", prompt)
+
+    def test_run_batch_pipeline_creates_reports_and_comparison(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            dir_path = Path(temporary_directory)
+            photo1 = dir_path / "fig1.jpg"
+            photo2 = dir_path / "fig2.jpg"
+            self._make_jpeg(photo1)
+            self._make_jpeg(photo2)
+
+            db_path = dir_path / "batch_test.sqlite3"
+            report_dir = dir_path / "reports"
+            summary_html = dir_path / "comparison.html"
+
+            with patch.object(photo_analyzer, "analyze_with_gemini") as mock_analyze:
+                mock_analyze.return_value = self._valid_analysis()
+                exit_code = photo_analyzer.run_batch_pipeline(
+                    photo_paths=[photo1, photo2],
+                    model="test-model",
+                    db_path=db_path,
+                    report_dir=report_dir,
+                    summary_html_path=summary_html,
+                    max_workers=2,
+                )
+
+            self.assertEqual(exit_code, 0)
+            self.assertTrue(db_path.is_file())
+            self.assertTrue(summary_html.is_file())
+            self.assertTrue((report_dir / "fig1.html").is_file())
+            self.assertTrue((report_dir / "fig2.html").is_file())
+
+            comparison_text = summary_html.read_text(encoding="utf-8")
+            self.assertIn("피규어 사진 일괄 평가 결과", comparison_text)
+            self.assertIn("fig1.jpg", comparison_text)
+            self.assertIn("fig2.jpg", comparison_text)
+
+    def test_dashboard_get_all_analyses(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            dir_path = Path(temporary_directory)
+            db_path = dir_path / "dash_test.sqlite3"
+            image_path = dir_path / "sample.jpg"
+            self._make_jpeg(image_path)
+            photo = prepare_photo(image_path)
+            record_id = save_analysis(db_path, photo, "test-model", self._valid_analysis())
+
+            items = photo_dashboard.get_all_analyses(db_path)
+            self.assertEqual(len(items), 1)
+            self.assertEqual(items[0]["id"], record_id)
+            self.assertEqual(items[0]["filename"], "sample.jpg")
+            self.assertEqual(items[0]["final_score"], 7.8)
+            self.assertEqual(items[0]["grade"], "우수")
+
+
+    def test_figure_categories_defined(self) -> None:
+        from photo_tag_schema import FIGURE_CATEGORIES
+        self.assertIn("macro", FIGURE_CATEGORIES)
+        self.assertIn("snap", FIGURE_CATEGORIES)
+        self.assertIn("staging", FIGURE_CATEGORIES)
+        self.assertIn("general", FIGURE_CATEGORIES)
+        self.assertEqual(FIGURE_CATEGORIES["macro"]["label"], "접사/디테일")
+        self.assertEqual(FIGURE_CATEGORIES["snap"]["label"], "일상/야외 스냅")
+        self.assertEqual(FIGURE_CATEGORIES["staging"]["label"], "스튜디오 연출/디오라마")
+
+    def test_prompt_branching_for_macro_snap_and_auto(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            image_path = Path(temporary_directory) / "sample.jpg"
+            self._make_jpeg(image_path)
+            photo = prepare_photo(image_path)
+
+            # Auto mode
+            auto_prompt = photo_analyzer._build_prompt(photo, category_hint=None)
+            self.assertIn("피규어 촬영 세부 유형 자동 판별 및 분기 심사", auto_prompt)
+            self.assertIn("접사/디테일", auto_prompt)
+            self.assertIn("일상/야외 스냅", auto_prompt)
+            self.assertIn("스튜디오 연출/디오라마", auto_prompt)
+
+            # Macro explicit hint
+            macro_prompt = photo_analyzer._build_prompt(photo, category_hint="macro")
+            self.assertIn("[지정된 피규어 촬영 유형: 접사/디테일]", macro_prompt)
+            self.assertIn("눈동자 데칼", macro_prompt)
+
+            # Snap explicit hint
+            snap_prompt = photo_analyzer._build_prompt(photo, category_hint="snap")
+            self.assertIn("[지정된 피규어 촬영 유형: 일상/야외 스냅]", snap_prompt)
+            self.assertIn("자연광", snap_prompt)
+
+    def test_photo_analysis_figure_category_default(self) -> None:
+        analysis = self._valid_analysis()
+        self.assertEqual(analysis.figure_category, "일반 피규어 촬영")
+        self.assertIn("figure_category", PhotoAnalysis.model_fields)
 
 
 if __name__ == "__main__":

@@ -59,6 +59,11 @@ class PhotoHtmlReportTests(unittest.TestCase):
         self.assertIn("측면", report)
         self.assertIn("분위기", report)
         self.assertIn("고요함", report)
+        self.assertIn("매우 우수", report)
+        self.assertIn("주요 장점", report)
+        self.assertIn("단점 및 개선점", report)
+        self.assertIn("점수 평가 기준", report)
+        self.assertIn("프로사진작가 및 전문가급", report)
 
     def test_report_explains_when_legacy_record_has_no_tags(self) -> None:
         photo, analysis = self._sample()

@@ -56,6 +56,7 @@ ANALYSIS_HEADERS = {
     "최종 평가": "final_reason",
     "강점(줄바꿈 구분)": "strengths",
     "개선점(줄바꿈 구분)": "improvements",
+    "피규어 유형": "figure_category",
 }
 AESTHETIC_TAG_HEADERS = {
     f"{category_label} 태그(줄바꿈 구분)": category_key
@@ -213,6 +214,7 @@ def _format_workbook(path: Path, row_count: int) -> None:
         "색감 점수": 12,
         "촬영 기술 점수": 15,
         "최종 점수": 12,
+        "피규어 유형": 18,
         STATUS_HEADER: 14,
         USER_NOTES_HEADER: 36,
     }
@@ -287,7 +289,8 @@ def _format_workbook(path: Path, row_count: int) -> None:
 
     instructions = [
         ("사진 분석 엑셀 관리", "설명"),
-        ("편집 가능", "점수, 평가 메모, 강점·개선점, 검토 상태, 사용자 메모"),
+        ("점수 기준", "9.0~10: 프로사진작가 및 전문가급 | 8.0~8.9: 매우 우수 | 7.0~7.9: 우수 | 5.0~6.9: 보통 (일반 스냅) | 5.0 미만: 개선 필요"),
+        ("편집 가능", "점수, 평가 메모([장점]/[단점] 구분), 강점·개선점, 검토 상태, 사용자 메모"),
         ("태그 편집", "범주별 태그 열에서 줄바꿈으로 구분합니다. 허용 어휘만 사용할 수 있고 범주당 최대 3개입니다."),
         ("편집 제한", "ID 및 파일·모델·촬영 정보는 표시용이며 SQLite로 가져올 때 변경되지 않습니다."),
         ("반영 방법", "저장한 뒤 photo_excel_manager.py import 명령으로 가져옵니다."),

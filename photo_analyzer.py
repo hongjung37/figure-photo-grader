@@ -5,8 +5,11 @@ import base64
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import sys
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -19,9 +22,23 @@ from google import genai
 from PIL import ExifTags, Image, ImageOps
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from photo_html_report import save_html_report
-from photo_tag_schema import AESTHETIC_TAG_CATEGORIES, AESTHETIC_TAG_OPTIONS, AestheticTags
+from photo_tag_schema import (
+    AESTHETIC_TAG_CATEGORIES,
+    AESTHETIC_TAG_OPTIONS,
+    FIGURE_CATEGORIES,
+    FIGURE_CATEGORY_CHOICES,
+    SCORE_GRADE_BENCHMARKS,
+    AestheticTags,
+    get_score_grade,
+)
 
-DEFAULT_MODEL = "gemini-3.1-flash-lite"
+MODEL_PRESETS = {
+    "lite": "gemini-3.1-flash-lite",      # 빠르고 가벼운 대량 분류/스크리닝 모드 (기본값)
+    "standard": "gemini-2.5-flash",       # 균형 잡힌 표준 화질 평가 모드
+    "pro": "gemini-3.1-pro-preview",              # 고화질 심층 비평 모드 (전문가급)
+}
+DEFAULT_TIER = "lite"
+DEFAULT_MODEL = MODEL_PRESETS[DEFAULT_TIER]
 DEFAULT_DB_PATH = Path(__file__).resolve().with_name("photo_analysis.sqlite3")
 ENV_FILE_PATH = Path(__file__).resolve().with_name(".env")
 SUPPORTED_FORMATS = {
@@ -73,18 +90,22 @@ class PhotoAnalysis(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    composition_score: float = Field(description="구도 점수, 0~10")
-    composition_notes: str = Field(description="구도의 장점과 아쉬운 점")
-    lighting_score: float = Field(description="조명 점수, 0~10")
-    lighting_notes: str = Field(description="빛의 방향, 노출, 명암에 대한 평가")
-    color_score: float = Field(description="색감 점수, 0~10")
-    color_notes: str = Field(description="색조, 채도, 색 조화에 대한 평가")
-    technique_score: float = Field(description="촬영 기술 점수, 0~10")
-    technique_notes: str = Field(description="초점, 흔들림, 심도, 촬영 설정의 적절성")
-    final_score: float = Field(description="사진 전체에 대한 최종 점수, 0~10")
-    final_reason: str = Field(description="최종 점수의 간결한 근거")
-    strengths: list[str] = Field(description="사진의 주요 장점 목록")
-    improvements: list[str] = Field(description="다음 촬영에서 시도할 수 있는 개선점 목록")
+    composition_score: float = Field(description="구도 점수 (0~10). 7점: 우수, 8점: 매우 우수, 9점: 프로사진작가 및 전문가급")
+    composition_notes: str = Field(description="구도 평가. 반드시 '[장점]'과 '[단점]'을 명확히 구분하여 서술")
+    lighting_score: float = Field(description="조명 점수 (0~10). 7점: 우수, 8점: 매우 우수, 9점: 프로사진작가 및 전문가급")
+    lighting_notes: str = Field(description="빛의 방향/노출/명암 평가. 반드시 '[장점]'과 '[단점]'을 명확히 구분하여 서술")
+    color_score: float = Field(description="색감 점수 (0~10). 7점: 우수, 8점: 매우 우수, 9점: 프로사진작가 및 전문가급")
+    color_notes: str = Field(description="색조/채도/조화 평가. 반드시 '[장점]'과 '[단점]'을 명확히 구분하여 서술")
+    technique_score: float = Field(description="촬영 기술 점수 (0~10). 7점: 우수, 8점: 매우 우수, 9점: 프로사진작가 및 전문가급")
+    technique_notes: str = Field(description="초점/선명도/설정 적절성 평가. 반드시 '[장점]'과 '[단점]'을 명확히 구분하여 서술")
+    final_score: float = Field(description="사진 전체 최종 종합 점수 (0~10). 7점: 우수, 8점: 매우 우수, 9점: 프로사진작가 및 전문가급")
+    final_reason: str = Field(description="최종 점수 근거. 장점과 단점을 균형 있게 분석하고 해당 점수를 부여한 명확한 이유 제시")
+    strengths: list[str] = Field(description="사진의 주요 장점 목록 (실제 돋보이는 핵심 강점)")
+    improvements: list[str] = Field(description="사진의 단점, 아쉬운 점 및 다음 촬영을 위한 개선점 목록")
+    figure_category: str = Field(
+        default="일반 피규어 촬영",
+        description="피규어 사진 하위 유형: '접사/디테일', '일상/야외 스냅', '스튜디오 연출/디오라마', '일반 피규어 촬영' 중 택1",
+    )
     aesthetic_tags: AestheticTags = Field(
         default_factory=AestheticTags.empty,
         description="시각적 근거에 기반한 범주별 미학 태그",
@@ -93,6 +114,11 @@ class PhotoAnalysis(BaseModel):
     @classmethod
     def model_json_schema(cls, *args: Any, **kwargs: Any) -> dict[str, Any]:
         schema = super().model_json_schema(*args, **kwargs)
+        tag_properties = schema.get("$defs", {}).get("AestheticTags", {}).get("properties", {})
+        for category_key, allowed_tags in AESTHETIC_TAG_OPTIONS.items():
+            field_schema = tag_properties.get(category_key)
+            if isinstance(field_schema, dict):
+                field_schema["items"] = {"type": "string", "enum": list(allowed_tags)}
         required = list(schema.get("required", []))
         if "aesthetic_tags" not in required:
             required.append("aesthetic_tags")
@@ -307,7 +333,7 @@ def prepare_photo(image_path: str | Path) -> PreparedPhoto:
     )
 
 
-def _build_prompt(photo: PreparedPhoto) -> str:
+def _build_prompt(photo: PreparedPhoto, category_hint: str | None = None) -> str:
     camera_settings = json.dumps(photo.safe_exif, ensure_ascii=False, sort_keys=True)
     if not photo.safe_exif:
         camera_settings = "{} (사용 가능한 안전한 EXIF 촬영 설정 없음)"
@@ -315,14 +341,57 @@ def _build_prompt(photo: PreparedPhoto) -> str:
         f"- {category_key} ({AESTHETIC_TAG_CATEGORIES[category_key]}): {', '.join(options)}"
         for category_key, options in AESTHETIC_TAG_OPTIONS.items()
     )
-    return f"""당신은 사진 촬영을 돕는 비평가입니다. 첨부 이미지에서 확인할 수 있는 시각적 근거를 바탕으로 평가하세요.
+    category_instruction = ""
+    if category_hint and category_hint in FIGURE_CATEGORIES:
+        cat_info = FIGURE_CATEGORIES[category_hint]
+        category_instruction = f"""[지정된 피규어 촬영 유형: {cat_info['label']}]
+이 사진은 사용자가 '{cat_info['label']}'({cat_info['description']}) 유형으로 지정했습니다.
+figure_category 값에 반드시 '{cat_info['label']}'을 입력하고, 아래 특화 심사 기준을 최우선 잣대로 적용하세요:
+- 특화 심사 포인트: {cat_info['focus']}
+"""
+    else:
+        category_instruction = """[피규어 촬영 세부 유형 자동 판별 및 분기 심사]
+먼저 사진을 분석하여 다음 4가지 피규어 촬영 유형 중 가장 부합하는 하나를 판별하여 figure_category에 정확히 입력하고, 해당 유형의 특화 기준을 엄격하게 적용하여 심사하세요:
+1. '접사/디테일' (피규어 얼굴, 눈동자, 무기 등 세부 조형/도색 초근접 촬영)
+   → 중점 기준: 눈동자 데칼의 초정밀 칼초점, 코/귀/머리카락 등 주요 조형이 날아가지 않는 적절한 매크로 심도(너무 얕아서 조형이 뭉개지면 감점), 미세 먼지/마감 관리, 번들거리는 반사광(핫스팟) 억제
+2. '일상/야외 스냅' (자연광 야외 출사, 여행 동행, 카페 등 실제 일상 환경과 상호작용)
+   → 중점 기준: 자연광(역광/측광)의 창의적 활용, 실제 환경과 피규어의 자연스러운 스케일 조화, 계절감 및 일상적 스토리텔링, 자연스러운 여백과 수평
+3. '스튜디오 연출/디오라마' (배경지, 다각도 조명 세팅, 디오라마 세트, 이펙트 파츠 활용)
+   → 중점 기준: 다각도 조명(키/필/림라이트)의 드라마틱한 입체감과 명암비, 디오라마와 피규어의 정교한 스케일 일치, 역동적인 포징, 클리어/이펙트 파츠 투과광
+4. '일반 피규어 촬영' (피규어 본체 전신 또는 상반신을 중심으로 단정하게 담아낸 스탠다드 포토)
+   → 중점 기준: 피규어 원형의 왜곡 없는 렌즈 화각과 프레이밍, 단정한 배경 분리, 자연스러운 광택 및 피부톤 밸런스
+"""
+
+    return f"""당신은 피규어 및 캐릭터 모델 사진(Figure Photography)의 완성도를 엄격하고 객관적으로 심사하는 전문 피규어 사진 비평가입니다. 첨부 이미지에서 직접 관찰되는 시각적 근거를 바탕으로 냉정하게 평가하세요.
+
+{category_instruction}
+
+[핵심 심사 원칙: 지나친 긍정 지양 및 엄격한 비판]
+- 과도하게 칭찬하거나 호의적으로만 평가하지 마세요.
+- 잘된 점뿐만 아니라 구도의 군더더기, 노출 및 빛의 아쉬움, 색감 왜곡, 기술적 한계(흔들림/초점/노이즈 등) 등 단점과 한계를 분명하고 솔직하게 지적해야 합니다.
+- 각 세부 평가 메모(composition_notes, lighting_notes, color_notes, technique_notes)는 반드시 '[장점]'과 '[단점]'을 명확히 구분하여 서술하세요.
+  예시 형식:
+  [장점] 피사체의 배치와 시선 처리가 안정적임
+  [단점] 배경 요소가 산만하여 시선을 분산시키고 상단 여백이 과도하게 남음
+
+[점수 평가 기준 (10점 만점 척도)]:
+- 9.0 ~ 10.0: [프로사진작가 및 전문가급] - 상업 화보, 사진전시회 또는 전문 포트폴리오 수준의 탁월한 완성도. 빛·구도·기술의 완벽한 통제와 독창적 연출. 결함이나 아쉬움이 없는 마스터피스에만 부여.
+- 8.0 ~ 8.9: [매우 우수] - 상급 사진가 및 준전문가 수준. 주제가 명확하고 완성도가 높으며 시각적 호소력이 뛰어남. 사소한 단점만 존재.
+- 7.0 ~ 7.9: [우수] - 기본기가 탄탄하고 잘 찍힌 준수한 사진. 안정적인 면이 있으나, 구도 정리나 빛의 활용, 설정 등에서 분명한 단점이나 개선 여지가 공존함.
+- 5.0 ~ 6.9: [보통 (일반 스냅)] - 일상적인 스냅사진 수준. 구도 불안정, 노출 과부족, 배경 분산, 초점의 아쉬움 등 일반적인 한계가 다수 보임.
+- 5.0 미만: [개선 필요 (기초 미흡)] - 초점 이탈, 심각한 흔들림, 노출 실패 등 기초적인 기술적 결함이 큰 사진.
+
+* 점수 인플레이션을 엄격히 금지합니다. 일상 스냅이나 평범한 사진은 5~6점대에 배치하고, 7점은 충분히 우수한 사진, 8점 이상은 엄격한 기준을 통과한 사진, 9점 이상은 프로 수준의 완성도를 갖춘 경우에만 부여하세요.
 
 평가 항목:
-- composition: 프레이밍, 시선 유도, 균형, 여백, 주제 배치
-- lighting: 빛의 방향과 질, 노출, 하이라이트/그림자 디테일
-- color: 색조, 채도, 색 조화와 분위기
-- technique: 초점/선명도, 흔들림, 심도, 그리고 아래 EXIF 촬영 설정의 적절성
-- final_score: 사진 전체의 완성도에 대한 최종 점수
+- composition: 프레이밍, 시선 유도, 균형, 여백, 주제 배치 ([장점]과 [단점] 구분)
+- lighting: 빛의 방향과 질, 노출, 하이라이트/그림자 디테일 ([장점]과 [단점] 구분)
+- color: 색조, 채도, 색 조화와 분위기 ([장점]과 [단점] 구분)
+- technique: 초점/선명도, 흔들림, 심도, 그리고 아래 EXIF 촬영 설정의 적절성 ([장점]과 [단점] 구분)
+- final_score: 위 점수 기준 척도(7: 우수, 8: 매우 우수, 9: 프로/전문가급)를 엄격히 준수한 종합 점수
+- final_reason: 최종 점수의 객관적 근거 (장점과 단점을 균형 있게 종합하여 점수 이유 서술)
+- strengths: 사진의 주요 장점 목록 (실제 돋보이는 핵심 강점 2~3개)
+- improvements: 사진의 단점, 아쉬운 점 및 다음 촬영을 위한 개선점 목록 (2~3개)
 
 미학 태깅(aesthetic_tags):
 - 아래 8개 범주별로 이미지에서 직접 확인되는 태그를 0~3개 선택하세요. 근거가 없거나 해당되지 않으면 빈 배열([])을 사용하세요.
@@ -333,42 +402,58 @@ def _build_prompt(photo: PreparedPhoto) -> str:
 - 모든 키를 포함한 객체로 반환하세요. 키와 허용 어휘는 다음과 같습니다:
 {tag_taxonomy}
 
-모든 점수는 0.0~10.0 범위의 숫자로 작성하세요. 점수는 사진의 장르와 의도를 고려하고, 최종 점수는 네 항목을 기계적으로 평균 내지 말고 전체 인상을 반영하세요. EXIF가 없거나 불완전하면 추정하지 말고 이미지에서 확인되는 내용만 평가하세요. 답변의 텍스트 값은 한국어로 작성하세요. 강점과 개선점은 구체적이고 간결하게 적으세요.
+모든 점수는 0.0~10.0 범위의 숫자로 작성하세요. 최종 점수는 네 항목을 기계적으로 단순 산술평균하지 말고 전체 인상과 완성도를 위 점수 기준에 맞춰 반영하세요. EXIF가 없거나 불완전하면 추정하지 말고 이미지에서 확인되는 내용만 평가하세요. 답변의 텍스트 값은 한국어로 작성하세요.
 
 촬영 관련 안전 EXIF (GPS, 촬영 시각, 소유자/일련번호 등은 제외됨):
 {camera_settings}
 """
 
 
-def analyze_with_gemini(photo: PreparedPhoto, model: str = DEFAULT_MODEL) -> PhotoAnalysis:
+def analyze_with_gemini(photo: PreparedPhoto, model: str = DEFAULT_MODEL, category_hint: str | None = None) -> PhotoAnalysis:
     load_dotenv(dotenv_path=ENV_FILE_PATH, override=False)
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY를 .env 파일 또는 환경변수에 설정해 주세요.")
 
     client = genai.Client(api_key=api_key)
-    interaction = client.interactions.create(
-        model=model,
-        input=[
-            {"type": "text", "text": _build_prompt(photo)},
-            {
-                "type": "image",
-                "data": base64.b64encode(photo.upload_bytes).decode("ascii"),
-                "mime_type": photo.upload_mime_type,
-            },
-        ],
-        response_format={
-            "type": "text",
-            "mime_type": "application/json",
-            "schema": PhotoAnalysis.model_json_schema(),
-        },
-        # Do not persist the Interaction object server-side.
-        store=False,
-    )
-    output_text = interaction.output_text
-    if not output_text:
-        raise RuntimeError("Gemini가 JSON 분석 결과를 반환하지 않았습니다.")
-    return PhotoAnalysis.model_validate_json(output_text)
+    max_retries = 5
+    backoff = 3.0
+    for attempt in range(1, max_retries + 1):
+        try:
+            interaction = client.interactions.create(
+                model=model,
+                input=[
+                    {"type": "text", "text": _build_prompt(photo, category_hint=category_hint)},
+                    {
+                        "type": "image",
+                        "data": base64.b64encode(photo.upload_bytes).decode("ascii"),
+                        "mime_type": photo.upload_mime_type,
+                    },
+                ],
+                response_format={
+                    "type": "text",
+                    "mime_type": "application/json",
+                    "schema": PhotoAnalysis.model_json_schema(),
+                },
+                # Do not persist the Interaction object server-side.
+                store=False,
+            )
+            output_text = interaction.output_text
+            if not output_text:
+                raise RuntimeError("Gemini가 JSON 분석 결과를 반환하지 않았습니다.")
+            return PhotoAnalysis.model_validate_json(output_text)
+        except Exception as exc:
+            err_msg = str(exc)
+            is_transient = any(
+                code in err_msg
+                for code in ("503", "429", "high demand", "ResourceExhausted", "UNAVAILABLE", "service_unavailable")
+            )
+            if is_transient and attempt < max_retries:
+                print(f"[재시도 {attempt}/{max_retries}] API 일시적 지연/오류 발생. {backoff:.1f}초 후 재시도합니다...", file=sys.stderr)
+                time.sleep(backoff)
+                backoff *= 2.0
+            else:
+                raise
 
 
 def ensure_tag_tables(connection: sqlite3.Connection) -> None:
@@ -480,49 +565,331 @@ def save_analysis(
         return record_id
 
 
+
+
+def render_batch_comparison_html(
+    results: list[dict[str, Any]],
+    model: str,
+    db_path: Path,
+) -> str:
+    """Render a standalone, modern HTML summary comparing all analyzed photos in a batch."""
+    from html import escape
+    from statistics import mean
+
+    scores = [float(r["analysis"].final_score) for r in results] if results else [0.0]
+    avg_score = mean(scores)
+    max_score = max(scores)
+    min_score = min(scores)
+
+    rows_html = []
+    for r in results:
+        analysis: PhotoAnalysis = r["analysis"]
+        grade = get_score_grade(analysis.final_score)
+        report_link = f'<a href="{escape(r["relative_report"])}">개별 보고서</a>' if r.get("relative_report") else "-"
+        rows_html.append(
+            f"""<tr>
+              <td><strong>{escape(r["filename"])}</strong></td>
+              <td><span class="badge" style="background:#eef2ff;color:#4338ca;">{escape(getattr(analysis, 'figure_category', '일반'))}</span></td>
+              <td><span class="badge">{escape(grade)}</span></td>
+              <td><strong class="score">{analysis.final_score:.1f}</strong></td>
+              <td>{analysis.composition_score:.1f}</td>
+              <td>{analysis.lighting_score:.1f}</td>
+              <td>{analysis.color_score:.1f}</td>
+              <td>{analysis.technique_score:.1f}</td>
+              <td class="reason-cell">{escape(analysis.final_reason)}</td>
+              <td>{report_link}</td>
+            </tr>"""
+        )
+
+    return f"""<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>피규어 사진 일괄 평가 결과</title>
+<style>
+:root {{ --ink:#17233b; --muted:#61708a; --navy:#182b49; --blue:#436cf5; --teal:#11a898; --line:#e5eaf2; --paper:#f4f7fb; }}
+* {{ box-sizing:border-box; }}
+body {{ margin:0; background:var(--paper); color:var(--ink); font-family: "Segoe UI", "Malgun Gothic", sans-serif; line-height:1.6; }}
+main {{ width:min(1240px, calc(100% - 36px)); margin:32px auto 60px; }}
+.hero {{ padding:32px 36px; border-radius:24px; color:white; background:linear-gradient(125deg,#142440,#253f68 65%,#3757a3); box-shadow:0 18px 48px #20395b24; }}
+.hero h1 {{ margin:0 0 8px; font-size:clamp(1.8rem, 3.5vw, 2.5rem); }}
+.hero p {{ margin:4px 0; color:#e0e8f7; font-size:.95rem; }}
+.stats-grid {{ display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:14px; margin-top:22px; }}
+.stat-card {{ background:rgba(255,255,255,.1); backdrop-filter:blur(10px); border:1px solid rgba(255,255,255,.2); border-radius:16px; padding:16px 20px; }}
+.stat-card small {{ display:block; color:#b9c9ff; font-size:.8rem; }}
+.stat-card strong {{ font-size:1.9rem; color:white; }}
+.section {{ margin-top:28px; }}
+.table-wrap {{ overflow-x:auto; background:white; border:1px solid var(--line); border-radius:18px; box-shadow:0 8px 26px #2439570a; }}
+table {{ border-collapse:collapse; width:100%; min-width:850px; font-size:.92rem; }}
+th, td {{ padding:13px 15px; text-align:left; border-bottom:1px solid var(--line); vertical-align:middle; }}
+th {{ background:#f8fafc; color:var(--muted); font-weight:700; font-size:.84rem; }}
+tr:last-child td {{ border-bottom:none; }}
+tr:hover td {{ background:#fbfdff; }}
+.badge {{ display:inline-block; padding:4px 9px; border-radius:999px; background:#e6f8f5; color:#0e8477; font-size:.8rem; font-weight:700; white-space:nowrap; }}
+.score {{ color:var(--blue); font-size:1.15rem; }}
+.reason-cell {{ max-width:320px; color:#4a5568; font-size:.86rem; line-height:1.45; }}
+a {{ color:var(--blue); text-decoration:none; font-weight:650; }}
+a:hover {{ text-decoration:underline; }}
+.guide {{ margin-top:20px; padding:15px 20px; border-radius:14px; background:white; border:1px solid var(--line); color:var(--muted); font-size:.85rem; }}
+.guide strong {{ color:var(--ink); }}
+footer {{ margin-top:30px; text-align:center; color:var(--muted); font-size:.82rem; }}
+</style>
+</head>
+<body>
+<main>
+  <header class="hero">
+    <h1>피규어 사진 일괄 평가 결과</h1>
+    <p>Gemini 모델: {escape(model)} · 분석 완료: {len(results)}장 · SQLite DB: {escape(db_path.name)}</p>
+    <div class="stats-grid">
+      <div class="stat-card"><small>총 분석 장수</small><strong>{len(results)}<span style="font-size:1rem;font-weight:normal">장</span></strong></div>
+      <div class="stat-card"><small>평균 점수</small><strong>{avg_score:.1f}<span style="font-size:1rem;font-weight:normal"> / 10</span></strong></div>
+      <div class="stat-card"><small>최고 점수</small><strong>{max_score:.1f}<span style="font-size:1rem;font-weight:normal"> / 10</span></strong></div>
+      <div class="stat-card"><small>최저 점수</small><strong>{min_score:.1f}<span style="font-size:1rem;font-weight:normal"> / 10</span></strong></div>
+    </div>
+  </header>
+
+  <section class="section">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>파일명</th>
+            <th>유형</th>
+            <th>등급</th>
+            <th>최종</th>
+            <th>구도</th>
+            <th>조명</th>
+            <th>색감</th>
+            <th>기술</th>
+            <th>총평 요약</th>
+            <th>상세</th>
+          </tr>
+        </thead>
+        <tbody>
+          {"".join(rows_html)}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <aside class="guide">
+    <strong>채점 기준 척도:</strong>
+    <span><b>9.0~10</b> 프로사진작가 및 전문가급</span> ·
+    <span><b>8.0~8.9</b> 매우 우수</span> ·
+    <span><b>7.0~7.9</b> 우수</span> ·
+    <span><b>5.0~6.9</b> 보통 (일반 스냅)</span> ·
+    <span><b>5.0 미만</b> 개선 필요 (기초 미흡)</span>
+  </aside>
+  <footer>생성된 일괄 평가 보고서 · 피규어 사진 미학 및 기술 기준 적용</footer>
+</main>
+</body>
+</html>"""
+
+
+def run_batch_pipeline(
+    photo_paths: list[Path],
+    model: str,
+    db_path: Path,
+    report_dir: Path | None,
+    summary_html_path: Path | None,
+    max_workers: int = 2,
+    category: str = "auto",
+) -> int:
+    """Analyze multiple photos in parallel, save results to DB and generate reports."""
+    print(f"=== 피규어 사진 일괄 분석 시작 ===", file=sys.stderr)
+    print(f"대상 사진: {len(photo_paths)}장 | 모델: {model} | 동시 워커: {max_workers}", file=sys.stderr)
+    print(f"SQLite DB: {db_path}", file=sys.stderr)
+    if report_dir:
+        report_dir.mkdir(parents=True, exist_ok=True)
+        print(f"개별 HTML 폴더: {report_dir}", file=sys.stderr)
+
+    results: list[dict[str, Any]] = []
+
+    def _process_one(photo_path: Path) -> dict[str, Any]:
+        photo = prepare_photo(photo_path)
+        analysis = analyze_with_gemini(photo, model=model, category_hint=args.category if args.category != "auto" else None)
+        record_id = save_analysis(db_path, photo, model, analysis)
+        report_path = None
+        rel_report = None
+        if report_dir is not None:
+            clean_stem = re.sub(r"[^A-Za-z0-9._-]+", "_", photo_path.stem).strip("._") or "photo"
+            report_path = report_dir / f"{clean_stem}.html"
+            save_html_report(photo, analysis, record_id, model, report_path)
+            if summary_html_path is not None:
+                try:
+                    rel_report = os.path.relpath(report_path, summary_html_path.parent).replace("\\", "/")
+                except ValueError:
+                    rel_report = report_path.as_posix()
+            else:
+                rel_report = report_path.as_posix()
+        return {
+            "path": photo_path,
+            "filename": photo_path.name,
+            "photo": photo,
+            "analysis": analysis,
+            "record_id": record_id,
+            "report_path": report_path,
+            "relative_report": rel_report,
+        }
+
+    total = len(photo_paths)
+    completed_count = 0
+    with ThreadPoolExecutor(max_workers=max(1, max_workers)) as executor:
+        future_map = {executor.submit(_process_one, p): p for p in photo_paths}
+        for future in as_completed(future_map):
+            completed_count += 1
+            path = future_map[future]
+            try:
+                res = future.result()
+                results.append(res)
+                analysis: PhotoAnalysis = res["analysis"]
+                grade = get_score_grade(analysis.final_score)
+                print(
+                    f"[{completed_count:02d}/{total}] {path.name} [{analysis.figure_category}] 완료 - {analysis.final_score:.1f}점 ({grade}) [DB #{res['record_id']}]",
+                    file=sys.stderr,
+                )
+            except Exception as exc:
+                print(f"[{completed_count:02d}/{total}] {path.name} 분석 실패: {exc}", file=sys.stderr)
+
+    # Sort results by filename
+    results.sort(key=lambda r: r["filename"].casefold())
+
+    if summary_html_path is not None and results:
+        summary_html_path.parent.mkdir(parents=True, exist_ok=True)
+        summary_content = render_batch_comparison_html(results, model, db_path)
+        summary_html_path.write_text(summary_content, encoding="utf-8")
+        print(f"일괄 비교 HTML 보고서 저장 완료: {summary_html_path}", file=sys.stderr)
+
+    print(f"\n=== 일괄 분석 완료: 성공 {len(results)}/{total}장 ===", file=sys.stderr)
+    return 0 if len(results) == total else 1
+
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="사진의 안전한 EXIF와 Gemini JSON 평가를 SQLite에 저장합니다."
+        description="피규어 사진의 안전한 EXIF와 Gemini JSON 평가를 SQLite에 저장하고 보고서를 생성합니다."
     )
-    parser.add_argument("image", type=Path, help="분석할 JPEG, MPO, PNG 또는 WEBP 사진")
-    parser.add_argument("--model", default=DEFAULT_MODEL, help=f"Gemini 모델 (기본값: {DEFAULT_MODEL})")
-    parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help="SQLite DB 경로")
+    parser.add_argument(
+        "target",
+        type=Path,
+        help="분석할 사진 파일(JPEG, MPO, PNG, WEBP) 또는 사진이 포함된 폴더 경로",
+    )
+    parser.add_argument(
+        "--category",
+        "-c",
+        choices=["auto", "macro", "snap", "staging", "general"],
+        default="auto",
+        help="피규어 촬영 세부 유형 (auto: 자동 판별, macro: 접사/디테일, snap: 일상/야외 스냅, staging: 스튜디오 연출/디오라마, general: 일반) (기본값: auto)",
+    )
+    parser.add_argument(
+        "--tier",
+        choices=list(MODEL_PRESETS.keys()),
+        default=DEFAULT_TIER,
+        help=f"모델 티어 프리셋 선택 (lite: Flash-Lite, standard: 2.5-Flash, pro: 2.5-Pro) (기본값: {DEFAULT_TIER})",
+    )
+    parser.add_argument(
+        "--model",
+        default=None,
+        help="사용할 Gemini 모델명 직접 지정 (지정 시 --tier보다 우선 적용)",
+    )
+    parser.add_argument(
+        "--db",
+        type=Path,
+        default=DEFAULT_DB_PATH,
+        help=f"SQLite DB 경로 (기본값: {DEFAULT_DB_PATH.name})",
+    )
     parser.add_argument(
         "--html",
         "--html-report",
         dest="html_output",
         type=Path,
         metavar="PATH",
-        help="분석 결과를 단독 HTML 보고서로도 저장할 경로",
+        help="단일 사진 분석 시 단독 HTML 보고서 저장 경로",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=2,
+        help="폴더 일괄 분석 시 동시 처리 워커 수 (기본값: 2)",
+    )
+    parser.add_argument(
+        "--recursive",
+        action="store_true",
+        help="폴더 일괄 분석 시 하위 폴더까지 재귀적으로 검색",
+    )
+    parser.add_argument(
+        "--summary-html",
+        type=Path,
+        default=None,
+        help="폴더 일괄 분석 시 전체 비교 요약 HTML 저장 경로 (기본: <폴더>/comparison.html)",
+    )
+    parser.add_argument(
+        "--report-dir",
+        type=Path,
+        default=None,
+        help="폴더 일괄 분석 시 개별 사진 HTML 보고서를 저장할 폴더 (기본: <폴더>/reports)",
     )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    target_path = args.target.expanduser().resolve()
+    model = args.model if args.model else MODEL_PRESETS[args.tier]
+    db_path = args.db.expanduser().resolve()
+
+    if target_path.is_dir():
+        # Batch folder mode
+        extensions = {f".{fmt.lower()}" for fmt in SUPPORTED_FORMATS} | {".jpg"}
+        pattern = "**/*" if args.recursive else "*"
+        photo_paths = [
+            p for p in sorted(target_path.glob(pattern))
+            if p.is_file() and p.suffix.lower() in extensions
+        ]
+        if not photo_paths:
+            print(f"오류: 지정된 폴더에 지원하는 사진 파일이 없습니다: {target_path}", file=sys.stderr)
+            return 1
+
+        summary_html = args.summary_html.expanduser().resolve() if args.summary_html else target_path / "comparison.html"
+        report_dir = args.report_dir.expanduser().resolve() if args.report_dir else target_path / "reports"
+
+        return run_batch_pipeline(
+            photo_paths=photo_paths,
+            model=model,
+            db_path=db_path,
+            report_dir=report_dir,
+            summary_html_path=summary_html,
+            max_workers=args.workers,
+            category=args.category,
+        )
+
+    # Single file mode
     try:
-        report_output = args.html_output.expanduser() if args.html_output else None
+        if not target_path.is_file():
+            raise FileNotFoundError(f"파일을 찾을 수 없습니다: {target_path}")
+        report_output = args.html_output.expanduser().resolve() if args.html_output else None
         if report_output is not None:
             protected_paths = {
-                args.image.expanduser().resolve(),
-                args.db.expanduser().resolve(),
+                target_path,
+                db_path,
                 ENV_FILE_PATH.resolve(),
             }
-            if report_output.resolve() in protected_paths:
+            if report_output in protected_paths:
                 raise ValueError("HTML 보고서 경로가 입력 사진, SQLite DB 또는 .env 경로와 같을 수 없습니다.")
-        photo = prepare_photo(args.image)
-        analysis = analyze_with_gemini(photo, model=args.model)
-        record_id = save_analysis(args.db, photo, args.model, analysis)
+        photo = prepare_photo(target_path)
+        analysis = analyze_with_gemini(photo, model=model, category_hint=args.category if args.category != "auto" else None)
+        record_id = save_analysis(db_path, photo, model, analysis)
         report_path = None
         if report_output is not None:
-            report_path = save_html_report(photo, analysis, record_id, args.model, report_output)
+            report_path = save_html_report(photo, analysis, record_id, model, report_output)
     except Exception as exc:
         print(f"오류: {exc}", file=sys.stderr)
         return 1
 
     # Keep stdout as a single valid JSON document for piping to other programs.
     print(analysis.model_dump_json(indent=2))
-    print(f"SQLite 저장 완료 (record_id={record_id}, db={args.db})", file=sys.stderr)
+    print(f"SQLite 저장 완료 (record_id={record_id}, db={db_path})", file=sys.stderr)
     if report_path is not None:
         print(f"HTML 보고서 저장 완료: {report_path}", file=sys.stderr)
     return 0

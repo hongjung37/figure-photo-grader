@@ -7,7 +7,7 @@ from html import escape
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from photo_tag_schema import AESTHETIC_TAG_CATEGORIES
+from photo_tag_schema import AESTHETIC_TAG_CATEGORIES, get_score_grade
 
 if TYPE_CHECKING:
     from photo_analyzer import PhotoAnalysis, PreparedPhoto
@@ -22,9 +22,10 @@ CATEGORY_SCORES = (
 
 def _score_card(title: str, score: float, notes: str) -> str:
     value = float(score)
+    grade = get_score_grade(value)
     return f"""<article class="score-card">
-      <div class="score-heading"><h3>{escape(title)}</h3><strong>{value:.1f}<small> / 10</small></strong></div>
-      <div class="track" role="meter" aria-label="{escape(title)} 점수" aria-valuemin="0" aria-valuemax="10" aria-valuenow="{value:.1f}"><span style="width:{value * 10:.1f}%"></span></div>
+      <div class="score-heading"><h3>{escape(title)}</h3><div><span class="sub-grade">{escape(grade)}</span> <strong>{value:.1f}<small> / 10</small></strong></div></div>
+      <div class="track" role="meter" aria-label="{escape(title)} 점수 ({escape(grade)})" aria-valuemin="0" aria-valuemax="10" aria-valuenow="{value:.1f}"><span style="width:{value * 10:.1f}%"></span></div>
       <p>{escape(notes)}</p>
     </article>"""
 
@@ -65,6 +66,8 @@ def render_html_report(
 
     filename = escape(photo.source_filename)
     final_score = float(analysis.final_score)
+    final_grade = escape(get_score_grade(final_score))
+    category_label = escape(getattr(analysis, 'figure_category', '일반 피규어 촬영'))
     return f"""<!doctype html>
 <html lang="ko">
 <head>
@@ -90,6 +93,11 @@ h1 {{ margin:0; font-size:clamp(1.8rem,4vw,2.8rem); line-height:1.2; }}
 .final-score div {{ position:relative; text-align:center; }}
 .final-score strong {{ display:block; font-size:3.4rem; line-height:1.1; }}
 .final-score span {{ display:block; color:#cfdbef; font-size:.88rem; }}
+.grade-pill {{ display:inline-block; margin-top:6px; padding:3px 10px; border-radius:999px; background:#11a898; color:white; font-size:.78rem; font-weight:700; letter-spacing:.02em; }}
+.sub-grade {{ font-size:.8rem; font-weight:600; color:var(--teal); margin-right:4px; vertical-align:middle; }}
+.grade-guide {{ margin-top:20px; padding:14px 18px; border-radius:14px; background:white; border:1px solid var(--line); color:var(--muted); font-size:.84rem; display:flex; flex-wrap:wrap; gap:10px; align-items:center; }}
+.grade-guide strong {{ color:var(--ink); }}
+.grade-guide b {{ color:var(--navy); }}
 .section {{ margin-top:28px; }}
 .section-title {{ display:flex; justify-content:space-between; align-items:end; gap:14px; margin:0 0 14px; }}
 .section-title h2 {{ margin:0; font-size:1.35rem; }}
@@ -137,10 +145,10 @@ footer {{ margin-top:24px; color:var(--muted); font-size:.8rem; text-align:cente
       <p class="eyebrow">PHOTO ANALYSIS REPORT</p>
       <h1>사진 분석 결과</h1>
       <p class="filename">{filename}</p>
-      <div class="meta"><span>{photo.width} × {photo.height}px</span><span>{escape(photo.image_format)}</span><span>{escape(model)}</span></div>
+      <div class="meta"><span style="background:#11a898;border-color:#11a898;font-weight:700;">{category_label}</span><span>{photo.width} × {photo.height}px</span><span>{escape(photo.image_format)}</span><span>{escape(model)}</span></div>
     </div>
-    <div class="final-score" role="img" aria-label="최종 점수 {final_score:.1f}점">
-      <div><strong>{final_score:.1f}</strong><span>최종 점수 / 10</span></div>
+    <div class="final-score" role="img" aria-label="최종 점수 {final_score:.1f}점 ({final_grade})">
+      <div><strong>{final_score:.1f}</strong><span>최종 점수 / 10</span><div class="grade-pill">{final_grade}</div></div>
     </div>
   </header>
 
@@ -161,9 +169,17 @@ footer {{ margin-top:24px; color:var(--muted); font-size:.8rem; text-align:cente
   </section>
 
   <section class="section list-grid" aria-label="강점과 개선점">
-    <article class="panel list-card"><h3>잘된 점</h3><ul>{render_list(analysis.strengths)}</ul></article>
-    <article class="panel list-card"><h3>다음 촬영에서 시도해 볼 점</h3><ul>{render_list(analysis.improvements)}</ul></article>
+    <article class="panel list-card"><h3>주요 장점</h3><ul>{render_list(analysis.strengths)}</ul></article>
+    <article class="panel list-card"><h3>단점 및 개선점</h3><ul>{render_list(analysis.improvements)}</ul></article>
   </section>
+  <aside class="grade-guide" aria-label="점수 평가 기준 안내">
+    <strong>점수 평가 기준:</strong>
+    <span><b>9.0~10</b> 프로사진작가 및 전문가급</span> ·
+    <span><b>8.0~8.9</b> 매우 우수</span> ·
+    <span><b>7.0~7.9</b> 우수</span> ·
+    <span><b>5.0~6.9</b> 보통 (일반 스냅)</span> ·
+    <span><b>5.0 미만</b> 개선 필요 (기초 미흡)</span>
+  </aside>
   <footer>생성된 HTML 단독 보고서 · 이미지는 분석용으로 재인코딩된 데이터만 포함합니다.</footer>
 </main>
 </body>
