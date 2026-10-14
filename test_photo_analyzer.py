@@ -294,6 +294,48 @@ class PhotoAnalyzerTests(unittest.TestCase):
                 status = conn.execute("SELECT review_status FROM photo_analyses WHERE id = 1").fetchone()[0]
                 self.assertEqual(status, "토너먼트 1위")
 
+    def test_hybrid_burst_grouping_and_sensitivity(self) -> None:
+        self.assertTrue(photo_dashboard.are_filenames_sequential("SG_01089.webp", "SG_01089-2.webp"))
+        self.assertTrue(photo_dashboard.are_filenames_sequential("SG_03607.webp", "SG_03607 (1).webp"))
+        self.assertTrue(photo_dashboard.are_filenames_sequential("IMG_0123.jpg", "IMG_0124.jpg"))
+        self.assertFalse(photo_dashboard.are_filenames_sequential("SG_07953.jpg", "SG_03607.webp"))
+
+        item1 = {
+            "id": 1,
+            "filename": "SG_01089.webp",
+            "dhash": 0x1111111111111111,
+            "created_at": "2026-10-14T10:00:00+00:00",
+            "figure_category": "접사/디테일",
+        }
+        # Item 2 has distance 17 from item1, but same stem and same time!
+        # Base threshold is 15. Without bonus, 17 > 15 (False).
+        # With bonus (+3 for filename, +2 for time), allowed is 20, so 17 <= 20 (True).
+        diff_bits = 17
+        diff_val = (1 << diff_bits) - 1
+        item2 = {
+            "id": 2,
+            "filename": "SG_01089-2.webp",
+            "dhash": 0x1111111111111111 ^ diff_val,
+            "created_at": "2026-10-14T10:00:30+00:00",
+            "figure_category": "접사/디테일",
+        }
+        self.assertTrue(photo_dashboard.are_burst_pair(item1, item2, base_max_dist=15))
+
+        # Different files with distance 17 and no bonus should not cluster under base 15
+        item3 = {
+            "id": 3,
+            "filename": "OTHER_001.webp",
+            "dhash": 0x1111111111111111 ^ diff_val,
+            "created_at": "2026-10-14T12:00:00+00:00",
+            "figure_category": "일상/야외 스냅",
+        }
+        self.assertFalse(photo_dashboard.are_burst_pair(item1, item3, base_max_dist=15))
+        # But under relaxed threshold 18, it should cluster
+        self.assertTrue(photo_dashboard.are_burst_pair(item1, item3, base_max_dist=18))
+
+        self.assertIn("burst-dist-select", photo_dashboard.DASHBOARD_HTML)
+        self.assertIn("changeBurstSensitivity", photo_dashboard.DASHBOARD_HTML)
+
     def test_figure_prompt_includes_figure_photography_context(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             image_path = Path(temporary_directory) / "sample.jpg"

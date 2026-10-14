@@ -5,12 +5,14 @@ import base64
 import json
 import mimetypes
 import os
+import re
 import sqlite3
 import sys
 import tempfile
 from contextlib import closing
+from datetime import datetime
 from http import HTTPStatus
-from http.server import HTTPServer, SimpleHTTPRequestHandler
+from http.server import HTTPServer, SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -68,8 +70,118 @@ def ensure_db_columns(db_path: Path) -> None:
                 pass
 
 
-def cluster_burst_groups(analyses: list[dict], max_hamming_dist: int = 12) -> list[dict]:
-    """Cluster photos into Burst Groups based on perceptual dHash similarity.
+def are_filenames_sequential(fn1: str, fn2: str) -> bool:
+    """Check if filenames indicate sequential continuous shots or duplicate copy variants."""
+    s1 = Path(fn1).stem.lower()
+    s2 = Path(fn2).stem.lower()
+
+    if s1 == s2:
+        return True
+
+    # Check copy suffix e.g. "sg_01089-2" vs "sg_01089" or "sg_03607 (1)" vs "sg_03607"
+    copy_pattern = r"^(.+?)(?:[\s_-]*\(\d+\)|[\s_-]+\d{1,2}|[\s_-]+복사본)$"
+    m_copy1 = re.match(copy_pattern, s1)
+    base1 = m_copy1.group(1) if m_copy1 else s1
+
+    m_copy2 = re.match(copy_pattern, s2)
+    base2 = m_copy2.group(1) if m_copy2 else s2
+
+    if base1 == base2 or base1 == s2 or base2 == s1:
+        return True
+
+    # Check trailing integer sequence (e.g. IMG_0123 vs IMG_0124)
+    m1 = re.search(r"(\d+)$", s1)
+    m2 = re.search(r"(\d+)$", s2)
+    if m1 and m2:
+        prefix1 = s1[: m1.start()]
+        prefix2 = s2[: m2.start()]
+        if prefix1 == prefix2:
+            try:
+                num1 = int(m1.group(1))
+                num2 = int(m2.group(1))
+                if abs(num1 - num2) <= 3:
+                    return True
+            except ValueError:
+                pass
+    return False
+
+
+def parse_photo_time(item: dict) -> datetime | None:
+    """Extract capture time from EXIF or fallback to DB created_at."""
+    exif = item.get("exif") or {}
+    for key in ("DateTimeOriginal", "DateTimeDigitized", "DateTime"):
+        val = exif.get(key)
+        if val and isinstance(val, str):
+            try:
+                clean_val = val.replace("-", ":")
+                parts = clean_val.split(" ")
+                if len(parts) >= 2:
+                    date_part = parts[0].replace(":", "-")
+                    iso_str = f"{date_part}T{parts[1]}"
+                    return datetime.fromisoformat(iso_str)
+            except Exception:
+                pass
+    created = item.get("created_at")
+    if created and isinstance(created, str):
+        try:
+            return datetime.fromisoformat(created.replace("Z", "+00:00"))
+        except Exception:
+            pass
+    return None
+
+
+def are_burst_pair(
+    item1: dict,
+    item2: dict,
+    base_max_dist: int = 15,
+    time_window_sec: int = 180,
+) -> bool:
+    """Determine if two photos belong to the same burst sequence using a hybrid
+    perceptual hash, filename sequentiality, and timestamp proximity model.
+    """
+    h1 = item1.get("dhash")
+    h2 = item2.get("dhash")
+    if h1 is None or h2 is None:
+        return False
+
+    dist = bin(h1 ^ h2).count("1")
+
+    # If within base threshold, it's a burst directly
+    if dist <= base_max_dist:
+        return True
+
+    fn_seq = are_filenames_sequential(item1.get("filename", ""), item2.get("filename", ""))
+
+    t1 = parse_photo_time(item1)
+    t2 = parse_photo_time(item2)
+    time_prox = False
+    if t1 and t2:
+        try:
+            ts1 = t1.timestamp()
+            ts2 = t2.timestamp()
+            time_prox = abs(ts1 - ts2) <= time_window_sec
+        except Exception:
+            pass
+
+    cat1 = item1.get("figure_category")
+    cat2 = item2.get("figure_category")
+    same_cat = bool(cat1 and cat2 and cat1 == cat2)
+
+    bonus = 0
+    if fn_seq:
+        bonus += 3
+    if time_prox:
+        bonus += 2
+    if same_cat and (fn_seq or time_prox):
+        bonus += 1
+
+    allowed_dist = min(base_max_dist + bonus, 21)
+    return dist <= allowed_dist
+
+
+def cluster_burst_groups(analyses: list[dict], max_hamming_dist: int = 15) -> list[dict]:
+    """Cluster photos into Burst Groups based on perceptual dHash similarity,
+    filename sequence, and timestamp proximity.
     Selects Best Pick (1st place) and tags B-cuts with concrete drop reasons.
     """
     if not analyses:
@@ -91,15 +203,8 @@ def cluster_burst_groups(analyses: list[dict], max_hamming_dist: int = 12) -> li
             parent[root_j] = root_i
 
     for i in range(n):
-        h1 = analyses[i].get("dhash")
-        if h1 is None:
-            continue
         for j in range(i + 1, n):
-            h2 = analyses[j].get("dhash")
-            if h2 is None:
-                continue
-            dist = bin(h1 ^ h2).count("1")
-            if dist <= max_hamming_dist:
+            if are_burst_pair(analyses[i], analyses[j], base_max_dist=max_hamming_dist):
                 union(i, j)
 
     groups: dict[int, list[int]] = {}
@@ -188,7 +293,7 @@ def make_thumbnail_bytes(image_path_or_bytes: Path | bytes, max_dim: int = 800, 
     return out.getvalue()
 
 
-def get_all_analyses(db_path: Path) -> list[dict]:
+def get_all_analyses(db_path: Path, max_hamming_dist: int = 15) -> list[dict]:
     if not db_path.is_file():
         return []
     ensure_db_columns(db_path)
@@ -277,7 +382,7 @@ def get_all_analyses(db_path: Path) -> list[dict]:
                 "dhash": dhash_val,
             }
         )
-    return cluster_burst_groups(results)
+    return cluster_burst_groups(results, max_hamming_dist=max_hamming_dist)
 
 
 DASHBOARD_HTML = """<!doctype html>
@@ -505,11 +610,20 @@ h1 span { font-size: 0.75rem; background: var(--teal); color: white; padding: 3p
       <button class="filter-btn cat-btn" onclick="setCatFilter('스튜디오 연출/디오라마', this)">🎬 스튜디오 연출</button>
       <button class="filter-btn cat-btn" onclick="setCatFilter('일반 피규어 촬영', this)">📷 일반 촬영</button>
     </div>
-    <div class="filter-group" style="margin-top:8px;">
+    <div class="filter-group" style="margin-top:8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
       <span style="font-size:0.84rem;font-weight:700;color:var(--muted)">연사 선별(B-1):</span>
       <button class="filter-btn active burst-btn" onclick="setBurstFilter('all', this)">전체 컷</button>
       <button class="filter-btn burst-btn" onclick="setBurstFilter('best_only', this)" style="color:#065f46;">👑 Best Pick만 보기</button>
       <button class="filter-btn burst-btn" onclick="setBurstFilter('stack', this)" style="color:#0369a1;">🗂️ 연사 묶어보기 (Stack)</button>
+      <div style="display:inline-flex;align-items:center;gap:4px;margin-left:8px;background:#f1f5f9;padding:3px 10px;border-radius:8px;border:1px solid #e2e8f0;">
+        <span style="font-size:0.75rem;font-weight:700;color:#64748b;">연사 감도:</span>
+        <select id="burst-dist-select" class="select-input" style="padding:1px 6px;font-size:0.75rem;height:auto;border:none;background:transparent;font-weight:700;color:#0284c7;cursor:pointer;" onchange="changeBurstSensitivity(this.value)">
+          <option value="12">엄격 (삼각대 연사: 12)</option>
+          <option value="15" selected>표준 (핸드헬드 연사: 15 - 권장)</option>
+          <option value="18">여유 (유사 앵글 묶기: 18)</option>
+          <option value="20">최대 (동일 피규어 넓게: 20)</option>
+        </select>
+      </div>
     </div>
 
     <div style="display:flex;gap:12px;align-items:center;">
@@ -640,12 +754,21 @@ function setCatFilter(cat, btn) {
   renderGallery();
 }
 
+let currentBurstDist = 15;
+
 async function loadData() {
-  const res = await fetch('/api/analyses');
+  const res = await fetch(`/api/analyses?burst_dist=${currentBurstDist}`);
   allData = await res.json();
   updateStats();
   populateCompareSelects();
   renderGallery();
+}
+
+const loadAnalyses = loadData;
+
+async function changeBurstSensitivity(val) {
+  currentBurstDist = parseInt(val) || 15;
+  await loadData();
 }
 
 function updateStats() {
@@ -2352,8 +2475,13 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             self.wfile.write(DASHBOARD_HTML.encode("utf-8"))
             return
 
-        if path == "/api/analyses":
-            data = get_all_analyses(self.db_path)
+        if parsed.path == "/api/analyses":
+            query = parse_qs(parsed.query)
+            try:
+                burst_dist = int(query.get("burst_dist", ["15"])[0])
+            except Exception:
+                burst_dist = 15
+            data = get_all_analyses(self.db_path, max_hamming_dist=burst_dist)
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.end_headers()
@@ -2848,7 +2976,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
 def run_dashboard(port: int = PORT, db_path: Path = DEFAULT_DB_PATH) -> None:
     DashboardRequestHandler.db_path = db_path.resolve()
-    server = HTTPServer(("0.0.0.0", port), DashboardRequestHandler)
+    server = ThreadingHTTPServer(("0.0.0.0", port), DashboardRequestHandler)
     print(f"============================================================")
     print(f" 피규어 포토 그레이더 Culling 대시보드 서버가 시작되었습니다.")
     print(f" 접속 주소: http://localhost:{port}")
