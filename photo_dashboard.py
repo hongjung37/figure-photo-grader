@@ -384,9 +384,10 @@ h1 span { font-size: 0.75rem; background: var(--teal); color: white; padding: 3p
   border: 2px solid #38bdf8;
   box-shadow: 0 0 0 9999px rgba(15, 23, 42, 0.65);
   pointer-events: none;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   display: none;
   z-index: 5;
+  box-sizing: border-box;
 }
 .crop-box-overlay::before {
   content: '';
@@ -401,6 +402,23 @@ h1 span { font-size: 0.75rem; background: var(--teal); color: white; padding: 3p
   left: 33.333%; right: 33.333%; top: 0; bottom: 0;
   border-left: 1px dashed rgba(255,255,255,0.45);
   border-right: 1px dashed rgba(255,255,255,0.45);
+}
+.crop-overlay-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  background: rgba(3, 105, 161, 0.9);
+  color: #f0f9ff;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 .crop-ratio-btn {
   background: white; border: 1px solid var(--line);
@@ -748,7 +766,9 @@ function openDetailModal(id) {
     <div>
       <div class="zoom-wrap" id="zoom-wrap-container" onclick="toggleZoom(event)" onmousemove="panZoom(event)">
         <img class="detail-img" id="detail-modal-img" src="/api/image/${item.id}" alt="${item.filename}" onload="repositionCropOverlay()">
-        <div class="crop-box-overlay" id="crop-box-overlay"></div>
+        <div class="crop-box-overlay" id="crop-box-overlay">
+          <span class="crop-overlay-badge" id="crop-overlay-badge"></span>
+        </div>
         <span class="zoom-hint">🔍 클릭하여 초점/데칼 2.4배 확대</span>
       </div>
       <div class="kbd-hint">
@@ -961,6 +981,118 @@ function renderSnsAdviceContent(advice, recordId) {
   `;
 }
 
+const TARGET_CROP_RATIOS = {
+  instagram_crop_4_5: { name: 'Instagram 4:5', tag: '인스타 4:5 (세로피드)', w: 4, h: 5, ratio: 4 / 5 },
+  instagram_crop_1_1: { name: 'Instagram 1:1', tag: '인스타 1:1 (정방형)', w: 1, h: 1, ratio: 1.0 },
+  x_crop_16_9: { name: 'X 16:9', tag: 'X 16:9 (가로타임라인)', w: 16, h: 9, ratio: 16 / 9 },
+  x_crop_3_4: { name: 'X 3:4', tag: 'X 3:4 (모바일세로)', w: 3, h: 4, ratio: 3 / 4 }
+};
+
+function getImageRenderedRect(img) {
+  if (!img) return null;
+  const cW = img.clientWidth;
+  const cH = img.clientHeight;
+  const nW = img.naturalWidth || 1;
+  const nH = img.naturalHeight || 1;
+  if (!cW || !cH) return null;
+
+  const containerRatio = cW / cH;
+  const imgRatio = nW / nH;
+  let rW, rH, offX, offY;
+
+  if (imgRatio > containerRatio) {
+    rW = cW;
+    rH = cW / imgRatio;
+    offX = 0;
+    offY = (cH - rH) / 2;
+  } else {
+    rH = cH;
+    rW = cH * imgRatio;
+    offX = (cW - rW) / 2;
+    offY = 0;
+  }
+
+  return {
+    left: img.offsetLeft + offX,
+    top: img.offsetTop + offY,
+    width: rW,
+    height: rH,
+    naturalW: nW,
+    naturalH: nH
+  };
+}
+
+function calculateExactCrop(ratioKey, box, naturalW, naturalH) {
+  const target = TARGET_CROP_RATIOS[ratioKey] || { name: '1:1', tag: '1:1', w: 1, h: 1, ratio: 1.0 };
+  const targetRatio = target.ratio;
+
+  const cx = ((box.xmin + box.xmax) / 2) * naturalW;
+  const cy = ((box.ymin + box.ymax) / 2) * naturalH;
+
+  const rawW = Math.max(1, (box.xmax - box.xmin) * naturalW);
+  const rawH = Math.max(1, (box.ymax - box.ymin) * naturalH);
+
+  let cropW, cropH;
+  if (rawW / rawH > targetRatio) {
+    cropW = rawW;
+    cropH = cropW / targetRatio;
+  } else {
+    cropH = rawH;
+    cropW = cropH * targetRatio;
+  }
+
+  if (cropW > naturalW) {
+    cropW = naturalW;
+    cropH = cropW / targetRatio;
+  }
+  if (cropH > naturalH) {
+    cropH = naturalH;
+    cropW = cropH * targetRatio;
+  }
+  if (cropW > naturalW) {
+    cropW = naturalW;
+    cropH = cropW / targetRatio;
+  }
+
+  let sx = cx - cropW / 2;
+  let sy = cy - cropH / 2;
+
+  if (sx < 0) sx = 0;
+  if (sx + cropW > naturalW) sx = naturalW - cropW;
+  if (sy < 0) sy = 0;
+  if (sy + cropH > naturalH) sy = naturalH - cropH;
+
+  sx = Math.max(0, sx);
+  sy = Math.max(0, sy);
+
+  let intH = Math.max(1, Math.floor(cropH));
+  let intW = Math.max(1, Math.round(intH * targetRatio));
+
+  if (intW > naturalW) {
+    intW = Math.floor(naturalW);
+    intH = Math.max(1, Math.round(intW / targetRatio));
+  }
+  if (intH > naturalH) {
+    intH = Math.floor(naturalH);
+    intW = Math.max(1, Math.round(intH * targetRatio));
+  }
+
+  const intSx = Math.max(0, Math.min(naturalW - intW, Math.round(sx)));
+  const intSy = Math.max(0, Math.min(naturalH - intH, Math.round(sy)));
+
+  return {
+    target,
+    sx: intSx,
+    sy: intSy,
+    sw: intW,
+    sh: intH,
+    normX: intSx / naturalW,
+    normY: intSy / naturalH,
+    normW: intW / naturalW,
+    normH: intH / naturalH
+  };
+}
+
 function selectCropRatio(ratioKey, recordId) {
   const item = allData.find(d => d.id === recordId);
   if (!item || !item.sns_advice) return;
@@ -995,24 +1127,42 @@ function clearCropOverlay() {
 function repositionCropOverlay() {
   const overlay = document.getElementById('crop-box-overlay');
   const img = document.getElementById('detail-modal-img');
-  if (!overlay || !img || !currentCropBox) {
+  if (!overlay || !img || !currentCropBox || !currentCropRatioKey) {
     if (overlay) overlay.style.display = 'none';
     return;
   }
-  const cWidth = img.clientWidth;
-  const cHeight = img.clientHeight;
-  if (cWidth === 0 || cHeight === 0) return;
+  if (img.classList.contains('zoomed')) {
+    overlay.style.display = 'none';
+    return;
+  }
 
-  const top = Math.round(currentCropBox.ymin * cHeight);
-  const left = Math.round(currentCropBox.xmin * cWidth);
-  const width = Math.round((currentCropBox.xmax - currentCropBox.xmin) * cWidth);
-  const height = Math.round((currentCropBox.ymax - currentCropBox.ymin) * cHeight);
+  const rect = getImageRenderedRect(img);
+  if (!rect || rect.width <= 0 || rect.height <= 0) {
+    overlay.style.display = 'none';
+    return;
+  }
+
+  const crop = calculateExactCrop(currentCropRatioKey, currentCropBox, rect.naturalW, rect.naturalH);
+  if (!crop) {
+    overlay.style.display = 'none';
+    return;
+  }
+
+  const top = Math.round(rect.top + crop.normY * rect.height);
+  const left = Math.round(rect.left + crop.normX * rect.width);
+  const width = Math.round(crop.normW * rect.width);
+  const height = Math.round(crop.normH * rect.height);
 
   overlay.style.top = `${top}px`;
   overlay.style.left = `${left}px`;
   overlay.style.width = `${width}px`;
   overlay.style.height = `${height}px`;
   overlay.style.display = 'block';
+
+  const badge = document.getElementById('crop-overlay-badge');
+  if (badge) {
+    badge.textContent = `${crop.target.tag} (${crop.sw}×${crop.sh})`;
+  }
 }
 
 window.addEventListener('resize', repositionCropOverlay);
@@ -1031,21 +1181,19 @@ async function downloadCroppedImage(ratioKey, recordId) {
     img.onerror = reject;
   });
 
-  const origW = img.naturalWidth;
-  const origH = img.naturalHeight;
-  const sx = Math.max(0, Math.round(box.xmin * origW));
-  const sy = Math.max(0, Math.round(box.ymin * origH));
-  const sw = Math.min(origW - sx, Math.round((box.xmax - box.xmin) * origW));
-  const sh = Math.min(origH - sy, Math.round((box.ymax - box.ymin) * origH));
+  const origW = img.naturalWidth || 1;
+  const origH = img.naturalHeight || 1;
+  const crop = calculateExactCrop(ratioKey, box, origW, origH);
+  if (!crop || crop.sw <= 0 || crop.sh <= 0) return;
 
   const canvas = document.createElement('canvas');
-  canvas.width = sw;
-  canvas.height = sh;
+  canvas.width = crop.sw;
+  canvas.height = crop.sh;
   const ctx = canvas.getContext('2d');
-  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+  ctx.drawImage(img, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, crop.sw, crop.sh);
 
   const safeName = item.filename.replace(/\\.[^/.]+$/, '');
-  const outName = `${safeName}_${ratioKey.replace('crop_', '')}.png`;
+  const outName = `${safeName}_${ratioKey.replace('crop_', '')}_${crop.sw}x${crop.sh}.png`;
   canvas.toBlob((blob) => {
     if (!blob) return;
     const url = URL.createObjectURL(blob);
@@ -1208,6 +1356,7 @@ function toggleZoom(e) {
   } else {
     img.style.transformOrigin = 'center center';
   }
+  repositionCropOverlay();
 }
 
 function panZoom(e) {
