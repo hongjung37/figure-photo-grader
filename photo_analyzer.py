@@ -708,7 +708,7 @@ def run_batch_pipeline(
 
     def _process_one(photo_path: Path) -> dict[str, Any]:
         photo = prepare_photo(photo_path)
-        analysis = analyze_with_gemini(photo, model=model, category_hint=args.category if args.category != "auto" else None)
+        analysis = analyze_with_gemini(photo, model=model, category_hint=category if category != "auto" else None)
         record_id = save_analysis(db_path, photo, model, analysis)
         report_path = None
         rel_report = None
