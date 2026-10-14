@@ -220,8 +220,9 @@ h1 span { font-size: 0.75rem; background: var(--teal); color: white; padding: 3p
 /* Upload Modal */
 .upload-btn { background: var(--blue); color: white; border: none; padding: 9px 18px; border-radius: 10px; font-weight: 700; font-size: 0.88rem; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: background .15s; }
 .upload-btn:hover { background: #2563eb; }
-.drop-zone { border: 2px dashed #94a3b8; border-radius: 16px; padding: 36px 20px; text-align: center; color: var(--muted); cursor: pointer; margin: 18px 0; transition: border-color .15s; }
-.drop-zone:hover { border-color: var(--blue); background: #f8fafc; }
+.drop-zone { border: 2px dashed #94a3b8; border-radius: 16px; padding: 28px 20px; text-align: center; color: var(--muted); cursor: pointer; margin: 18px 0; transition: all .15s; }
+.drop-zone:hover, .drop-zone.drag-over { border-color: var(--blue); background: #f0f7ff; }
+
 
 @media (max-width: 850px) {
   .compare-columns, .compare-selectors, .modal-grid { grid-template-columns: 1fr; }
@@ -331,13 +332,29 @@ h1 span { font-size: 0.75rem; background: var(--teal); color: white; padding: 3p
       <option value="general">📷 일반 피규어 촬영 (기본 전시/조형 중심)</option>
     </select>
 
-    <div class="drop-zone" onclick="document.getElementById('file-input').click()">
-      <div style="font-size:2rem;margin-bottom:8px;">📷</div>
-      <strong>사진 파일을 클릭하여 선택하거나 드래그하세요</strong>
-      <div style="font-size:0.78rem;margin-top:6px;">지원: JPG, PNG, WEBP, MPO</div>
-      <input type="file" id="file-input" style="display:none" accept="image/jpeg,image/png,image/webp" onchange="handleFileSelect(event)">
+    <div class="drop-zone" id="drop-zone" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)">
+      <div style="font-size:2.2rem;margin-bottom:6px;">📁</div>
+      <strong style="font-size:0.95rem;">사진 파일(들) 또는 폴더를 드래그하여 놓으세요</strong>
+      <div style="font-size:0.78rem;margin:6px 0 14px;color:var(--muted)">폴더를 통째로 놓으면 하위 사진까지 자동 탐색 (JPG, PNG, WEBP, MPO 지원)</div>
+      <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;" onclick="event.stopPropagation()">
+        <button type="button" class="upload-btn" style="padding:7px 14px;font-size:0.82rem;" onclick="document.getElementById('file-input-multi').click()">📸 여러 사진 선택</button>
+        <button type="button" class="upload-btn" style="background:#0d9488;padding:7px 14px;font-size:0.82rem;" onclick="document.getElementById('folder-input').click()">📁 폴더 통째로 선택</button>
+      </div>
+      <input type="file" id="file-input-multi" style="display:none" accept="image/jpeg,image/png,image/webp" multiple onchange="handleFilesSelect(this.files)">
+      <input type="file" id="folder-input" style="display:none" webkitdirectory directory multiple onchange="handleFilesSelect(this.files)">
     </div>
-    <div id="upload-status" style="font-size:0.88rem;font-weight:600;text-align:center;"></div>
+
+    <div id="progress-container" style="display:none;margin-top:16px;">
+      <div style="display:flex;justify-content:space-between;font-size:0.84rem;margin-bottom:6px;">
+        <span id="progress-text" style="font-weight:700;color:var(--navy);">분석 준비 중...</span>
+        <span id="progress-percent" style="font-weight:700;color:var(--blue);">0%</span>
+      </div>
+      <div style="background:#e2e8f0;border-radius:999px;height:10px;overflow:hidden;">
+        <div id="progress-bar" style="background:linear-gradient(90deg, #3b82f6, #0d9488);height:100%;width:0%;transition:width 0.2s;"></div>
+      </div>
+      <div id="progress-current-file" style="font-size:0.78rem;color:var(--muted);margin-top:6px;overflow-wrap:anywhere;"></div>
+    </div>
+    <div id="upload-status" style="font-size:0.88rem;font-weight:600;text-align:center;margin-top:12px;"></div>
   </div>
 </div>
 
@@ -768,51 +785,192 @@ function updateComparison() {
   `).join('');
 }
 
+const VALID_EXTS = ['.jpg', '.jpeg', '.png', '.webp', '.mpo'];
+
+function isImageFile(file) {
+  if (!file || !file.name) return false;
+  const name = file.name.toLowerCase();
+  return VALID_EXTS.some(ext => name.endsWith(ext));
+}
+
+function handleDragOver(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  const dz = document.getElementById('drop-zone');
+  if (dz) dz.classList.add('drag-over');
+}
+
+function handleDragLeave(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  const dz = document.getElementById('drop-zone');
+  if (dz) dz.classList.remove('drag-over');
+}
+
+async function getFilesFromEntry(entry) {
+  if (entry.isFile) {
+    return new Promise((resolve) => {
+      entry.file(f => resolve([f]), () => resolve([]));
+    });
+  } else if (entry.isDirectory) {
+    const dirReader = entry.createReader();
+    const entries = await new Promise((resolve) => {
+      const all = [];
+      function readEntries() {
+        dirReader.readEntries(results => {
+          if (!results.length) {
+            resolve(all);
+          } else {
+            all.push(...results);
+            readEntries();
+          }
+        }, () => resolve(all));
+      }
+      readEntries();
+    });
+    const subFiles = [];
+    for (const child of entries) {
+      const fList = await getFilesFromEntry(child);
+      subFiles.push(...fList);
+    }
+    return subFiles;
+  }
+  return [];
+}
+
+let isBatchUploading = false;
+
 function openUploadModal() {
   document.getElementById('upload-modal').style.display = 'flex';
   document.getElementById('upload-status').textContent = '';
+  document.getElementById('progress-container').style.display = 'none';
+  document.getElementById('progress-bar').style.width = '0%';
+  document.getElementById('progress-percent').textContent = '0%';
+  document.getElementById('progress-text').textContent = '';
+  document.getElementById('progress-current-file').textContent = '';
+  // reset file inputs
+  const mInput = document.getElementById('file-input-multi');
+  if (mInput) mInput.value = '';
+  const fInput = document.getElementById('folder-input');
+  if (fInput) fInput.value = '';
 }
+
 function closeUploadModal(e) {
+  if (isBatchUploading) {
+    if (!confirm('현재 사진 분석이 진행 중입니다. 닫으시겠습니까? (백그라운드에서 분석은 계속됩니다)')) return;
+  }
   if (!e || e.target.id === 'upload-modal') {
     document.getElementById('upload-modal').style.display = 'none';
   }
 }
 
-async function handleFileSelect(e) {
-  const file = e.target.files[0];
-  if (!file) return;
+async function handleFilesSelect(fileList) {
+  if (!fileList || fileList.length === 0 || isBatchUploading) return;
+  const files = Array.from(fileList).filter(isImageFile);
+  if (files.length === 0) {
+    alert('선택된 항목에 지원하는 사진 파일(JPG, PNG, WEBP, MPO)이 없습니다.');
+    return;
+  }
+  await processBatchUpload(files);
+}
+
+async function handleDrop(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  const dz = document.getElementById('drop-zone');
+  if (dz) dz.classList.remove('drag-over');
+  if (isBatchUploading) return;
+
+  let collected = [];
+  const items = e.dataTransfer.items;
+  if (items && items.length > 0 && items[0].webkitGetAsEntry) {
+    for (let i = 0; i < items.length; i++) {
+      const entry = items[i].webkitGetAsEntry();
+      if (entry) {
+        const fList = await getFilesFromEntry(entry);
+        collected.push(...fList);
+      }
+    }
+  } else if (e.dataTransfer.files) {
+    collected = Array.from(e.dataTransfer.files);
+  }
+
+  const validFiles = collected.filter(isImageFile);
+  if (validFiles.length === 0) {
+    alert('드롭된 항목에 지원하는 사진 파일(JPG, PNG, WEBP, MPO)이 없습니다.');
+    return;
+  }
+  await processBatchUpload(validFiles);
+}
+
+async function processBatchUpload(files) {
+  isBatchUploading = true;
   const tier = document.getElementById('upload-tier').value;
   const category = document.getElementById('upload-category').value;
+  const progContainer = document.getElementById('progress-container');
+  const progText = document.getElementById('progress-text');
+  const progPercent = document.getElementById('progress-percent');
+  const progBar = document.getElementById('progress-bar');
+  const progFile = document.getElementById('progress-current-file');
   const status = document.getElementById('upload-status');
-  status.textContent = 'Gemini API 분석 중입니다 (수 초 소요)...';
-  status.style.color = 'var(--blue)';
 
-  const formData = new FormData();
-  formData.append('image', file);
-  formData.append('tier', tier);
-  formData.append('category', category);
+  progContainer.style.display = 'block';
+  status.textContent = '';
+  
+  const total = files.length;
+  let successCount = 0;
+  let failCount = 0;
 
-  try {
-    const res = await fetch('/api/analyze', { method: 'POST', body: formData });
-    const result = await res.json();
-    if (result.success) {
-      status.textContent = `분석 완료! (${result.analysis.final_score.toFixed(1)}점)`;
-      status.style.color = 'var(--teal)';
-      setTimeout(() => {
-        closeUploadModal();
-        loadData();
-      }, 1000);
-    } else {
-      status.textContent = `오류: ${result.error}`;
+  for (let i = 0; i < total; i++) {
+    const file = files[i];
+    const currentNum = i + 1;
+    const pct = Math.round(((i) / total) * 100);
+    progPercent.textContent = `${pct}%`;
+    progBar.style.width = `${pct}%`;
+    progText.textContent = `[${currentNum} / ${total}장] Gemini 분석 진행 중...`;
+    progFile.textContent = `현재 분석 파일: ${file.name} (${(file.size / 1024 / 1024).toFixed(1)}MB)`;
+
+    const formData = new FormData();
+    formData.append('image', file, file.name);
+    formData.append('tier', tier);
+    formData.append('category', category);
+
+    try {
+      const res = await fetch('/api/analyze', { method: 'POST', body: formData });
+      const result = await res.json();
+      if (result.success) {
+        successCount++;
+        status.textContent = `✓ [${currentNum}/${total}] ${file.name} 완료 (${result.analysis.final_score.toFixed(1)}점 - ${result.analysis.figure_category})`;
+        status.style.color = 'var(--teal)';
+      } else {
+        failCount++;
+        status.textContent = `✗ [${currentNum}/${total}] ${file.name} 실패: ${result.error || '오류'}`;
+        status.style.color = '#e11d48';
+      }
+    } catch (err) {
+      failCount++;
+      status.textContent = `✗ [${currentNum}/${total}] ${file.name} 전송 오류: ${err.message}`;
       status.style.color = '#e11d48';
     }
-  } catch (err) {
-    status.textContent = `업로드 실패: ${err.message}`;
-    status.style.color = '#e11d48';
   }
+
+  progPercent.textContent = '100%';
+  progBar.style.width = '100%';
+  progText.textContent = '모든 분석이 완료되었습니다!';
+  progFile.textContent = '';
+  
+  status.textContent = `🎉 총 ${total}장 중 ${successCount}장 분석 성공${failCount > 0 ? `, ${failCount}장 실패` : ''}`;
+  status.style.color = successCount > 0 ? 'var(--teal)' : '#e11d48';
+
+  setTimeout(() => {
+    isBatchUploading = false;
+    closeUploadModal();
+    loadData();
+  }, 1500);
 }
 
 window.addEventListener('DOMContentLoaded', loadData);
+
 </script>
 </body>
 </html>
