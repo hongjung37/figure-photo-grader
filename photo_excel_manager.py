@@ -57,6 +57,8 @@ ANALYSIS_HEADERS = {
     "강점(줄바꿈 구분)": "strengths",
     "개선점(줄바꿈 구분)": "improvements",
     "피규어 유형": "figure_category",
+    "초점 상태": "focus_status",
+    "초점 분석": "focus_notes",
     "워터마크 촬영 정보(JSON)": "detected_camera_settings",
 }
 AESTHETIC_TAG_HEADERS = {
@@ -223,6 +225,8 @@ def _format_workbook(path: Path, row_count: int) -> None:
         "촬영 기술 점수": 15,
         "최종 점수": 12,
         "피규어 유형": 18,
+        "초점 상태": 14,
+        "초점 분석": 30,
         "워터마크 촬영 정보(JSON)": 32,
         STATUS_HEADER: 14,
         USER_NOTES_HEADER: 36,

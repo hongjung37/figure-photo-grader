@@ -127,3 +127,11 @@ FIGURE_CATEGORIES = {
 }
 
 FIGURE_CATEGORY_CHOICES = tuple(cat["label"] for cat in FIGURE_CATEGORIES.values())
+
+FOCUS_STATUS_OPTIONS = (
+    "완벽 칼초점",
+    "미세 앞핀",
+    "미세 뒤핀",
+    "초점 이탈",
+    "판별 불가",
+)

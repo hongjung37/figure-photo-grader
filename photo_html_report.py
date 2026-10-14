@@ -68,6 +68,8 @@ def render_html_report(
     final_score = float(analysis.final_score)
     final_grade = escape(get_score_grade(final_score))
     category_label = escape(getattr(analysis, 'figure_category', '일반 피규어 촬영'))
+    focus_status = escape(getattr(analysis, 'focus_status', '완벽 칼초점'))
+    focus_notes = escape(getattr(analysis, 'focus_notes', ''))
 
     watermark_badge = ""
     detected_settings = getattr(analysis, "detected_camera_settings", None)
@@ -75,6 +77,8 @@ def render_html_report(
         sp_text = " · ".join(f"{v}" for v in detected_settings.values() if v)
         if sp_text:
             watermark_badge = f'<div style="margin-top:8px;font-size:0.82rem;color:#4338ca;background:#eef2ff;padding:4px 10px;border-radius:6px;display:inline-block"><b>🔍 사진 내 워터마크 감지:</b> {escape(sp_text)}</div>'
+    if focus_notes:
+        watermark_badge += f'<div style="margin-top:6px;font-size:0.82rem;color:#0369a1;background:#f0f9ff;padding:4px 10px;border-radius:6px;display:inline-block"><b>🎯 초점 정밀 분석:</b> {focus_notes}</div>'
     return f"""<!doctype html>
 <html lang="ko">
 <head>
@@ -152,7 +156,7 @@ footer {{ margin-top:24px; color:var(--muted); font-size:.8rem; text-align:cente
       <p class="eyebrow">PHOTO ANALYSIS REPORT</p>
       <h1>사진 분석 결과</h1>
       <p class="filename">{filename}</p>
-      <div class="meta"><span style="background:#11a898;border-color:#11a898;font-weight:700;">{category_label}</span><span>{photo.width} × {photo.height}px</span><span>{escape(photo.image_format)}</span><span>{escape(model)}</span></div>
+      <div class="meta"><span style="background:#11a898;border-color:#11a898;font-weight:700;">{category_label}</span><span style="background:#4f46e5;border-color:#4f46e5;font-weight:700;">🎯 {focus_status}</span><span>{photo.width} × {photo.height}px</span><span>{escape(photo.image_format)}</span><span>{escape(model)}</span></div>
     </div>
     <div class="final-score" role="img" aria-label="최종 점수 {final_score:.1f}점 ({final_grade})">
       <div><strong>{final_score:.1f}</strong><span>최종 점수 / 10</span><div class="grade-pill">{final_grade}</div></div>

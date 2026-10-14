@@ -110,6 +110,14 @@ class PhotoAnalysis(BaseModel):
         default=None,
         description="사진 하단 프레임이나 워터마크에 인쇄된 시각적 촬영 설정(카메라, 조리개, 셔터, ISO, 렌즈 등) 추출 결과. 없거나 불확실하면 null",
     )
+    focus_status: str = Field(
+        default="완벽 칼초점",
+        description="피규어 눈동자/페이스 초점 핀 정밀 판정: '완벽 칼초점', '미세 앞핀', '미세 뒤핀', '초점 이탈', '판별 불가' 중 택1",
+    )
+    focus_notes: str = Field(
+        default="",
+        description="초점이 맞은 부위(눈동자, 의상, 배경 등) 및 심도 상태에 대한 1줄 분석 근거",
+    )
     aesthetic_tags: AestheticTags = Field(
         default_factory=AestheticTags.empty,
         description="시각적 근거에 기반한 범주별 미학 태그",
@@ -141,6 +149,27 @@ class PhotoAnalysis(BaseModel):
         if not 0 <= value <= 10:
             raise ValueError("점수는 0 이상 10 이하여야 합니다.")
         return value
+
+
+class LightroomAdvice(BaseModel):
+    """Pydantic model for on-demand Adobe Lightroom post-processing slider recommendations."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    exposure: float = Field(description="노출 슬라이더 추천값 (-5.00 ~ +5.00, 소수점 둘째자리)")
+    contrast: int = Field(description="대비 슬라이더 추천값 (-100 ~ +100)")
+    highlights: int = Field(description="밝은 영역 (하이라이트) 추천값 (-100 ~ +100)")
+    shadows: int = Field(description="어두운 영역 (그림자) 추천값 (-100 ~ +100)")
+    whites: int = Field(description="흰색 계열 추천값 (-100 ~ +100)")
+    blacks: int = Field(description="검정 계열 추천값 (-100 ~ +100)")
+    texture: int = Field(description="텍스처 슬라이더 추천값 (-100 ~ +100)")
+    clarity: int = Field(description="명료도 (부분 대비) 추천값 (-100 ~ +100)")
+    dehaze: int = Field(description="디헤이즈 추천값 (-100 ~ +100)")
+    vibrance: int = Field(description="활기 슬라이더 추천값 (-100 ~ +100)")
+    saturation: int = Field(description="채도 슬라이더 추천값 (-100 ~ +100)")
+    temp_tint_notes: str = Field(description="화이트밸런스/색온도/색조 가이드 (예: 5200K 유지, 틴트 +4 등)")
+    retouching_guide: str = Field(description="피규어 특성에 맞춘 마스킹 및 세부 후보정 팁 (아이 데칼 캐치라이트 살리기, 피부 번들거림 방지 등)")
+
 
 
 @dataclass(frozen=True)
@@ -402,6 +431,12 @@ figure_category 값에 반드시 '{cat_info['label']}'을 입력하고, 아래 �
 - lighting: 빛의 방향과 질, 노출, 하이라이트/그림자 디테일 ([장점]과 [단점] 구분)
 - color: 색조, 채도, 색 조화와 분위기 ([장점]과 [단점] 구분)
 - technique: 초점/선명도, 흔들림, 심도, 그리고 아래 EXIF 촬영 설정의 적절성 ([장점]과 [단점] 구분)
+- focus_status: 피규어 눈동자(아이 데칼) 및 안면 조형의 초점 정밀 상태 ('완벽 칼초점', '미세 앞핀', '미세 뒤핀', '초점 이탈', '판별 불가' 중 택1)
+  * 완벽 칼초점: 눈동자 데칼의 경계면과 반사광이 타협 없이 극도로 선명함
+  * 미세 앞핀: 눈동자보다 앞쪽(앞머리 끝, 코끝, 무기)에 초점이 맺힘
+  * 미세 뒤핀: 눈동자보다 뒤쪽(귀, 머리 뒤편, 어깨)에 초점이 맺힘
+  * 초점 이탈: 피규어 얼굴 전반에 핀이 맞지 않거나 흔들림
+- focus_notes: 초점이 맞은 위치와 심도 상태에 대한 1줄 직관적 판정 근거
 - final_score: 위 점수 기준 척도(7: 우수, 8: 매우 우수, 9: 프로/전문가급)를 엄격히 준수한 종합 점수
 - final_reason: 최종 점수의 객관적 근거 (장점과 단점을 균형 있게 종합하여 점수 이유 서술)
 - strengths: 사진의 주요 장점 목록 (실제 돋보이는 핵심 강점 2~3개)
@@ -464,6 +499,74 @@ def analyze_with_gemini(photo: PreparedPhoto, model: str = DEFAULT_MODEL, catego
             if not output_text:
                 raise RuntimeError("Gemini가 JSON 분석 결과를 반환하지 않았습니다.")
             return PhotoAnalysis.model_validate_json(output_text)
+        except Exception as exc:
+            err_msg = str(exc)
+            is_transient = any(
+                code in err_msg
+                for code in ("503", "429", "high demand", "ResourceExhausted", "UNAVAILABLE", "service_unavailable")
+            )
+            if is_transient and attempt < max_retries:
+                print(f"[재시도 {attempt}/{max_retries}] API 일시적 지연/오류 발생. {backoff:.1f}초 후 재시도합니다...", file=sys.stderr)
+                time.sleep(backoff)
+                backoff *= 2.0
+            else:
+                raise
+
+
+def generate_lightroom_advice(photo: PreparedPhoto, model: str = DEFAULT_MODEL) -> LightroomAdvice:
+    """Generate on-demand Adobe Lightroom post-processing slider recommendations."""
+    load_dotenv(dotenv_path=ENV_FILE_PATH, override=False)
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY를 .env 파일 또는 환경변수에 설정해 주세요.")
+
+    prompt = """당신은 피규어/서브컬처 전문 사진 리터처이자 Adobe Lightroom 마스터입니다.
+제시된 피규어 사진의 노출, 명암비, 하이라이트(번들거림), 암부 섀도우, 색감 및 피부 질감을 면밀히 분석하고,
+Lightroom 기본 현상(Basic Tone) 슬라이더 추천 수치와 세부 리터칭 가이드를 JSON 형식으로 제시해 주세요.
+
+[보정 슬라이더 기준]
+- exposure: 노출 보정치 (EV 단위, -5.00 ~ +5.00, 보통 -1.0 ~ +1.0 사이 소수점 둘째자리)
+- contrast: 대비 (-100 ~ +100)
+- highlights: 밝은 영역 (-100 ~ +100, 피규어 플라스틱/도색의 과도한 하이라이트 번들거림을 억제하려면 음수 추천)
+- shadows: 어두운 영역 (-100 ~ +100, 피규어 머리카락 안쪽이나 옷주름의 디테일을 살리려면 양수 추천)
+- whites: 흰색 계열 (-100 ~ +100)
+- blacks: 검정 계열 (-100 ~ +100)
+- texture: 텍스처 (-100 ~ +100, 피부는 살짝 부드럽게 음수, 무기/의상 질감은 양수)
+- clarity: 명료도 (-100 ~ +100)
+- dehaze: 디헤이즈 (-100 ~ +100)
+- vibrance: 활기 (-100 ~ +100)
+- saturation: 채도 (-100 ~ +100)
+- temp_tint_notes: 색온도(K) 및 틴트(Green/Magenta) 화이트밸런스 추천 가이드
+- retouching_guide: 브러시/원형 마스크 활용법, 아이 데칼 캐치라이트 강조, 피규어 안면 번들거림 제어 등 실전 후보정 팁
+
+출력은 반드시 지정된 JSON 스키마를 준수하고 한국어로 작성하세요."""
+
+    client = genai.Client(api_key=api_key)
+    max_retries = 5
+    backoff = 3.0
+    for attempt in range(1, max_retries + 1):
+        try:
+            interaction = client.interactions.create(
+                model=model,
+                input=[
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "image",
+                        "data": base64.b64encode(photo.upload_bytes).decode("ascii"),
+                        "mime_type": photo.upload_mime_type,
+                    },
+                ],
+                response_format={
+                    "type": "text",
+                    "mime_type": "application/json",
+                    "schema": LightroomAdvice.model_json_schema(),
+                },
+                store=False,
+            )
+            output_text = interaction.output_text
+            if not output_text:
+                raise RuntimeError("Gemini가 Lightroom 보정 제안 JSON을 반환하지 않았습니다.")
+            return LightroomAdvice.model_validate_json(output_text)
         except Exception as exc:
             err_msg = str(exc)
             is_transient = any(
@@ -566,6 +669,8 @@ def save_analysis(
         existing_cols = [r[1] for r in connection.execute("PRAGMA table_info(photo_analyses)").fetchall()]
         if "thumbnail" not in existing_cols:
             connection.execute("ALTER TABLE photo_analyses ADD COLUMN thumbnail BLOB")
+        if "lr_advice_json" not in existing_cols:
+            connection.execute("ALTER TABLE photo_analyses ADD COLUMN lr_advice_json TEXT")
         ensure_tag_tables(connection)
         connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_photo_analyses_sha256 "

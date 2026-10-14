@@ -17,15 +17,33 @@ from urllib.parse import parse_qs, urlparse
 from photo_analyzer import (
     DEFAULT_DB_PATH,
     MODEL_PRESETS,
+    LightroomAdvice,
     PhotoAnalysis,
     PreparedPhoto,
     analyze_with_gemini,
+    generate_lightroom_advice,
     prepare_photo,
     save_analysis,
 )
 from photo_tag_schema import AESTHETIC_TAG_CATEGORIES, get_score_grade
 
 PORT = 8080
+
+
+def ensure_db_columns(db_path: Path) -> None:
+    if not db_path.is_file():
+        return
+    with closing(sqlite3.connect(db_path)) as conn, conn:
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(photo_analyses)").fetchall()]
+        if "thumbnail" not in cols:
+            conn.execute("ALTER TABLE photo_analyses ADD COLUMN thumbnail BLOB")
+        if "lr_advice_json" not in cols:
+            conn.execute("ALTER TABLE photo_analyses ADD COLUMN lr_advice_json TEXT")
+        if "review_status" not in cols:
+            conn.execute("ALTER TABLE photo_analyses ADD COLUMN review_status TEXT DEFAULT '미검토'")
+        if "user_notes" not in cols:
+            conn.execute("ALTER TABLE photo_analyses ADD COLUMN user_notes TEXT DEFAULT ''")
+
 
 
 def make_thumbnail_bytes(image_path_or_bytes: Path | bytes, max_dim: int = 800, quality: int = 82) -> bytes:
@@ -47,6 +65,7 @@ def make_thumbnail_bytes(image_path_or_bytes: Path | bytes, max_dim: int = 800, 
 def get_all_analyses(db_path: Path) -> list[dict]:
     if not db_path.is_file():
         return []
+    ensure_db_columns(db_path)
     from contextlib import closing
     with closing(sqlite3.connect(db_path)) as conn:
         conn.row_factory = sqlite3.Row
@@ -74,6 +93,13 @@ def get_all_analyses(db_path: Path) -> list[dict]:
         except Exception:
             continue
 
+        lr_advice = None
+        if "lr_advice_json" in row.keys() and row["lr_advice_json"]:
+            try:
+                lr_advice = json.loads(row["lr_advice_json"])
+            except Exception:
+                pass
+
         final_score = float(analysis_data.get("final_score", 0))
         results.append(
             {
@@ -90,6 +116,8 @@ def get_all_analyses(db_path: Path) -> list[dict]:
                 "final_score": final_score,
                 "grade": get_score_grade(final_score),
                 "figure_category": analysis_data.get("figure_category", "일반 피규어 촬영"),
+                "focus_status": analysis_data.get("focus_status", "완벽 칼초점"),
+                "focus_notes": analysis_data.get("focus_notes", ""),
                 "composition_score": float(analysis_data.get("composition_score", 0)),
                 "composition_notes": analysis_data.get("composition_notes", ""),
                 "lighting_score": float(analysis_data.get("lighting_score", 0)),
@@ -103,6 +131,7 @@ def get_all_analyses(db_path: Path) -> list[dict]:
                 "improvements": analysis_data.get("improvements", []),
                 "aesthetic_tags": tags_by_id.get(aid, analysis_data.get("aesthetic_tags", {})),
                 "detected_camera_settings": analysis_data.get("detected_camera_settings"),
+                "lr_advice": lr_advice,
                 "exif": exif_data,
             }
         )
@@ -183,6 +212,10 @@ h1 span { font-size: 0.75rem; background: var(--teal); color: white; padding: 3p
 .list-box { background: #f8fafc; padding: 14px 18px; border-radius: 12px; margin-top: 12px; }
 .list-box h4 { margin: 0 0 8px; font-size: 0.92rem; }
 .list-box ul { margin: 0; padding-left: 20px; font-size: 0.86rem; color: #475569; }
+.lr-metric { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px; text-align: center; }
+.lr-metric span { display: block; font-size: 0.72rem; color: var(--muted); margin-bottom: 2px; }
+.lr-metric strong { display: block; font-size: 0.95rem; color: #1e293b; font-weight: 700; }
+
 
 /* Upload Modal */
 .upload-btn { background: var(--blue); color: white; border: none; padding: 9px 18px; border-radius: 10px; font-weight: 700; font-size: 0.88rem; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: background .15s; }
@@ -384,6 +417,7 @@ function renderGallery() {
           <div>
             <h3 class="card-title">${item.filename}</h3>
             <span style="display:inline-block;margin-top:4px;font-size:0.75rem;font-weight:700;color:#4f46e5;background:#eef2ff;padding:2px 7px;border-radius:6px;">${item.figure_category}</span>
+            <span style="display:inline-block;margin-top:4px;margin-left:4px;font-size:0.75rem;font-weight:700;color:#0d9488;background:#f0fdfa;padding:2px 7px;border-radius:6px;">🎯 ${item.focus_status || '완벽 칼초점'}</span>
           </div>
           <div class="score-badge">
             <span class="score-num">${item.final_score.toFixed(1)}</span>
@@ -474,6 +508,10 @@ function openDetailModal(id) {
         <h4><span>📷 촬영 기술 평가</span> <strong>${item.technique_score.toFixed(1)}</strong></h4>
         <div>${item.technique_notes}</div>
       </div>
+      <div class="note-item" style="border-left: 3px solid #6366f1;">
+        <h4><span>🎯 피규어 눈동자/페이스 초점 핀</span> <strong style="color:#4f46e5;">${item.focus_status || '완벽 칼초점'}</strong></h4>
+        <div>${item.focus_notes ? item.focus_notes : '눈동자 아이 데칼 및 안면 조형 핀 상태 양호'}</div>
+      </div>
 
       <div class="list-box">
         <h4 style="color:var(--teal)">✓ 주요 장점</h4>
@@ -483,10 +521,80 @@ function openDetailModal(id) {
         <h4 style="color:#e11d48">✗ 단점 및 다음 촬영 개선점</h4>
         <ul>${item.improvements.map(i => `<li>${i}</li>`).join('')}</ul>
       </div>
+
+      <div class="lr-advice-box" style="margin-top:16px;background:#f8fafc;border:1px solid #cbd5e1;border-radius:14px;padding:16px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+          <h3 style="margin:0;font-size:1.02rem;display:flex;align-items:center;gap:6px;">
+            <span style="background:#312e81;color:white;padding:2px 7px;border-radius:4px;font-size:0.78rem;">Lr</span>
+            Adobe Lightroom 추천 보정 수치
+          </h3>
+          <button class="filter-btn" style="background:#4f46e5;color:white;border-color:#4f46e5;" onclick="requestLrAdvice(${item.id}, this)">
+            ${item.lr_advice ? '🔄 보정 수치 다시 제안' : '🛠️ 라이트룸 보정 수치 제안 받기'}
+          </button>
+        </div>
+        <div id="lr-advice-content">
+          ${renderLrAdviceContent(item.lr_advice)}
+        </div>
+      </div>
     </div>
   `;
   modal.style.display = 'flex';
 }
+
+function renderLrAdviceContent(advice) {
+  if (!advice) {
+    return `<div style="font-size:0.86rem;color:var(--muted);text-align:center;padding:14px 0;">
+      아직 생성된 보정 수치가 없습니다. 위의 <b>[🛠️ 라이트룸 보정 수치 제안 받기]</b> 버튼을 누르면 AI가 노출·명암·화이트밸런스 수치를 온디맨드로 분석합니다.
+    </div>`;
+  }
+  return `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));gap:8px;margin-bottom:12px;">
+      <div class="lr-metric"><span>노출 (Exposure)</span><strong>${advice.exposure > 0 ? '+' : ''}${advice.exposure.toFixed(2)} EV</strong></div>
+      <div class="lr-metric"><span>대비 (Contrast)</span><strong>${advice.contrast > 0 ? '+' : ''}${advice.contrast}</strong></div>
+      <div class="lr-metric"><span>하이라이트</span><strong>${advice.highlights > 0 ? '+' : ''}${advice.highlights}</strong></div>
+      <div class="lr-metric"><span>그림자 (Shadows)</span><strong>${advice.shadows > 0 ? '+' : ''}${advice.shadows}</strong></div>
+      <div class="lr-metric"><span>흰색 계열 (Whites)</span><strong>${advice.whites > 0 ? '+' : ''}${advice.whites}</strong></div>
+      <div class="lr-metric"><span>검정 계열 (Blacks)</span><strong>${advice.blacks > 0 ? '+' : ''}${advice.blacks}</strong></div>
+      <div class="lr-metric"><span>텍스처 (Texture)</span><strong>${advice.texture > 0 ? '+' : ''}${advice.texture}</strong></div>
+      <div class="lr-metric"><span>명료도 (Clarity)</span><strong>${advice.clarity > 0 ? '+' : ''}${advice.clarity}</strong></div>
+      <div class="lr-metric"><span>디헤이즈 (Dehaze)</span><strong>${advice.dehaze > 0 ? '+' : ''}${advice.dehaze}</strong></div>
+      <div class="lr-metric"><span>활기 (Vibrance)</span><strong>${advice.vibrance > 0 ? '+' : ''}${advice.vibrance}</strong></div>
+      <div class="lr-metric"><span>채도 (Saturation)</span><strong>${advice.saturation > 0 ? '+' : ''}${advice.saturation}</strong></div>
+    </div>
+    <div style="background:white;padding:10px 14px;border-radius:8px;font-size:0.84rem;margin-bottom:8px;border:1px solid #e2e8f0;">
+      <b style="color:#0369a1">🌡️ 화이트밸런스/색조:</b> ${advice.temp_tint_notes}
+    </div>
+    <div style="background:white;padding:10px 14px;border-radius:8px;font-size:0.84rem;border:1px solid #e2e8f0;">
+      <b style="color:#4f46e5">🎨 마스킹 및 세부 후보정 팁:</b> ${advice.retouching_guide}
+    </div>
+  `;
+}
+
+async function requestLrAdvice(recordId, btn) {
+  const origText = btn.textContent;
+  btn.textContent = 'Gemini 분석 중...';
+  btn.disabled = true;
+  try {
+    const res = await fetch(`/api/post-process-advice/${recordId}`, { method: 'POST' });
+    const data = await res.json();
+    if (data.success && data.advice) {
+      const item = allData.find(d => d.id === recordId);
+      if (item) {
+        item.lr_advice = data.advice;
+        openDetailModal(recordId);
+      }
+    } else {
+      alert(`보정 수치 제안 실패: ${data.error || '알 수 없는 오류'}`);
+      btn.textContent = origText;
+      btn.disabled = false;
+    }
+  } catch (err) {
+    alert(`오류: ${err.message}`);
+    btn.textContent = origText;
+    btn.disabled = false;
+  }
+}
+
 
 function renderExifSummary(exif, detectedSettings) {
   const parts = [];
@@ -896,6 +1004,67 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(json.dumps({"success": True, "count": exported_count}).encode("utf-8"))
                 return
+            except Exception as exc:
+                self.send_response(HTTPStatus.INTERNAL_SERVER_ERROR)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(json.dumps({"success": False, "error": str(exc)}).encode("utf-8"))
+                return
+
+        if parsed.path.startswith("/api/post-process-advice/"):
+            try:
+                record_id = int(parsed.path.split("/")[-1])
+                ensure_db_columns(self.db_path)
+                with closing(sqlite3.connect(self.db_path)) as conn:
+                    conn.row_factory = sqlite3.Row
+                    row = conn.execute("SELECT * FROM photo_analyses WHERE id = ?", (record_id,)).fetchone()
+                    if not row:
+                        raise ValueError(f"레코드 ID {record_id}를 찾을 수 없습니다.")
+
+                    # 이미 캐시가 있으면 즉시 반환 (API 호출 방지)
+                    if "lr_advice_json" in row.keys() and row["lr_advice_json"]:
+                        cached_advice = json.loads(row["lr_advice_json"])
+                        self.send_response(HTTPStatus.OK)
+                        self.send_header("Content-Type", "application/json; charset=utf-8")
+                        self.end_headers()
+                        self.wfile.write(json.dumps({"success": True, "advice": cached_advice, "cached": True}, ensure_ascii=False).encode("utf-8"))
+                        return
+
+                    fname = row["source_filename"]
+                    candidate_paths = [
+                        Path("test_photo") / fname,
+                        Path(fname),
+                        Path("test_photo") / Path(fname).name,
+                    ]
+                    found_file = next((p for p in candidate_paths if p.is_file()), None)
+                    if found_file:
+                        prepared = prepare_photo(found_file)
+                    elif row["thumbnail"]:
+                        prepared = PreparedPhoto(
+                            source_filename=fname,
+                            sha256=row["sha256"],
+                            width=row["width"],
+                            height=row["height"],
+                            image_format="WEBP",
+                            safe_exif={},
+                            upload_bytes=row["thumbnail"],
+                            upload_mime_type="image/webp",
+                        )
+                    else:
+                        raise ValueError(f"사진 파일 '{fname}'을 찾을 수 없으며 DB 썸네일도 없습니다.")
+
+                    advice = generate_lightroom_advice(prepared, model=MODEL_PRESETS["lite"])
+                    advice_dict = advice.model_dump(mode="json")
+                    advice_json = json.dumps(advice_dict, ensure_ascii=False)
+
+                    with conn:
+                        conn.execute("UPDATE photo_analyses SET lr_advice_json = ? WHERE id = ?", (advice_json, record_id))
+
+                    self.send_response(HTTPStatus.OK)
+                    self.send_header("Content-Type", "application/json; charset=utf-8")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"success": True, "advice": advice_dict, "cached": False}, ensure_ascii=False).encode("utf-8"))
+                    return
             except Exception as exc:
                 self.send_response(HTTPStatus.INTERNAL_SERVER_ERROR)
                 self.send_header("Content-Type", "application/json; charset=utf-8")

@@ -374,6 +374,75 @@ class PhotoAnalyzerTests(unittest.TestCase):
             self.assertIn("시각적 워터마크/하단 프레임 촬영 설정 감지 지침", prompt)
             self.assertIn("detected_camera_settings", prompt)
 
+    def test_focus_status_and_notes_schema_and_prompt(self) -> None:
+        analysis = self._valid_analysis()
+        self.assertEqual(analysis.focus_status, "완벽 칼초점")
+        self.assertEqual(analysis.focus_notes, "")
+
+        custom_analysis = analysis.model_copy(
+            update={"focus_status": "미세 앞핀", "focus_notes": "눈동자 대신 앞머리 끝에 초점 맺힘"}
+        )
+        self.assertEqual(custom_analysis.focus_status, "미세 앞핀")
+        self.assertIn("앞머리", custom_analysis.focus_notes)
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            image_path = Path(temporary_directory) / "sample.jpg"
+            self._make_jpeg(image_path)
+            photo = prepare_photo(image_path)
+            prompt = photo_analyzer._build_prompt(photo)
+            self.assertIn("focus_status", prompt)
+            self.assertIn("완벽 칼초점", prompt)
+            self.assertIn("아이 데칼", prompt)
+
+    def test_lightroom_advice_schema_and_model(self) -> None:
+        from photo_analyzer import LightroomAdvice
+
+        advice = LightroomAdvice(
+            exposure=0.35,
+            contrast=10,
+            highlights=-25,
+            shadows=20,
+            whites=5,
+            blacks=-10,
+            texture=-5,
+            clarity=8,
+            dehaze=5,
+            vibrance=15,
+            saturation=0,
+            temp_tint_notes="5200K 유지, 마젠타 +4 추천",
+            retouching_guide="눈동자 반사광에 원형 마스크 노출 +0.3 부여",
+        )
+        self.assertEqual(advice.exposure, 0.35)
+        self.assertEqual(advice.highlights, -25)
+        self.assertIn("마젠타", advice.temp_tint_notes)
+
+    def test_dashboard_lr_advice_caching_and_columns(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            db_path = Path(temporary_directory) / "test_dash.sqlite3"
+            image_path = Path(temporary_directory) / "test.jpg"
+            self._make_jpeg(image_path)
+            photo = prepare_photo(image_path)
+            analysis = self._valid_analysis()
+            rec_id = save_analysis(db_path, photo, "test-model", analysis)
+
+            # Check columns
+            photo_dashboard.ensure_db_columns(db_path)
+            with closing(sqlite3.connect(db_path)) as conn:
+                cols = [r[1] for r in conn.execute("PRAGMA table_info(photo_analyses)").fetchall()]
+                self.assertIn("lr_advice_json", cols)
+
+                # Update with sample advice
+                advice_json = json.dumps({"exposure": 0.5, "contrast": 5})
+                conn.execute("UPDATE photo_analyses SET lr_advice_json = ? WHERE id = ?", (advice_json, rec_id))
+                conn.commit()
+
+            items = photo_dashboard.get_all_analyses(db_path)
+            self.assertEqual(len(items), 1)
+            self.assertEqual(items[0]["focus_status"], "완벽 칼초점")
+            self.assertIsNotNone(items[0]["lr_advice"])
+            self.assertEqual(items[0]["lr_advice"]["exposure"], 0.5)
+
+
 
 if __name__ == "__main__":
     unittest.main()
