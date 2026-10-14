@@ -442,6 +442,85 @@ class PhotoAnalyzerTests(unittest.TestCase):
             self.assertIsNotNone(items[0]["lr_advice"])
             self.assertEqual(items[0]["lr_advice"]["exposure"], 0.5)
 
+    def test_sns_advice_schema_and_model(self) -> None:
+        from photo_analyzer import CropBox, SNSAdvice
+
+        crop_4_5 = CropBox(
+            ymin=0.05,
+            xmin=0.10,
+            ymax=0.95,
+            xmax=0.82,
+            ratio_label="4:5 (인스타 세로)",
+            composition_tip="피규어 시선 방향 여백 확보 및 상반신 집중 프레이밍",
+        )
+        crop_1_1 = CropBox(
+            ymin=0.10,
+            xmin=0.15,
+            ymax=0.85,
+            xmax=0.90,
+            ratio_label="1:1 (정방형)",
+            composition_tip="얼굴과 가슴 디테일 중심",
+        )
+        crop_16_9 = CropBox(
+            ymin=0.20,
+            xmin=0.00,
+            ymax=0.76,
+            xmax=1.00,
+            ratio_label="16:9 (X 가로)",
+            composition_tip="X 타임라인 썸네일 잘림 방지",
+        )
+        crop_3_4 = CropBox(
+            ymin=0.05,
+            xmin=0.12,
+            ymax=0.95,
+            xmax=0.80,
+            ratio_label="3:4 (X 세로)",
+            composition_tip="모바일 X 앱 피드 최적화",
+        )
+
+        advice = SNSAdvice(
+            instagram_crop_4_5=crop_4_5,
+            instagram_crop_1_1=crop_1_1,
+            x_crop_16_9=crop_16_9,
+            x_crop_3_4=crop_3_4,
+            social_caption="빛과 조형의 완벽한 조화 ✨ 피규어 컬렉션",
+            hashtags=["#피규어", "#figurephotography", "#toyphotography", "#フィギュア"],
+        )
+        self.assertEqual(advice.instagram_crop_4_5.ymin, 0.05)
+        self.assertEqual(advice.x_crop_16_9.ratio_label, "16:9 (X 가로)")
+        self.assertIn("#figurephotography", advice.hashtags)
+
+    def test_dashboard_sns_advice_caching_and_columns(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            db_path = Path(temporary_directory) / "test_dash_sns.sqlite3"
+            image_path = Path(temporary_directory) / "test.jpg"
+            self._make_jpeg(image_path)
+            photo = prepare_photo(image_path)
+            analysis = self._valid_analysis()
+            rec_id = save_analysis(db_path, photo, "test-model", analysis)
+
+            photo_dashboard.ensure_db_columns(db_path)
+            with closing(sqlite3.connect(db_path)) as conn:
+                cols = [r[1] for r in conn.execute("PRAGMA table_info(photo_analyses)").fetchall()]
+                self.assertIn("sns_advice_json", cols)
+
+                sample_sns = {
+                    "instagram_crop_4_5": {
+                        "ymin": 0.1, "xmin": 0.1, "ymax": 0.9, "xmax": 0.74,
+                        "ratio_label": "4:5 (인스타 세로)", "composition_tip": "테스트 팁"
+                    },
+                    "social_caption": "테스트 캡션입니다",
+                    "hashtags": ["#피규어"]
+                }
+                conn.execute("UPDATE photo_analyses SET sns_advice_json = ? WHERE id = ?", (json.dumps(sample_sns), rec_id))
+                conn.commit()
+
+            items = photo_dashboard.get_all_analyses(db_path)
+            self.assertEqual(len(items), 1)
+            self.assertIsNotNone(items[0]["sns_advice"])
+            self.assertEqual(items[0]["sns_advice"]["social_caption"], "테스트 캡션입니다")
+
+
 
 
 if __name__ == "__main__":

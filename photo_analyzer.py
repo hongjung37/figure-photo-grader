@@ -171,6 +171,33 @@ class LightroomAdvice(BaseModel):
     retouching_guide: str = Field(description="피규어 특성에 맞춘 마스킹 및 세부 후보정 팁 (아이 데칼 캐치라이트 살리기, 피부 번들거림 방지 등)")
 
 
+class CropBox(BaseModel):
+    """Normalized bounding box coordinates (0.0 to 1.0) and rationale for social media cropping."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ymin: float = Field(description="크롭 영역 상단 Y (0.0 ~ 1.0)")
+    xmin: float = Field(description="크롭 영역 좌측 X (0.0 ~ 1.0)")
+    ymax: float = Field(description="크롭 영역 하단 Y (0.0 ~ 1.0)")
+    xmax: float = Field(description="크롭 영역 우측 X (0.0 ~ 1.0)")
+    ratio_label: str = Field(description="비율 라벨 (예: '4:5 (인스타 세로)', '1:1 (정방형)', '16:9 (X 가로)', '3:4 (X 세로)')")
+    composition_tip: str = Field(description="해당 비율 크롭 시 피규어 시선/여백/프레이밍 의도 및 연출 팁")
+
+
+class SNSAdvice(BaseModel):
+    """Pydantic model for on-demand SNS platform crops (Instagram, X) and social captions."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    instagram_crop_4_5: CropBox = Field(description="인스타그램 피드 표준 4:5 세로 크롭 영역 (ymin, xmin, ymax, xmax)")
+    instagram_crop_1_1: CropBox = Field(description="인스타그램 1:1 정방형 크롭 영역")
+    x_crop_16_9: CropBox = Field(description="X(트위터) 타임라인 최적화 16:9 가로 크롭 영역")
+    x_crop_3_4: CropBox = Field(description="X(트위터) 세로 최적화 3:4 크롭 영역")
+    social_caption: str = Field(description="인스타 및 X 피드용 감성적인 짧은 캡션 (2~3줄, 이모지 포함)")
+    hashtags: list[str] = Field(description="피규어 특화 추천 해시태그 목록 (#피규어, #figurephotography 등 8~12개)")
+
+
+
 
 @dataclass(frozen=True)
 class PreparedPhoto:
@@ -581,6 +608,79 @@ Lightroom 기본 현상(Basic Tone) 슬라이더 추천 수치와 세부 리터�
                 raise
 
 
+def generate_sns_advice(photo: PreparedPhoto, model: str = DEFAULT_MODEL) -> SNSAdvice:
+    """Generate on-demand SNS platform crop coordinates and social captions for Instagram & X."""
+    load_dotenv(dotenv_path=ENV_FILE_PATH, override=False)
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY를 .env 파일 또는 환경변수에 설정해 주세요.")
+
+    prompt = f"""당신은 피규어 사진 및 서브컬처 소셜 미디어(Instagram, X/Twitter) 전문 큐레이터입니다.
+제시된 피규어 사진(원본 해상도: {photo.width} × {photo.height})을 분석하고,
+인스타그램과 X(트위터) 업로드 시 피규어가 가장 돋보이도록 플랫폼별 크롭 영역(정규화 좌표 0.0~1.0)과 감성 캡션, 해시태그를 JSON으로 제안하세요.
+
+[플랫폼별 크롭 비율 요구사항]
+1. instagram_crop_4_5: 인스타그램 피드 표준 (4:5 가로:세로 비율)
+   - 피규어의 안면, 눈동자 데칼, 시선 방향 여백을 최우선으로 살릴 것.
+   - 머리 위나 손/소품이 애매하게 잘리지 않도록 상단 여백과 하단 컷 라인을 미학적으로 조율.
+2. instagram_crop_1_1: 인스타그램 정방형 피드 (1:1 정사각형 비율)
+   - 피규어 상반신 또는 핵심 조형 포인트가 중앙 또는 3분할 교차점에 오도록 집중 프레이밍.
+3. x_crop_16_9: X(트위터) 가로 인라인 타임라인 미리보기 최적화 (16:9 가로 비율)
+   - X 타임라인 썸네일에서 피규어 얼굴이 잘려나가지 않도록 수평 파노라마 구도 조율.
+4. x_crop_3_4: X(트위터) 세로 최적화 (3:4 세로 비율)
+   - 모바일 X 앱에서 풀 세로로 시원하게 보이는 비율.
+
+[좌표 작성 규칙]
+- ymin, xmin, ymax, xmax는 0.0 이상 1.0 이하의 실수값으로 작성하세요 (소수점 4자리 권장).
+- 0.0 <= ymin < ymax <= 1.0, 0.0 <= xmin < xmax <= 1.0 이어야 합니다.
+- composition_tip에는 "왜 이렇게 잘라야 피규어가 돋보이는지"에 대한 친절한 1~2줄 코멘트를 작성하세요.
+
+[소셜 캡션 및 해시태그]
+- social_caption: 인스타/X에 바로 복사해 올릴 수 있는 세련된 2~3줄 캡션 (이모지 포함, 한국어).
+- hashtags: 한국어/일본어/영어 피규어 특화 해시태그 8~12개 (예: #피규어, #피규어사진, #figurephotography, #toyphotography, #フィギュア 등).
+"""
+
+    client = genai.Client(api_key=api_key)
+    max_retries = 5
+    backoff = 3.0
+    for attempt in range(1, max_retries + 1):
+        try:
+            interaction = client.interactions.create(
+                model=model,
+                input=[
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "image",
+                        "data": base64.b64encode(photo.upload_bytes).decode("ascii"),
+                        "mime_type": photo.upload_mime_type,
+                    },
+                ],
+                response_format={
+                    "type": "text",
+                    "mime_type": "application/json",
+                    "schema": SNSAdvice.model_json_schema(),
+                },
+                store=False,
+            )
+            output_text = interaction.output_text
+            if not output_text:
+                raise RuntimeError("Gemini가 SNS 크롭 및 캡션 제안 JSON을 반환하지 않았습니다.")
+            return SNSAdvice.model_validate_json(output_text)
+        except Exception as exc:
+            err_msg = str(exc)
+            is_transient = any(
+                code in err_msg
+                for code in ("503", "429", "high demand", "ResourceExhausted", "UNAVAILABLE", "service_unavailable")
+            )
+            if is_transient and attempt < max_retries:
+                print(f"[재시도 {attempt}/{max_retries}] API 일시적 지연/오류 발생. {backoff:.1f}초 후 재시도합니다...", file=sys.stderr)
+                time.sleep(backoff)
+                backoff *= 2.0
+            else:
+                raise
+
+
+
 def ensure_tag_tables(connection: sqlite3.Connection) -> None:
     """Create the controlled tag catalog and normalized per-analysis tag table."""
     connection.execute(
@@ -671,6 +771,8 @@ def save_analysis(
             connection.execute("ALTER TABLE photo_analyses ADD COLUMN thumbnail BLOB")
         if "lr_advice_json" not in existing_cols:
             connection.execute("ALTER TABLE photo_analyses ADD COLUMN lr_advice_json TEXT")
+        if "sns_advice_json" not in existing_cols:
+            connection.execute("ALTER TABLE photo_analyses ADD COLUMN sns_advice_json TEXT")
         ensure_tag_tables(connection)
         connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_photo_analyses_sha256 "

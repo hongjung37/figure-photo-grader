@@ -17,11 +17,14 @@ from urllib.parse import parse_qs, urlparse
 from photo_analyzer import (
     DEFAULT_DB_PATH,
     MODEL_PRESETS,
+    CropBox,
     LightroomAdvice,
     PhotoAnalysis,
     PreparedPhoto,
+    SNSAdvice,
     analyze_with_gemini,
     generate_lightroom_advice,
+    generate_sns_advice,
     prepare_photo,
     save_analysis,
 )
@@ -39,10 +42,13 @@ def ensure_db_columns(db_path: Path) -> None:
             conn.execute("ALTER TABLE photo_analyses ADD COLUMN thumbnail BLOB")
         if "lr_advice_json" not in cols:
             conn.execute("ALTER TABLE photo_analyses ADD COLUMN lr_advice_json TEXT")
+        if "sns_advice_json" not in cols:
+            conn.execute("ALTER TABLE photo_analyses ADD COLUMN sns_advice_json TEXT")
         if "review_status" not in cols:
             conn.execute("ALTER TABLE photo_analyses ADD COLUMN review_status TEXT DEFAULT '미검토'")
         if "user_notes" not in cols:
             conn.execute("ALTER TABLE photo_analyses ADD COLUMN user_notes TEXT DEFAULT ''")
+
 
 
 
@@ -100,6 +106,13 @@ def get_all_analyses(db_path: Path) -> list[dict]:
             except Exception:
                 pass
 
+        sns_advice = None
+        if "sns_advice_json" in row.keys() and row["sns_advice_json"]:
+            try:
+                sns_advice = json.loads(row["sns_advice_json"])
+            except Exception:
+                pass
+
         final_score = float(analysis_data.get("final_score", 0))
         results.append(
             {
@@ -132,6 +145,7 @@ def get_all_analyses(db_path: Path) -> list[dict]:
                 "aesthetic_tags": tags_by_id.get(aid, analysis_data.get("aesthetic_tags", {})),
                 "detected_camera_settings": analysis_data.get("detected_camera_settings"),
                 "lr_advice": lr_advice,
+                "sns_advice": sns_advice,
                 "exif": exif_data,
             }
         )
@@ -215,6 +229,39 @@ h1 span { font-size: 0.75rem; background: var(--teal); color: white; padding: 3p
 .lr-metric { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px; text-align: center; }
 .lr-metric span { display: block; font-size: 0.72rem; color: var(--muted); margin-bottom: 2px; }
 .lr-metric strong { display: block; font-size: 0.95rem; color: #1e293b; font-weight: 700; }
+
+/* Crop Overlay Box */
+.crop-box-overlay {
+  position: absolute;
+  border: 2px solid #38bdf8;
+  box-shadow: 0 0 0 9999px rgba(15, 23, 42, 0.65);
+  pointer-events: none;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  display: none;
+  z-index: 5;
+}
+.crop-box-overlay::before {
+  content: '';
+  position: absolute;
+  top: 33.333%; bottom: 33.333%; left: 0; right: 0;
+  border-top: 1px dashed rgba(255,255,255,0.45);
+  border-bottom: 1px dashed rgba(255,255,255,0.45);
+}
+.crop-box-overlay::after {
+  content: '';
+  position: absolute;
+  left: 33.333%; right: 33.333%; top: 0; bottom: 0;
+  border-left: 1px dashed rgba(255,255,255,0.45);
+  border-right: 1px dashed rgba(255,255,255,0.45);
+}
+.crop-ratio-btn {
+  background: white; border: 1px solid var(--line);
+  padding: 6px 12px; border-radius: 8px; font-size: 0.8rem; font-weight: 600;
+  color: var(--muted); cursor: pointer; transition: all .15s;
+}
+.crop-ratio-btn:hover { background: #e0f2fe; color: #0284c7; }
+.crop-ratio-btn.active { background: #0284c7; color: white; border-color: #0284c7; }
+
 
 
 /* Upload Modal */
@@ -476,8 +523,9 @@ function openDetailModal(id) {
 
   body.innerHTML = `
     <div>
-      <div class="zoom-wrap" onclick="toggleZoom(event)" onmousemove="panZoom(event)">
-        <img class="detail-img" id="detail-modal-img" src="/api/image/${item.id}" alt="${item.filename}">
+      <div class="zoom-wrap" id="zoom-wrap-container" onclick="toggleZoom(event)" onmousemove="panZoom(event)">
+        <img class="detail-img" id="detail-modal-img" src="/api/image/${item.id}" alt="${item.filename}" onload="repositionCropOverlay()">
+        <div class="crop-box-overlay" id="crop-box-overlay"></div>
         <span class="zoom-hint">🔍 클릭하여 초점/데칼 2.4배 확대</span>
       </div>
       <div class="kbd-hint">
@@ -553,9 +601,213 @@ function openDetailModal(id) {
           ${renderLrAdviceContent(item.lr_advice)}
         </div>
       </div>
+
+      <!-- SNS Crop & Caption Advice Box -->
+      <div class="sns-advice-box" style="margin-top:16px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:14px;padding:16px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+          <h3 style="margin:0;font-size:1.02rem;display:flex;align-items:center;gap:6px;color:#0369a1;">
+            <span style="background:#0284c7;color:white;padding:2px 7px;border-radius:4px;font-size:0.78rem;">SNS</span>
+            인스타 · X(트위터) 규격 크롭 & 캡션 제안
+          </h3>
+          <button class="filter-btn" style="background:#0284c7;color:white;border-color:#0284c7;" onclick="requestSnsAdvice(${item.id}, this)">
+            ${item.sns_advice ? '🔄 크롭/캡션 다시 제안' : '📱 SNS 크롭 & 캡션 제안 받기'}
+          </button>
+        </div>
+        <div id="sns-advice-content">
+          ${renderSnsAdviceContent(item.sns_advice, item.id)}
+        </div>
+      </div>
     </div>
   `;
   modal.style.display = 'flex';
+  currentCropBox = null;
+  const overlay = document.getElementById('crop-box-overlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+let currentCropBox = null;
+let currentCropRatioKey = null;
+
+function renderSnsAdviceContent(advice, recordId) {
+  if (!advice) {
+    return `<div style="font-size:0.86rem;color:var(--muted);text-align:center;padding:14px 0;">
+      아직 생성된 SNS 제안이 없습니다. 위의 <b>[📱 SNS 크롭 & 캡션 제안 받기]</b> 버튼을 누르면 AI가 인스타그램(4:5, 1:1) 및 X(16:9, 3:4) 최적 크롭 영역과 감성 캡션·해시태그를 온디맨드로 분석합니다.
+    </div>`;
+  }
+
+  return `
+    <div>
+      <div style="font-size:0.84rem;font-weight:700;color:#0369a1;margin-bottom:6px;">📐 크롭 비율 선택 (클릭 시 사진 위에 프레임 표시):</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">
+        <button class="crop-ratio-btn active" id="btn-crop-instagram_crop_4_5" onclick="selectCropRatio('instagram_crop_4_5', ${recordId})">📸 인스타 4:5 (세로피드)</button>
+        <button class="crop-ratio-btn" id="btn-crop-instagram_crop_1_1" onclick="selectCropRatio('instagram_crop_1_1', ${recordId})">🟦 인스타 1:1 (정방형)</button>
+        <button class="crop-ratio-btn" id="btn-crop-x_crop_16_9" onclick="selectCropRatio('x_crop_16_9', ${recordId})">🐦 X 16:9 (가로타임라인)</button>
+        <button class="crop-ratio-btn" id="btn-crop-x_crop_3_4" onclick="selectCropRatio('x_crop_3_4', ${recordId})">📱 X 3:4 (모바일세로)</button>
+        <button class="crop-ratio-btn" style="color:#ef4444;" onclick="clearCropOverlay()">❌ 오버레이 숨기기</button>
+      </div>
+
+      <div id="crop-tip-box" style="background:white;padding:12px 14px;border-radius:10px;font-size:0.85rem;border:1px solid #e0f2fe;margin-bottom:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <b id="crop-tip-title" style="color:#0369a1;">${advice.instagram_crop_4_5.ratio_label}</b>
+          <button class="upload-btn" id="btn-crop-download" style="padding:4px 10px;font-size:0.78rem;background:#0284c7;" onclick="downloadCroppedImage('instagram_crop_4_5', ${recordId})">✂️ 이 비율로 잘라 다운로드</button>
+        </div>
+        <div id="crop-tip-desc" style="color:#334155;">${advice.instagram_crop_4_5.composition_tip}</div>
+      </div>
+
+      <div style="background:white;padding:12px 14px;border-radius:10px;font-size:0.85rem;border:1px solid #e0f2fe;margin-bottom:10px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <b style="color:#0369a1;">✍️ SNS 감성 캡션:</b>
+          <button class="filter-btn" style="padding:2px 8px;font-size:0.75rem;" onclick="copyText('${escape(advice.social_caption).replace(/'/g, "\\'")}', this)">📋 캡션 복사</button>
+        </div>
+        <div style="color:#1e293b;white-space:pre-wrap;background:#f8fafc;padding:8px 12px;border-radius:6px;">${advice.social_caption}</div>
+      </div>
+
+      <div style="background:white;padding:12px 14px;border-radius:10px;font-size:0.85rem;border:1px solid #e0f2fe;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <b style="color:#0369a1;">🏷️ 추천 해시태그:</b>
+          <button class="filter-btn" style="padding:2px 8px;font-size:0.75rem;" onclick="copyText('${advice.hashtags.join(' ')}', this)">📋 전체 복사</button>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;">
+          ${advice.hashtags.map(t => `<span class="tag-pill" style="background:#e0f2fe;color:#0369a1;">${t}</span>`).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function selectCropRatio(ratioKey, recordId) {
+  const item = allData.find(d => d.id === recordId);
+  if (!item || !item.sns_advice) return;
+  const box = item.sns_advice[ratioKey];
+  if (!box) return;
+
+  currentCropBox = box;
+  currentCropRatioKey = ratioKey;
+
+  document.querySelectorAll('.crop-ratio-btn').forEach(b => b.classList.remove('active'));
+  const activeBtn = document.getElementById(`btn-crop-${ratioKey}`);
+  if (activeBtn) activeBtn.classList.add('active');
+
+  const titleEl = document.getElementById('crop-tip-title');
+  const descEl = document.getElementById('crop-tip-desc');
+  const dlBtn = document.getElementById('btn-crop-download');
+  if (titleEl) titleEl.textContent = box.ratio_label;
+  if (descEl) descEl.textContent = box.composition_tip;
+  if (dlBtn) dlBtn.setAttribute('onclick', `downloadCroppedImage('${ratioKey}', ${recordId})`);
+
+  repositionCropOverlay();
+}
+
+function clearCropOverlay() {
+  currentCropBox = null;
+  currentCropRatioKey = null;
+  document.querySelectorAll('.crop-ratio-btn').forEach(b => b.classList.remove('active'));
+  const overlay = document.getElementById('crop-box-overlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+function repositionCropOverlay() {
+  const overlay = document.getElementById('crop-box-overlay');
+  const img = document.getElementById('detail-modal-img');
+  if (!overlay || !img || !currentCropBox) {
+    if (overlay) overlay.style.display = 'none';
+    return;
+  }
+  const cWidth = img.clientWidth;
+  const cHeight = img.clientHeight;
+  if (cWidth === 0 || cHeight === 0) return;
+
+  const top = Math.round(currentCropBox.ymin * cHeight);
+  const left = Math.round(currentCropBox.xmin * cWidth);
+  const width = Math.round((currentCropBox.xmax - currentCropBox.xmin) * cWidth);
+  const height = Math.round((currentCropBox.ymax - currentCropBox.ymin) * cHeight);
+
+  overlay.style.top = `${top}px`;
+  overlay.style.left = `${left}px`;
+  overlay.style.width = `${width}px`;
+  overlay.style.height = `${height}px`;
+  overlay.style.display = 'block';
+}
+
+window.addEventListener('resize', repositionCropOverlay);
+
+async function downloadCroppedImage(ratioKey, recordId) {
+  const item = allData.find(d => d.id === recordId);
+  if (!item || !item.sns_advice) return;
+  const box = item.sns_advice[ratioKey];
+  if (!box) return;
+
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.src = `/api/image/${recordId}`;
+  await new Promise((resolve, reject) => {
+    img.onload = resolve;
+    img.onerror = reject;
+  });
+
+  const origW = img.naturalWidth;
+  const origH = img.naturalHeight;
+  const sx = Math.max(0, Math.round(box.xmin * origW));
+  const sy = Math.max(0, Math.round(box.ymin * origH));
+  const sw = Math.min(origW - sx, Math.round((box.xmax - box.xmin) * origW));
+  const sh = Math.min(origH - sy, Math.round((box.ymax - box.ymin) * origH));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = sw;
+  canvas.height = sh;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+
+  const safeName = item.filename.replace(/\\.[^/.]+$/, '');
+  const outName = `${safeName}_${ratioKey.replace('crop_', '')}.png`;
+  canvas.toBlob((blob) => {
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = outName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 'image/png');
+}
+
+async function copyText(text, btn) {
+  try {
+    await navigator.clipboard.writeText(text);
+    const orig = btn.textContent;
+    btn.textContent = '✓ 복사됨!';
+    setTimeout(() => { btn.textContent = orig; }, 1500);
+  } catch (err) {
+    prompt('텍스트 복사:', text);
+  }
+}
+
+async function requestSnsAdvice(recordId, btn) {
+  const origText = btn.textContent;
+  btn.textContent = 'Gemini 크롭 분석 중...';
+  btn.disabled = true;
+  try {
+    const res = await fetch(`/api/sns-advice/${recordId}`, { method: 'POST' });
+    const data = await res.json();
+    if (data.success && data.advice) {
+      const item = allData.find(d => d.id === recordId);
+      if (item) {
+        item.sns_advice = data.advice;
+        openDetailModal(recordId);
+        setTimeout(() => { selectCropRatio('instagram_crop_4_5', recordId); }, 250);
+      }
+    } else {
+      alert(`SNS 제안 실패: ${data.error || '알 수 없는 오류'}`);
+      btn.textContent = origText;
+      btn.disabled = false;
+    }
+  } catch (err) {
+    alert(`오류: ${err.message}`);
+    btn.textContent = origText;
+    btn.disabled = false;
+  }
 }
 
 function renderLrAdviceContent(advice) {
@@ -611,6 +863,7 @@ async function requestLrAdvice(recordId, btn) {
     btn.disabled = false;
   }
 }
+
 
 
 function renderExifSummary(exif, detectedSettings) {
@@ -1217,6 +1470,67 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
                     with conn:
                         conn.execute("UPDATE photo_analyses SET lr_advice_json = ? WHERE id = ?", (advice_json, record_id))
+
+                    self.send_response(HTTPStatus.OK)
+                    self.send_header("Content-Type", "application/json; charset=utf-8")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"success": True, "advice": advice_dict, "cached": False}, ensure_ascii=False).encode("utf-8"))
+                    return
+            except Exception as exc:
+                self.send_response(HTTPStatus.INTERNAL_SERVER_ERROR)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(json.dumps({"success": False, "error": str(exc)}).encode("utf-8"))
+                return
+
+        if parsed.path.startswith("/api/sns-advice/"):
+            try:
+                record_id = int(parsed.path.split("/")[-1])
+                ensure_db_columns(self.db_path)
+                with closing(sqlite3.connect(self.db_path)) as conn:
+                    conn.row_factory = sqlite3.Row
+                    row = conn.execute("SELECT * FROM photo_analyses WHERE id = ?", (record_id,)).fetchone()
+                    if not row:
+                        raise ValueError(f"레코드 ID {record_id}를 찾을 수 없습니다.")
+
+                    # 이미 캐시가 있으면 즉시 반환 (API 호출 방지)
+                    if "sns_advice_json" in row.keys() and row["sns_advice_json"]:
+                        cached_advice = json.loads(row["sns_advice_json"])
+                        self.send_response(HTTPStatus.OK)
+                        self.send_header("Content-Type", "application/json; charset=utf-8")
+                        self.end_headers()
+                        self.wfile.write(json.dumps({"success": True, "advice": cached_advice, "cached": True}, ensure_ascii=False).encode("utf-8"))
+                        return
+
+                    fname = row["source_filename"]
+                    candidate_paths = [
+                        Path("test_photo") / fname,
+                        Path(fname),
+                        Path("test_photo") / Path(fname).name,
+                    ]
+                    found_file = next((p for p in candidate_paths if p.is_file()), None)
+                    if found_file:
+                        prepared = prepare_photo(found_file)
+                    elif row["thumbnail"]:
+                        prepared = PreparedPhoto(
+                            source_filename=fname,
+                            sha256=row["sha256"],
+                            width=row["width"],
+                            height=row["height"],
+                            image_format="WEBP",
+                            safe_exif={},
+                            upload_bytes=row["thumbnail"],
+                            upload_mime_type="image/webp",
+                        )
+                    else:
+                        raise ValueError(f"사진 파일 '{fname}'을 찾을 수 없으며 DB 썸네일도 없습니다.")
+
+                    advice = generate_sns_advice(prepared, model=MODEL_PRESETS["lite"])
+                    advice_dict = advice.model_dump(mode="json")
+                    advice_json = json.dumps(advice_dict, ensure_ascii=False)
+
+                    with conn:
+                        conn.execute("UPDATE photo_analyses SET sns_advice_json = ? WHERE id = ?", (advice_json, record_id))
 
                     self.send_response(HTTPStatus.OK)
                     self.send_header("Content-Type", "application/json; charset=utf-8")
