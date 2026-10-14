@@ -252,8 +252,8 @@ class PhotoAnalyzerTests(unittest.TestCase):
         self.assertIn("standard", photo_analyzer.MODEL_PRESETS)
         self.assertIn("pro", photo_analyzer.MODEL_PRESETS)
         self.assertEqual(photo_analyzer.MODEL_PRESETS["lite"], "gemini-3.1-flash-lite")
-        self.assertEqual(photo_analyzer.MODEL_PRESETS["standard"], "gemini-2.5-flash")
-        self.assertEqual(photo_analyzer.MODEL_PRESETS["pro"], "gemini-3.1-pro-preview")
+        self.assertEqual(photo_analyzer.MODEL_PRESETS["standard"], "gemini-3.5-flash-lite")
+        self.assertEqual(photo_analyzer.MODEL_PRESETS["pro"], "gemini-3.8-flash")
 
     def test_figure_prompt_includes_figure_photography_context(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

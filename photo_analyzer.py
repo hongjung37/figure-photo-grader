@@ -34,8 +34,8 @@ from photo_tag_schema import (
 
 MODEL_PRESETS = {
     "lite": "gemini-3.1-flash-lite",      # 빠르고 가벼운 대량 분류/스크리닝 모드 (기본값)
-    "standard": "gemini-2.5-flash",       # 균형 잡힌 표준 화질 평가 모드
-    "pro": "gemini-3.1-pro-preview",              # 고화질 심층 비평 모드 (전문가급)
+    "standard": "gemini-3.5-flash-lite",   # 균형 잡힌 표준 화질 평가 모드
+    "pro": "gemini-3.8-flash",            # 고화질 심층 비평 모드 (사용자 지정)
 }
 DEFAULT_TIER = "lite"
 DEFAULT_MODEL = MODEL_PRESETS[DEFAULT_TIER]
@@ -522,6 +522,21 @@ figure_category 값에 반드시 '{cat_info['label']}'을 입력하고, 아래 �
 """
 
 
+def _format_gemini_error(model: str, exc: Exception) -> RuntimeError:
+    err_msg = str(exc)
+    if "429" in err_msg or "ResourceExhausted" in err_msg or "quota" in err_msg.lower():
+        return RuntimeError(
+            f"[{model}] 호출 실패: 프로젝트의 API 할당량(Quota/Rate Limit)을 초과했습니다. "
+            f"잠시 후 다시 시도하시거나 '--tier lite'(gemini-3.1-flash-lite)를 사용해 보세요. (상세: {err_msg})"
+        )
+    elif "404" in err_msg or "not found" in err_msg.lower() or "no longer available" in err_msg.lower():
+        return RuntimeError(
+            f"[{model}] 호출 실패: 해당 모델은 현재 프로젝트/API 키에서 지원되지 않거나 사용이 중단되었습니다. "
+            f"'--tier lite'(gemini-3.1-flash-lite) 또는 standard를 권장합니다. (상세: {err_msg})"
+        )
+    return RuntimeError(f"[{model}] Gemini API 호출 중 오류 발생: {err_msg}")
+
+
 def analyze_with_gemini(photo: PreparedPhoto, model: str = DEFAULT_MODEL, category_hint: str | None = None) -> PhotoAnalysis:
     load_dotenv(dotenv_path=ENV_FILE_PATH, override=False)
     api_key = os.environ.get("GEMINI_API_KEY")
@@ -562,11 +577,11 @@ def analyze_with_gemini(photo: PreparedPhoto, model: str = DEFAULT_MODEL, catego
                 for code in ("503", "429", "high demand", "ResourceExhausted", "UNAVAILABLE", "service_unavailable")
             )
             if is_transient and attempt < max_retries:
-                print(f"[재시도 {attempt}/{max_retries}] API 일시적 지연/오류 발생. {backoff:.1f}초 후 재시도합니다...", file=sys.stderr)
+                print(f"[재시도 {attempt}/{max_retries}] API 일시적 지연/오류 발생 ({model}). {backoff:.1f}초 후 재시도합니다...", file=sys.stderr)
                 time.sleep(backoff)
                 backoff *= 2.0
             else:
-                raise
+                raise _format_gemini_error(model, exc) from exc
 
 
 def generate_lightroom_advice(photo: PreparedPhoto, model: str = DEFAULT_MODEL) -> LightroomAdvice:
@@ -630,11 +645,11 @@ Lightroom 기본 현상(Basic Tone) 슬라이더 추천 수치와 세부 리터�
                 for code in ("503", "429", "high demand", "ResourceExhausted", "UNAVAILABLE", "service_unavailable")
             )
             if is_transient and attempt < max_retries:
-                print(f"[재시도 {attempt}/{max_retries}] API 일시적 지연/오류 발생. {backoff:.1f}초 후 재시도합니다...", file=sys.stderr)
+                print(f"[재시도 {attempt}/{max_retries}] API 일시적 지연/오류 발생 ({model}). {backoff:.1f}초 후 재시도합니다...", file=sys.stderr)
                 time.sleep(backoff)
                 backoff *= 2.0
             else:
-                raise
+                raise _format_gemini_error(model, exc) from exc
 
 
 def generate_sns_advice(photo: PreparedPhoto, model: str = DEFAULT_MODEL) -> SNSAdvice:
@@ -702,11 +717,11 @@ def generate_sns_advice(photo: PreparedPhoto, model: str = DEFAULT_MODEL) -> SNS
                 for code in ("503", "429", "high demand", "ResourceExhausted", "UNAVAILABLE", "service_unavailable")
             )
             if is_transient and attempt < max_retries:
-                print(f"[재시도 {attempt}/{max_retries}] API 일시적 지연/오류 발생. {backoff:.1f}초 후 재시도합니다...", file=sys.stderr)
+                print(f"[재시도 {attempt}/{max_retries}] API 일시적 지연/오류 발생 ({model}). {backoff:.1f}초 후 재시도합니다...", file=sys.stderr)
                 time.sleep(backoff)
                 backoff *= 2.0
             else:
-                raise
+                raise _format_gemini_error(model, exc) from exc
 
 
 SNS_CROP_RATIO_CONFIGS: dict[str, dict[str, Any]] = {
@@ -813,11 +828,11 @@ def generate_single_sns_crop(photo: PreparedPhoto, ratio_key: str, model: str = 
                 for code in ("503", "429", "high demand", "ResourceExhausted", "UNAVAILABLE", "service_unavailable")
             )
             if is_transient and attempt < max_retries:
-                print(f"[재시도 {attempt}/{max_retries}] API 일시적 지연/오류 발생. {backoff:.1f}초 후 재시도합니다...", file=sys.stderr)
+                print(f"[재시도 {attempt}/{max_retries}] API 일시적 지연/오류 발생 ({model}). {backoff:.1f}초 후 재시도합니다...", file=sys.stderr)
                 time.sleep(backoff)
                 backoff *= 2.0
             else:
-                raise
+                raise _format_gemini_error(model, exc) from exc
 
 
 def generate_sns_caption_and_tags(photo: PreparedPhoto, model: str = DEFAULT_MODEL) -> SNSCaptionAndTags:
@@ -869,11 +884,11 @@ SNS에 바로 복사해 올릴 수 있는 세련된 한국어 감성 캡션과 �
                 for code in ("503", "429", "high demand", "ResourceExhausted", "UNAVAILABLE", "service_unavailable")
             )
             if is_transient and attempt < max_retries:
-                print(f"[재시도 {attempt}/{max_retries}] API 일시적 지연/오류 발생. {backoff:.1f}초 후 재시도합니다...", file=sys.stderr)
+                print(f"[재시도 {attempt}/{max_retries}] API 일시적 지연/오류 발생 ({model}). {backoff:.1f}초 후 재시도합니다...", file=sys.stderr)
                 time.sleep(backoff)
                 backoff *= 2.0
             else:
-                raise
+                raise _format_gemini_error(model, exc) from exc
 
 
 
