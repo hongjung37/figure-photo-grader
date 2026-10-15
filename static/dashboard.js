@@ -484,11 +484,11 @@ function openDetailModal(id) {
       </div>
 
       <!-- Adobe Lightroom Advice Box (사진 바로 아래 배치) -->
-      <div class="lr-advice-box" id="lr-advice-box-section" style="margin-top:12px;background:#f8fafc;border:1px solid #cbd5e1;border-radius:14px;padding:16px;">
+      <div class="lr-advice-box" id="lr-advice-box-section">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
-          <h3 style="margin:0;font-size:1.02rem;display:flex;align-items:center;gap:6px;">
-            <span style="background:#312e81;color:white;padding:2px 7px;border-radius:4px;font-size:0.78rem;">Lr</span>
-            Adobe Lightroom 추천 보정 수치
+          <h3 class="lr-advice-title">
+            <span class="lr-advice-badge">Lr</span>
+            <span>Adobe Lightroom 추천 보정 수치</span>
           </h3>
           <button class="filter-btn" style="background:#4f46e5;color:white;border-color:#4f46e5;" onclick="requestLrAdvice(${item.id}, this)">
             ${item.lr_advice ? '🔄 보정 수치 다시 제안' : '🛠️ 라이트룸 보정 수치 제안 받기'}
@@ -500,13 +500,13 @@ function openDetailModal(id) {
       </div>
 
       <!-- SNS Crop & Caption Advice Box (사진 바로 아래 배치) -->
-      <div class="sns-advice-box" id="sns-advice-box-section" style="margin-top:16px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:14px;padding:16px;">
+      <div class="sns-advice-box" id="sns-advice-box-section">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
-          <h3 style="margin:0;font-size:1.02rem;display:flex;align-items:center;gap:6px;color:#0369a1;">
+          <h3 class="sns-advice-title">
             <span style="background:#0284c7;color:white;padding:2px 7px;border-radius:4px;font-size:0.78rem;">SNS</span>
-            인스타 · X(트위터) 규격별 크롭 & 캡션 제안
+            <span>인스타 · X(트위터) 규격별 크롭 & 캡션 제안</span>
           </h3>
-          <span style="font-size:0.75rem;color:#0284c7;background:#e0f2fe;padding:3px 9px;border-radius:6px;font-weight:700;">
+          <span style="font-size:0.75rem;color:#0284c7;background:rgba(56,189,248,0.15);padding:3px 9px;border-radius:6px;font-weight:700;">
             ⚡ 비율 선택형 토큰 절약 모드
           </span>
         </div>
@@ -528,31 +528,30 @@ function openDetailModal(id) {
         </div>
       </div>
 
-      <div style="background:#eef2ff;padding:8px 12px;border-radius:10px;margin-bottom:8px;font-size:0.84rem;line-height:1.42;color:#3730a3">
+      <div class="final-reason-box">
         <b>종합 총평:</b> ${item.final_reason}
       </div>
 
       <!-- 사용자 직접 평점 매기기 & AI 비교 영역 -->
-      <div class="user-score-section" style="background:#f8fafc;border:1px solid #cbd5e1;border-radius:14px;padding:12px 16px;margin-bottom:12px;">
+      <div class="user-score-section">
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
           <div style="display:flex;align-items:center;gap:6px;">
             <span style="font-size:1.15rem;">👤</span>
             <div>
-              <b style="font-size:0.88rem;color:var(--navy);">내 직접 평가 평점 (User Rating)</b>
+              <b class="user-score-title">내 직접 평가 평점 (User Rating)</b>
               <div style="font-size:0.73rem;color:var(--muted);">점수를 직접 매겨 AI와 시각을 비교해보세요.</div>
             </div>
           </div>
           <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-            <div style="display:inline-flex;align-items:center;background:white;border:1px solid var(--line);border-radius:8px;padding:2px 8px;">
-              <input type="number" id="detail-user-score-input" min="0" max="10" step="0.1" 
+            <div class="user-score-input-wrap">
+              <input type="number" id="detail-user-score-input" class="user-score-input" min="0" max="10" step="0.1" 
                      value="${item.user_score !== null && item.user_score !== undefined ? item.user_score.toFixed(1) : ''}" 
-                     placeholder="0.0~10" 
-                     style="width:65px;border:none;outline:none;font-size:0.92rem;font-weight:700;color:#0f172a;text-align:center;">
+                     placeholder="0.0~10">
               <span style="font-size:0.75rem;color:var(--muted);font-weight:600;">/ 10</span>
             </div>
             <button class="filter-btn" style="background:#0284c7;color:white;border-color:#0284c7;padding:4px 10px;font-weight:700;font-size:0.78rem;" onclick="submitUserScore(${item.id})">저장</button>
             ${item.user_score !== null && item.user_score !== undefined ? `
-              <button class="filter-btn" style="background:#f1f5f9;color:#64748b;border-color:#cbd5e1;padding:4px 8px;font-size:0.76rem;" onclick="clearUserScore(${item.id})">초기화</button>
+              <button class="filter-btn" style="background:var(--filter-btn-bg);color:var(--muted);border-color:var(--line);padding:4px 8px;font-size:0.76rem;" onclick="clearUserScore(${item.id})">초기화</button>
             ` : ''}
           </div>
         </div>
@@ -560,7 +559,7 @@ function openDetailModal(id) {
         <div style="display:flex;gap:4px;align-items:center;margin-top:8px;flex-wrap:wrap;">
           <span style="font-size:0.73rem;color:var(--muted);font-weight:600;">빠른 점수:</span>
           ${[6.0, 7.0, 7.5, 8.0, 8.5, 9.0, 9.5, 10.0].map(s => `
-            <button class="filter-btn" style="padding:1px 6px;font-size:0.72rem;background:white;" onclick="setQuickUserScore(${item.id}, ${s})">${s.toFixed(1)}</button>
+            <button class="quick-score-btn" onclick="setQuickUserScore(${item.id}, ${s})">${s.toFixed(1)}</button>
           `).join('')}
         </div>
 
@@ -658,12 +657,12 @@ function openDetailModal(id) {
 
       <!-- 주요 장점 및 단점/개선점 (좌우 2열 배치로 세로 공간 50% 절약) -->
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px;">
-        <div class="list-box-compact" style="background:#f0fdf4;border:1px solid #bbf7d0;">
-          <h4 style="color:#059669;margin:0 0 3px;font-size:0.78rem;font-weight:700;">✓ 주요 장점</h4>
+        <div class="strengths-box">
+          <h4>✓ 주요 장점</h4>
           <ul>${item.strengths.map(s => `<li>${s}</li>`).join('')}</ul>
         </div>
-        <div class="list-box-compact" style="background:#fff1f2;border:1px solid #fecdd3;">
-          <h4 style="color:#e11d48;margin:0 0 3px;font-size:0.78rem;font-weight:700;">✗ 단점 및 촬영 개선점</h4>
+        <div class="improvements-box">
+          <h4>✗ 단점 및 촬영 개선점</h4>
           <ul>${item.improvements.map(i => `<li>${i}</li>`).join('')}</ul>
         </div>
       </div>
@@ -688,25 +687,25 @@ function openDetailModal(id) {
 
 function renderScoreComparisonBox(aiScore, userScore) {
   const diff = Math.round((userScore - aiScore) * 10) / 10;
-  let badgeStyle, badgeText, comment;
+  let badgeClass, badgeText, comment;
   if (Math.abs(diff) <= 0.2) {
-    badgeStyle = 'background:#f3e8ff;color:#7e22ce;border:1px solid #d8b4fe;';
+    badgeClass = 'diff-badge-match';
     badgeText = '±0.0 (AI와 일치)';
     comment = '🤖 AI와 👤 내 시각이 거의 완벽하게 일치합니다!';
   } else if (diff > 0) {
-    badgeStyle = 'background:#e0f2fe;color:#0369a1;border:1px solid #bae6fd;';
+    badgeClass = 'diff-badge-higher';
     badgeText = `+${diff.toFixed(1)} (AI보다 호평)`;
     comment = `👤 내가 AI(${aiScore.toFixed(1)}점)보다 +${diff.toFixed(1)}점 더 높게 평가했습니다. (개인 취향 부합)`;
   } else {
-    badgeStyle = 'background:#fef3c7;color:#b45309;border:1px solid #fde68a;';
+    badgeClass = 'diff-badge-stricter';
     badgeText = `${diff.toFixed(1)} (AI보다 엄격)`;
     comment = `👤 내가 AI(${aiScore.toFixed(1)}점)보다 ${Math.abs(diff).toFixed(1)}점 더 엄격하게 평가했습니다.`;
   }
   return `
-    <div style="margin-top:8px;padding:8px 10px;background:white;border-radius:8px;border:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;">
+    <div class="score-comparison-box">
       <div style="display:flex;align-items:center;gap:6px;">
         <span style="font-size:0.8rem;font-weight:700;color:var(--navy);">🤖 AI ${aiScore.toFixed(1)} vs 👤 내 점수 ${userScore.toFixed(1)}</span>
-        <span style="font-size:0.72rem;font-weight:800;padding:1px 7px;border-radius:999px;${badgeStyle}">${badgeText}</span>
+        <span class="${badgeClass}" style="font-size:0.72rem;font-weight:800;padding:1px 7px;border-radius:999px;">${badgeText}</span>
       </div>
       <span style="font-size:0.75rem;color:var(--muted);">${comment}</span>
     </div>
@@ -819,26 +818,26 @@ function renderCropRatioDetailArea(ratioKey, currentAdv, recordId) {
 
   if (box) {
     return `
-      <div id="crop-tip-box" style="background:white;padding:12px 14px;border-radius:10px;font-size:0.85rem;border:1px solid #e0f2fe;box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+      <div id="crop-tip-box" class="sns-tip-box">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:6px;">
-          <b id="crop-tip-title" style="color:#0369a1;font-size:0.92rem;">${box.ratio_label || target.tag}</b>
+          <b id="crop-tip-title" style="color:var(--blue);font-size:0.92rem;">${box.ratio_label || target.tag}</b>
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-            <button class="filter-btn" style="padding:4px 9px;font-size:0.76rem;background:#f0f9ff;color:#0284c7;border-color:#bae6fd;" onclick="requestSingleSnsCrop('${ratioKey}', ${recordId}, this, true)">🔄 이 비율만 다시 제안</button>
-            <button class="filter-btn" style="padding:4px 9px;font-size:0.76rem;background:#f8fafc;color:#475569;border-color:#cbd5e1;" onclick="requestAllSnsCrops(${recordId}, this)">🔄 전체 4종 일괄 재분석</button>
+            <button class="filter-btn" style="padding:4px 9px;font-size:0.76rem;background:rgba(56,189,248,0.15);color:var(--blue);border-color:var(--line);" onclick="requestSingleSnsCrop('${ratioKey}', ${recordId}, this, true)">🔄 이 비율만 다시 제안</button>
+            <button class="filter-btn" style="padding:4px 9px;font-size:0.76rem;background:var(--card);color:var(--muted);border-color:var(--line);" onclick="requestAllSnsCrops(${recordId}, this)">🔄 전체 4종 일괄 재분석</button>
             <button class="upload-btn" id="btn-crop-download" style="padding:5px 12px;font-size:0.78rem;background:#0284c7;" onclick="downloadCroppedImage('${ratioKey}', ${recordId})">✂️ 이 비율로 잘라 다운로드</button>
           </div>
         </div>
-        <div id="crop-tip-desc" style="color:#334155;line-height:1.45;">${box.composition_tip || '피사체 중심 추천 구도입니다.'}</div>
+        <div id="crop-tip-desc" style="color:var(--ink);line-height:1.45;">${box.composition_tip || '피사체 중심 추천 구도입니다.'}</div>
       </div>
     `;
   }
 
   return `
-    <div id="crop-tip-box" style="background:#f8fafc;padding:16px;border-radius:10px;font-size:0.85rem;border:1px dashed #93c5fd;text-align:center;">
-      <div style="color:#0369a1;font-weight:700;margin-bottom:6px;font-size:0.92rem;">
+    <div id="crop-tip-box" style="background:var(--card-sub);padding:16px;border-radius:10px;font-size:0.85rem;border:1px dashed var(--line);text-align:center;">
+      <div style="color:var(--blue);font-weight:700;margin-bottom:6px;font-size:0.92rem;">
         SNS 최적 크롭 제안이 아직 생성되지 않았습니다.
       </div>
-      <div style="color:#64748b;font-size:0.8rem;margin-bottom:12px;">
+      <div style="color:var(--muted);font-size:0.8rem;margin-bottom:12px;">
         단 1회의 Gemini 호출로 4대 규격(인스타 4:5, 1:1, X 16:9, 3:4)을 한 번에 분석하여 토큰을 대폭 절약합니다.
       </div>
       <button class="upload-btn" style="background:#0284c7;padding:8px 20px;font-size:0.86rem;margin:0 auto;display:inline-flex;" onclick="requestSingleSnsCrop('${ratioKey}', ${recordId}, this, false)">
@@ -1274,11 +1273,11 @@ function renderLrAdviceContent(advice) {
       <div class="lr-metric"><span>활기 (Vibrance)</span><strong>${advice.vibrance > 0 ? '+' : ''}${advice.vibrance}</strong></div>
       <div class="lr-metric"><span>채도 (Saturation)</span><strong>${advice.saturation > 0 ? '+' : ''}${advice.saturation}</strong></div>
     </div>
-    <div style="background:white;padding:10px 14px;border-radius:8px;font-size:0.84rem;margin-bottom:8px;border:1px solid #e2e8f0;">
-      <b style="color:#0369a1">🌡️ 화이트밸런스/색조:</b> ${advice.temp_tint_notes}
+    <div class="lr-tip-box" style="margin-bottom:8px;">
+      <b style="color:var(--blue)">🌡️ 화이트밸런스/색조:</b> ${advice.temp_tint_notes}
     </div>
-    <div style="background:white;padding:10px 14px;border-radius:8px;font-size:0.84rem;border:1px solid #e2e8f0;">
-      <b style="color:#4f46e5">🎨 마스킹 및 세부 후보정 팁:</b> ${advice.retouching_guide}
+    <div class="lr-tip-box">
+      <b style="color:var(--accent)">🎨 마스킹 및 세부 후보정 팁:</b> ${advice.retouching_guide}
     </div>
   `;
 }
@@ -2280,15 +2279,15 @@ function updateComparison() {
         <div><span>색감</span><strong>${item.color_score.toFixed(1)}</strong></div>
         <div><span>기술</span><strong>${item.technique_score.toFixed(1)}</strong></div>
       </div>
-      <div style="background:#f8fafc;padding:12px;border-radius:10px;font-size:0.88rem;margin-bottom:12px;">
+      <div class="final-reason-box" style="margin-bottom:12px;">
         <b>한줄 총평:</b> ${item.final_reason}
       </div>
-      <div class="list-box">
-        <h4 style="color:var(--teal)">✓ 주요 장점</h4>
+      <div class="strengths-box">
+        <h4>✓ 주요 장점</h4>
         <ul>${item.strengths.map(s => `<li>${s}</li>`).join('')}</ul>
       </div>
-      <div class="list-box" style="margin-top:8px;">
-        <h4 style="color:#e11d48">✗ 단점 및 아쉬운 점</h4>
+      <div class="improvements-box" style="margin-top:8px;">
+        <h4>✗ 단점 및 아쉬운 점</h4>
         <ul>${item.improvements.map(i => `<li>${i}</li>`).join('')}</ul>
       </div>
     </div>

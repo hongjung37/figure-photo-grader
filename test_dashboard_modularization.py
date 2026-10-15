@@ -40,11 +40,19 @@ class DashboardModularizationTests(unittest.TestCase):
         self.assertIn("--paper", css)
         self.assertIn("--card", css)
         self.assertIn("--ink", css)
+        self.assertIn("body.darkroom .strengths-box", css)
+        self.assertIn("body.darkroom .improvements-box", css)
+        self.assertIn("body.darkroom .lr-advice-box", css)
+        self.assertIn("body.darkroom .user-score-section", css)
 
-        # Verify theme functions in JS
+        # Verify theme functions and classes in JS
         self.assertIn("function toggleTheme", js)
         self.assertIn("function initTheme", js)
         self.assertIn("localStorage.setItem('theme'", js)
+        self.assertIn('class="strengths-box"', js)
+        self.assertIn('class="improvements-box"', js)
+        self.assertIn('class="user-score-section"', js)
+        self.assertIn('class="lr-advice-box"', js)
 
         # Verify template links and theme button
         self.assertIn('href="/static/dashboard.css"', tmpl)

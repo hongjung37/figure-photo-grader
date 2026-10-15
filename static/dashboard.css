@@ -102,13 +102,76 @@ h1 span { font-size: 0.75rem; background: var(--teal); color: white; padding: 3p
 .note-item { background: var(--card-sub); border-left: 3px solid var(--blue); padding: 5px 10px; border-radius: 0 8px 8px 0; margin-bottom: 4px; font-size: 0.78rem; line-height: 1.35; white-space: pre-wrap; }
 .note-item h4 { margin: 0 0 2px; font-size: 0.82rem; display: flex; justify-content: space-between; }
 .note-item-compact { background: var(--card-sub); padding: 6px 10px; border-radius: 0 8px 8px 0; font-size: 0.76rem; line-height: 1.35; box-shadow: 0 1px 2px rgba(0,0,0,0.03); border: 1px solid var(--line); }
-.note-item-compact .note-header { display: flex; justify-content: space-between; align-items: center; font-weight: 700; margin-bottom: 3px; font-size: 0.80rem; }
+.note-item-compact .note-header { display: flex; justify-content: space-between; align-items: center; font-weight: 700; margin-bottom: 3px; font-size: 0.80rem; color: var(--navy); }
 .note-item-compact .note-body { color: var(--ink); word-break: keep-all; }
 .list-box { background: var(--card-sub); padding: 6px 10px; border-radius: 8px; margin-top: 4px; border: 1px solid var(--line); }
 .list-box h4 { margin: 0 0 2px; font-size: 0.80rem; }
 .list-box ul { margin: 0; padding-left: 14px; font-size: 0.76rem; line-height: 1.3; color: var(--ink); }
 .list-box-compact { padding: 6px 10px; border-radius: 8px; }
 .list-box-compact ul { margin: 0; padding-left: 14px; font-size: 0.75rem; line-height: 1.3; color: var(--ink); }
+
+/* Strengths & Improvements Boxes */
+.strengths-box { background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 6px 10px; }
+.strengths-box h4 { color: #059669; margin: 0 0 3px; font-size: 0.78rem; font-weight: 700; }
+.strengths-box ul { margin: 0; padding-left: 14px; font-size: 0.75rem; line-height: 1.35; color: #166534; }
+.improvements-box { background: #fff1f2; border: 1px solid #fecdd3; border-radius: 8px; padding: 6px 10px; }
+.improvements-box h4 { color: #e11d48; margin: 0 0 3px; font-size: 0.78rem; font-weight: 700; }
+.improvements-box ul { margin: 0; padding-left: 14px; font-size: 0.75rem; line-height: 1.35; color: #9f1239; }
+
+body.darkroom .strengths-box { background: rgba(16, 185, 129, 0.12); border-color: rgba(16, 185, 129, 0.35); }
+body.darkroom .strengths-box h4 { color: #34d399; }
+body.darkroom .strengths-box ul { color: #e2e8f0; }
+body.darkroom .improvements-box { background: rgba(225, 29, 72, 0.12); border-color: rgba(225, 29, 72, 0.35); }
+body.darkroom .improvements-box h4 { color: #fb7185; }
+body.darkroom .improvements-box ul { color: #e2e8f0; }
+
+/* Final Reason (종합 총평) */
+.final-reason-box { background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 10px; padding: 8px 12px; margin-bottom: 8px; font-size: 0.84rem; line-height: 1.42; color: #3730a3; }
+body.darkroom .final-reason-box { background: rgba(99, 102, 241, 0.15); border-color: rgba(99, 102, 241, 0.35); color: #c7d2fe; }
+
+/* User Score Section */
+.user-score-section { background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 14px; padding: 12px 16px; margin-bottom: 12px; }
+.user-score-title { font-size: 0.88rem; font-weight: 800; color: #0f172a; }
+.user-score-input-wrap { display: inline-flex; align-items: center; background: white; border: 1px solid var(--line); border-radius: 8px; padding: 2px 8px; }
+.user-score-input { width: 65px; border: none; outline: none; font-size: 0.92rem; font-weight: 700; background: transparent; color: #0f172a; text-align: center; }
+.quick-score-btn { padding: 1px 6px; font-size: 0.72rem; background: white; color: #334155; border: 1px solid #cbd5e1; border-radius: 999px; cursor: pointer; transition: all .15s; }
+.quick-score-btn:hover { background: #f1f5f9; color: var(--blue); }
+.score-comparison-box { margin-top: 8px; padding: 8px 10px; background: white; border-radius: 8px; border: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; }
+
+body.darkroom .user-score-section { background: var(--card-sub); border-color: var(--line); }
+body.darkroom .user-score-title { color: #f8fafc; }
+body.darkroom .user-score-input-wrap { background: #0f172a; border-color: var(--line); }
+body.darkroom .user-score-input { color: #f8fafc; }
+body.darkroom .quick-score-btn { background: var(--card); color: var(--ink); border-color: var(--line); }
+body.darkroom .quick-score-btn:hover { background: var(--filter-btn-hover); color: var(--blue); }
+body.darkroom .score-comparison-box { background: #0f172a; border-color: var(--line); }
+
+.diff-badge-match { background: #f3e8ff; color: #7e22ce; border: 1px solid #d8b4fe; }
+.diff-badge-higher { background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; }
+.diff-badge-stricter { background: #fef3c7; color: #b45309; border: 1px solid #fde68a; }
+
+body.darkroom .diff-badge-match { background: rgba(168, 85, 247, 0.2); color: #c084fc; border-color: rgba(168, 85, 247, 0.4); }
+body.darkroom .diff-badge-higher { background: rgba(14, 165, 233, 0.2); color: #38bdf8; border-color: rgba(14, 165, 233, 0.4); }
+body.darkroom .diff-badge-stricter { background: rgba(245, 158, 11, 0.2); color: #fbbf24; border-color: rgba(245, 158, 11, 0.4); }
+
+/* Lightroom Advice Box */
+.lr-advice-box { margin-top: 12px; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 14px; padding: 16px; }
+.lr-advice-title { margin: 0; font-size: 1.02rem; font-weight: 800; display: flex; align-items: center; gap: 6px; color: #0f172a; }
+.lr-tip-box { background: white; padding: 10px 14px; border-radius: 8px; font-size: 0.84rem; border: 1px solid #e2e8f0; color: #334155; }
+
+body.darkroom .lr-advice-box { background: var(--card-sub); border-color: var(--line); }
+body.darkroom .lr-advice-title { color: #f8fafc; }
+body.darkroom .lr-tip-box { background: #0f172a; border-color: var(--line); color: var(--ink); }
+
+/* SNS Advice Box */
+.sns-advice-box { margin-top: 16px; background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 14px; padding: 16px; }
+.sns-advice-title { margin: 0; font-size: 1.02rem; font-weight: 800; display: flex; align-items: center; gap: 6px; color: #0369a1; }
+.sns-tip-box { background: white; padding: 12px 14px; border-radius: 10px; font-size: 0.85rem; border: 1px solid #e0f2fe; color: #334155; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+
+body.darkroom .sns-advice-box { background: var(--card-sub); border-color: var(--line); }
+body.darkroom .sns-advice-title { color: #38bdf8; }
+body.darkroom .sns-tip-box { background: #0f172a; border-color: var(--line); color: var(--ink); }
+
 .lr-metric { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; text-align: center; }
 .lr-metric span { display: block; font-size: 0.70rem; color: var(--muted); margin-bottom: 1px; }
 .lr-metric strong { display: block; font-size: 0.90rem; color: var(--ink); font-weight: 700; }
