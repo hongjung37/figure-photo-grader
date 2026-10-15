@@ -34,17 +34,26 @@ from app.db import (
     find_existing_analysis,
     get_all_analyses,
     get_analyses_and_tags_for_export,
+    get_analysis_by_id,
     get_analysis_row_by_id,
     get_photo_thumbnail_and_hash,
     get_tag_stats,
     save_analysis,
+    update_analysis,
+    update_cross_check_opinion,
     update_lr_advice,
     update_photo_thumbnail,
     update_review_status,
     update_sns_advice,
     update_user_score,
 )
-from app.models.analysis import AESTHETIC_TAG_CATEGORIES, AESTHETIC_TAG_OPTIONS, PhotoAnalysis, get_score_grade
+from app.models.analysis import (
+    AESTHETIC_TAG_CATEGORIES,
+    AESTHETIC_TAG_OPTIONS,
+    CrossCheckOpinion,
+    PhotoAnalysis,
+    get_score_grade,
+)
 from app.models.crop import CropBox, SNSAdvice
 from app.models.lightroom import LightroomAdvice
 from app.services.burst_detector import (
@@ -397,6 +406,88 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.end_headers()
                 self.wfile.write(json.dumps({"success": False, "error": str(exc)}, ensure_ascii=False).encode("utf-8"))
+                return
+
+        if parsed.path == "/api/reanalyze":
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(content_length)
+                data = json.loads(body.decode("utf-8"))
+                record_id = int(data.get("id"))
+                mode = str(data.get("mode", "cross_check_only"))
+                tier = str(data.get("tier", "standard"))
+                category_param = str(data.get("category", "auto"))
+
+                row = get_analysis_row_by_id(self.db_path, record_id)
+                if not row:
+                    raise ValueError(f"레코드 ID {record_id}를 찾을 수 없습니다.")
+
+                prepared = _load_prepared_photo_for_record(self.db_path, row)
+                category_hint = category_param if category_param != "auto" else None
+
+                if mode == "cross_check_only":
+                    from app.services.openai_client import cross_check_with_openai
+                    from app.models.analysis import OpenAICrossCheck
+                    openai_res = cross_check_with_openai(
+                        photo=prepared,
+                        model=DEFAULT_OPENAI_MODEL,
+                        category_hint=category_hint,
+                    )
+                    if isinstance(openai_res, OpenAICrossCheck):
+                        opinion = CrossCheckOpinion(
+                            model=DEFAULT_OPENAI_MODEL,
+                            score=openai_res.score,
+                            reason=openai_res.reason,
+                            strengths=openai_res.strengths,
+                            improvements=openai_res.improvements,
+                            composition_critique=openai_res.composition_critique,
+                            lighting_critique=openai_res.lighting_critique,
+                        )
+                    elif isinstance(openai_res, CrossCheckOpinion):
+                        opinion = openai_res
+                    else:
+                        raise RuntimeError(f"예상치 못한 OpenAI 응답 형태: {type(openai_res)}")
+
+                    updated_record = update_cross_check_opinion(self.db_path, record_id, opinion)
+                else:
+                    if tier == "ensemble":
+                        active_provider = "ensemble"
+                        model = f"ensemble(gemini+{DEFAULT_OPENAI_MODEL})"
+                    else:
+                        active_provider = "gemini"
+                        model = MODEL_PRESETS.get(tier, MODEL_PRESETS["standard"])
+
+                    new_analysis = analyze_photo(
+                        prepared,
+                        provider=active_provider,
+                        model=model,
+                        category_hint=category_hint,
+                    )
+                    updated_record = update_analysis(self.db_path, record_id, model, new_analysis)
+
+                if not updated_record:
+                    raise RuntimeError("데이터베이스 갱신 후 분석 레코드를 불러오지 못했습니다.")
+
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(
+                    json.dumps(
+                        {"success": True, "analysis": updated_record},
+                        ensure_ascii=False,
+                    ).encode("utf-8")
+                )
+                return
+            except Exception as exc:
+                import traceback
+                print(f"[/api/reanalyze ERROR] {type(exc).__name__}: {exc}", file=sys.stderr)
+                traceback.print_exc(file=sys.stderr)
+                self.send_response(HTTPStatus.INTERNAL_SERVER_ERROR)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(
+                    json.dumps({"success": False, "error": str(exc)}, ensure_ascii=False).encode("utf-8")
+                )
                 return
 
         if parsed.path == "/api/update-status":

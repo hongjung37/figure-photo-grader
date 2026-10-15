@@ -14,7 +14,7 @@ from app.db.connection import (
     ensure_tag_tables,
     sync_analysis_tags,
 )
-from app.models.analysis import AESTHETIC_TAG_CATEGORIES, PhotoAnalysis, get_score_grade
+from app.models.analysis import AESTHETIC_TAG_CATEGORIES, CrossCheckOpinion, PhotoAnalysis, get_score_grade
 from app.services.image_processor import (
     PreparedPhoto,
     compute_dhash_from_bytes,
@@ -147,77 +147,157 @@ def get_all_analyses(db_path: Path, max_hamming_dist: int = 15) -> list[dict]:
 
     results = []
     for row in rows:
-        aid = int(row["id"])
-        try:
-            analysis_data = json.loads(row["analysis_json"])
-            exif_data = json.loads(row["exif_json"])
-        except Exception:
-            continue
-
-        lr_advice = None
-        if "lr_advice_json" in row.keys() and row["lr_advice_json"]:
-            try:
-                lr_advice = json.loads(row["lr_advice_json"])
-            except Exception:
-                pass
-
-        sns_advice = None
-        if "sns_advice_json" in row.keys() and row["sns_advice_json"]:
-            try:
-                sns_advice = json.loads(row["sns_advice_json"])
-            except Exception:
-                pass
-
-        dhash_val = row["dhash"] if "dhash" in row.keys() and row["dhash"] is not None else None
-        if dhash_val is not None:
-            dhash_val = dhash_from_sqlite(dhash_val)
-        elif row["thumbnail"]:
-            try:
-                dhash_val = compute_dhash_from_bytes(row["thumbnail"])
-            except Exception:
-                dhash_val = None
-
-        final_score = float(analysis_data.get("final_score", 0))
-        results.append(
-            {
-                "id": aid,
-                "sha256": row["sha256"],
-                "filename": row["source_filename"],
-                "width": row["width"],
-                "height": row["height"],
-                "format": row["image_format"],
-                "model": row["model"],
-                "created_at": row["created_at"],
-                "review_status": row["review_status"] if "review_status" in row.keys() else "미검토",
-                "user_notes": row["user_notes"] if "user_notes" in row.keys() else "",
-                "user_score": float(row["user_score"]) if "user_score" in row.keys() and row["user_score"] is not None else None,
-                "final_score": final_score,
-                "grade": get_score_grade(final_score),
-                "figure_category": analysis_data.get("figure_category", "일반 피규어 촬영"),
-                "focus_status": analysis_data.get("focus_status", "완벽 칼초점"),
-                "focus_notes": analysis_data.get("focus_notes", ""),
-                "composition_score": float(analysis_data.get("composition_score", 0)),
-                "composition_notes": analysis_data.get("composition_notes", ""),
-                "lighting_score": float(analysis_data.get("lighting_score", 0)),
-                "lighting_notes": analysis_data.get("lighting_notes", ""),
-                "color_score": float(analysis_data.get("color_score", 0)),
-                "color_notes": analysis_data.get("color_notes", ""),
-                "technique_score": float(analysis_data.get("technique_score", 0)),
-                "technique_notes": analysis_data.get("technique_notes", ""),
-                "final_reason": analysis_data.get("final_reason", ""),
-                "strengths": analysis_data.get("strengths", []),
-                "improvements": analysis_data.get("improvements", []),
-                "aesthetic_tags": tags_by_id.get(aid, analysis_data.get("aesthetic_tags", {})),
-                "detected_camera_settings": analysis_data.get("detected_camera_settings"),
-                "cross_check_opinion": analysis_data.get("cross_check_opinion"),
-                "lr_advice": lr_advice,
-                "sns_advice": sns_advice,
-                "exif": exif_data,
-                "dhash": dhash_val,
-            }
-        )
+        formatted = _format_analysis_row(row, tags_by_id.get(int(row["id"])))
+        if formatted:
+            results.append(formatted)
     from app.services.burst_detector import cluster_burst_groups
     return cluster_burst_groups(results, max_hamming_dist=max_hamming_dist)
+
+
+def _format_analysis_row(
+    row: sqlite3.Row | dict[str, Any],
+    tags_dict: dict[str, list[str]] | None = None,
+) -> dict[str, Any] | None:
+    """Format a raw database row into the standardized analysis record dictionary."""
+    aid = int(row["id"])
+    try:
+        analysis_data = json.loads(row["analysis_json"])
+        exif_data = json.loads(row["exif_json"])
+    except Exception:
+        return None
+
+    lr_advice = None
+    if "lr_advice_json" in row.keys() and row["lr_advice_json"]:
+        try:
+            lr_advice = json.loads(row["lr_advice_json"])
+        except Exception:
+            pass
+
+    sns_advice = None
+    if "sns_advice_json" in row.keys() and row["sns_advice_json"]:
+        try:
+            sns_advice = json.loads(row["sns_advice_json"])
+        except Exception:
+            pass
+
+    dhash_val = row["dhash"] if "dhash" in row.keys() and row["dhash"] is not None else None
+    if dhash_val is not None:
+        dhash_val = dhash_from_sqlite(dhash_val)
+    elif row["thumbnail"]:
+        try:
+            dhash_val = compute_dhash_from_bytes(row["thumbnail"])
+        except Exception:
+            dhash_val = None
+
+    final_score = float(analysis_data.get("final_score", 0))
+    tags = tags_dict if tags_dict is not None else analysis_data.get("aesthetic_tags", {})
+    return {
+        "id": aid,
+        "sha256": row["sha256"],
+        "filename": row["source_filename"],
+        "width": row["width"],
+        "height": row["height"],
+        "format": row["image_format"],
+        "model": row["model"],
+        "created_at": row["created_at"],
+        "review_status": row["review_status"] if "review_status" in row.keys() else "미검토",
+        "user_notes": row["user_notes"] if "user_notes" in row.keys() else "",
+        "user_score": float(row["user_score"]) if "user_score" in row.keys() and row["user_score"] is not None else None,
+        "final_score": final_score,
+        "grade": get_score_grade(final_score),
+        "figure_category": analysis_data.get("figure_category", "일반 피규어 촬영"),
+        "focus_status": analysis_data.get("focus_status", "완벽 칼초점"),
+        "focus_notes": analysis_data.get("focus_notes", ""),
+        "composition_score": float(analysis_data.get("composition_score", 0)),
+        "composition_notes": analysis_data.get("composition_notes", ""),
+        "lighting_score": float(analysis_data.get("lighting_score", 0)),
+        "lighting_notes": analysis_data.get("lighting_notes", ""),
+        "color_score": float(analysis_data.get("color_score", 0)),
+        "color_notes": analysis_data.get("color_notes", ""),
+        "technique_score": float(analysis_data.get("technique_score", 0)),
+        "technique_notes": analysis_data.get("technique_notes", ""),
+        "final_reason": analysis_data.get("final_reason", ""),
+        "strengths": analysis_data.get("strengths", []),
+        "improvements": analysis_data.get("improvements", []),
+        "aesthetic_tags": tags,
+        "detected_camera_settings": analysis_data.get("detected_camera_settings"),
+        "cross_check_opinion": analysis_data.get("cross_check_opinion"),
+        "lr_advice": lr_advice,
+        "sns_advice": sns_advice,
+        "exif": exif_data,
+        "dhash": dhash_val,
+    }
+
+
+def get_analysis_by_id(db_path: Path, record_id: int) -> dict[str, Any] | None:
+    """Retrieve a single fully-formatted analysis record by ID with aesthetic tags."""
+    if not db_path.is_file():
+        return None
+    ensure_db_columns(db_path)
+    with closing(sqlite3.connect(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT * FROM photo_analyses WHERE id = ?", (record_id,)).fetchone()
+        if not row:
+            return None
+        tag_rows = conn.execute(
+            "SELECT category_key, tag FROM photo_analysis_tags WHERE analysis_id = ?",
+            (record_id,),
+        ).fetchall()
+
+    tags_dict: dict[str, list[str]] = {}
+    for r in tag_rows:
+        ckey = str(r["category_key"])
+        tag = str(r["tag"])
+        tags_dict.setdefault(ckey, []).append(tag)
+
+    return _format_analysis_row(row, tags_dict)
+
+
+def update_analysis(
+    db_path: str | Path,
+    record_id: int,
+    model: str,
+    analysis: PhotoAnalysis,
+) -> dict[str, Any] | None:
+    """Update model and complete analysis JSON for an existing record, re-syncing tags."""
+    database = Path(db_path).expanduser()
+    ensure_db_columns(database)
+    with closing(sqlite3.connect(database)) as connection, connection:
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute(
+            "UPDATE photo_analyses SET model = ?, analysis_json = ? WHERE id = ?",
+            (model, analysis.model_dump_json(), record_id),
+        )
+        sync_analysis_tags(connection, record_id, analysis.aesthetic_tags)
+    return get_analysis_by_id(database, record_id)
+
+
+def update_cross_check_opinion(
+    db_path: str | Path,
+    record_id: int,
+    cross_check: CrossCheckOpinion,
+) -> dict[str, Any] | None:
+    """Update only the cross_check_opinion inside analysis_json without modifying base evaluation."""
+    database = Path(db_path).expanduser()
+    ensure_db_columns(database)
+    with closing(sqlite3.connect(database)) as connection, connection:
+        connection.execute("PRAGMA foreign_keys = ON")
+        row = connection.execute(
+            "SELECT analysis_json FROM photo_analyses WHERE id = ?", (record_id,)
+        ).fetchone()
+        if not row:
+            return None
+        try:
+            data = json.loads(row[0])
+        except Exception:
+            data = {}
+        data["cross_check_opinion"] = cross_check.model_dump()
+        connection.execute(
+            "UPDATE photo_analyses SET analysis_json = ? WHERE id = ?",
+            (json.dumps(data, ensure_ascii=False), record_id),
+        )
+    return get_analysis_by_id(database, record_id)
+
 
 
 def get_tag_stats(db_path: Path, min_count: int = 1) -> dict:

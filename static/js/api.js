@@ -74,6 +74,15 @@ const API = {
       body: formData
     });
     return await res.json();
+  },
+
+  async reanalyzePhoto(id, mode = 'cross_check_only', tier = 'standard', category = 'auto') {
+    const res = await fetch('/api/reanalyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, mode, tier, category })
+    });
+    return await res.json();
   }
 };
 
