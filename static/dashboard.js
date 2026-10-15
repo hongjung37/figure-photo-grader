@@ -211,7 +211,7 @@ function renderGallery() {
               <span class="badge-user-score" style="display:inline-block;margin-top:4px;margin-left:4px;" title="사용자 직접 평점: ${item.user_score.toFixed(1)}점 (AI: ${item.final_score.toFixed(1)}점)">👤 내 점수 ${item.user_score.toFixed(1)}</span>
             ` : ''}
             ${item.cross_check_opinion ? `
-              <span style="display:inline-block;margin-top:4px;margin-left:4px;font-size:0.75rem;font-weight:700;color:#0284c7;background:#f0f9ff;border:1px solid #bae6fd;padding:2px 7px;border-radius:6px;" title="OpenAI(${escapeHtml(item.cross_check_opinion.model || 'GPT-6 Luna')}) 보조 의견: ${item.cross_check_opinion.score.toFixed(1)}점">🤝 OpenAI ${item.cross_check_opinion.score.toFixed(1)}</span>
+              <span class="cross-check-badge" title="OpenAI(${escapeHtml(item.cross_check_opinion.model || 'GPT-6 Luna')}) 보조 의견: ${Number(item.cross_check_opinion.score).toFixed(1)}점">🤝 OpenAI ${Number(item.cross_check_opinion.score).toFixed(1)}</span>
             ` : ''}
           </div>
           <div class="score-badge">
@@ -526,31 +526,33 @@ function openDetailModal(id) {
 function renderCrossCheckOpinion(op) {
   if (!op) return '';
   return `
-    <div class="cross-check-opinion-card" style="margin-top:8px;margin-bottom:8px;background:var(--card-bg, #f8fafc);border:1px solid #bae6fd;border-left:4px solid #0284c7;border-radius:10px;padding:12px 14px;">
+    <div class="cross-check-opinion-card">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px;">
         <div style="display:flex;align-items:center;gap:8px;">
           <span style="font-size:1.2rem;">🤝</span>
           <div>
-            <strong style="color:var(--navy);font-size:0.9rem;">OpenAI 크로스 체크 의견 (${escapeHtml(op.model || 'GPT-6 Luna')})</strong>
+            <strong class="cross-check-title">OpenAI 크로스 체크 의견 (${escapeHtml(op.model || 'GPT-6 Luna')})</strong>
             <div style="font-size:0.73rem;color:var(--muted);">Gemini 본 평가와 별도로 제공되는 독립적인 보조 비평입니다. (점수 합산/평균 없음)</div>
           </div>
         </div>
         <div style="text-align:right;">
-          <span style="font-size:1.25rem;font-weight:900;color:#0284c7;">${op.score !== undefined && op.score !== null ? Number(op.score).toFixed(1) : '-'}</span>
+          <span class="cross-check-score">${op.score !== undefined && op.score !== null ? Number(op.score).toFixed(1) : '-'}</span>
           <small style="color:var(--muted);font-size:0.75rem;"> / 10점</small>
         </div>
       </div>
-      ${op.reason ? `<div style="font-size:0.83rem;color:var(--navy);line-height:1.5;margin-bottom:8px;background:white;padding:8px 10px;border-radius:8px;border:1px solid #e2e8f0;"><b>OpenAI 총평:</b> ${escapeHtml(op.reason)}</div>` : ''}
+      ${op.reason ? `<div class="cross-check-reason-box"><b>OpenAI 총평:</b> ${escapeHtml(op.reason)}</div>` : ''}
       ${(op.composition_critique || op.lighting_critique) ? `
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;">
           ${op.composition_critique ? `
-            <div style="font-size:0.78rem;background:#f0f9ff;padding:6px 8px;border-radius:6px;border:1px solid #e0f2fe;">
-              <b style="color:#0369a1;">📐 구도 비평:</b> ${escapeHtml(op.composition_critique)}
+            <div class="cross-check-comp-box">
+              <b style="display:block;margin-bottom:2px;">📐 구도 비평:</b>
+              <span>${escapeHtml(op.composition_critique)}</span>
             </div>
           ` : ''}
           ${op.lighting_critique ? `
-            <div style="font-size:0.78rem;background:#fffbeb;padding:6px 8px;border-radius:6px;border:1px solid #fef3c7;">
-              <b style="color:#b45309;">💡 조명 비평:</b> ${escapeHtml(op.lighting_critique)}
+            <div class="cross-check-light-box">
+              <b style="display:block;margin-bottom:2px;">💡 조명 비평:</b>
+              <span>${escapeHtml(op.lighting_critique)}</span>
             </div>
           ` : ''}
         </div>
@@ -558,14 +560,14 @@ function renderCrossCheckOpinion(op) {
       ${((op.strengths && op.strengths.length) || (op.improvements && op.improvements.length)) ? `
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:0.78rem;">
           ${op.strengths && op.strengths.length ? `
-            <div style="background:#f0fdf4;padding:6px 8px;border-radius:6px;border:1px solid #dcfce7;color:#166534;">
-              <b>✓ OpenAI 시각 강점:</b>
+            <div class="cross-check-strengths-box">
+              <b style="display:block;margin-bottom:2px;">✓ OpenAI 시각 강점:</b>
               <ul style="margin:4px 0 0;padding-left:16px;">${op.strengths.map(s => `<li>${escapeHtml(s)}</li>`).join('')}</ul>
             </div>
           ` : ''}
           ${op.improvements && op.improvements.length ? `
-            <div style="background:#fef2f2;padding:6px 8px;border-radius:6px;border:1px solid #fee2e2;color:#991b1b;">
-              <b>✗ OpenAI 조언/개선점:</b>
+            <div class="cross-check-improvements-box">
+              <b style="display:block;margin-bottom:2px;">✗ OpenAI 조언/개선점:</b>
               <ul style="margin:4px 0 0;padding-left:16px;">${op.improvements.map(i => `<li>${escapeHtml(i)}</li>`).join('')}</ul>
             </div>
           ` : ''}
@@ -1690,12 +1692,12 @@ function updateComparison() {
         <ul>${item.improvements.map(i => `<li>${escapeHtml(i)}</li>`).join('')}</ul>
       </div>
       ${item.cross_check_opinion ? `
-        <div style="margin-top:10px;background:#f0f9ff;border:1px solid #bae6fd;border-left:3px solid #0284c7;border-radius:8px;padding:8px 10px;font-size:0.8rem;">
+        <div class="cross-check-compare-box">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-            <b style="color:#0369a1;">🤝 OpenAI 크로스 체크 (${escapeHtml(item.cross_check_opinion.model || 'GPT-6 Luna')})</b>
-            <strong style="color:#0284c7;">${item.cross_check_opinion.score !== undefined && item.cross_check_opinion.score !== null ? Number(item.cross_check_opinion.score).toFixed(1) : '-'}점</strong>
+            <b class="cross-check-comp-title">🤝 OpenAI 크로스 체크 (${escapeHtml(item.cross_check_opinion.model || 'GPT-6 Luna')})</b>
+            <strong class="cross-check-comp-score">${item.cross_check_opinion.score !== undefined && item.cross_check_opinion.score !== null ? Number(item.cross_check_opinion.score).toFixed(1) : '-'}점</strong>
           </div>
-          <div style="color:var(--navy);font-size:0.77rem;line-height:1.4;">${escapeHtml(item.cross_check_opinion.reason)}</div>
+          <div class="cross-check-comp-reason">${escapeHtml(item.cross_check_opinion.reason)}</div>
         </div>
       ` : ''}
     </div>
