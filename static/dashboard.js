@@ -1450,7 +1450,7 @@ function renderTagInsights() {
       <div class="insights-kpi-card">
         <div class="insights-kpi-title">🌟 AI 최고 평점 태그</div>
         <div class="insights-kpi-value" style="font-size:1.2rem;color:#0d9488;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-          ${topAi ? `#${topAi.tag}` : '-'}
+          ${topAi ? `#${escapeHtml(topAi.tag)}` : '-'}
         </div>
         <div class="insights-kpi-sub">${topAi ? `평균 ${topAi.avg_ai_score.toFixed(1)}점 (${topAi.count}장 등록)` : '데이터 없음'}</div>
       </div>

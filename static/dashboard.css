@@ -353,11 +353,26 @@ body.darkroom .best-ratio-badge {
   margin-bottom: 22px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.03);
 }
-.insights-kpis-grid {
+.insights-kpis-grid,
+.insights-kpi-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(4, 1fr);
   gap: 16px;
   margin-bottom: 24px;
+}
+
+@media (max-width: 992px) {
+  .insights-kpis-grid,
+  .insights-kpi-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 540px) {
+  .insights-kpis-grid,
+  .insights-kpi-grid {
+    grid-template-columns: 1fr;
+  }
 }
 .insights-kpi-card {
   background: var(--card);
