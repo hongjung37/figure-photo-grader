@@ -601,9 +601,11 @@ function renderLrAdviceContent(advice) {
       아직 생성된 보정 수치가 없습니다. 위의 <b>[🛠️ 라이트룸 보정 수치 제안 받기]</b> 버튼을 누르면 AI가 노출·명암·화이트밸런스 수치를 온디맨드로 분석합니다.
     </div>`;
   }
+  const exp = typeof advice.exposure === 'number' ? advice.exposure : parseFloat(advice.exposure || 0);
+  const expStr = (exp > 0 ? '+' : '') + exp.toFixed(2) + ' EV';
   return `
     <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));gap:8px;margin-bottom:12px;">
-      <div class="lr-metric"><span>노출 (Exposure)</span><strong>${advice.exposure > 0 ? '+' : ''}${advice.exposure.toFixed(2)} EV</strong></div>
+      <div class="lr-metric"><span>노출 (Exposure)</span><strong>${expStr}</strong></div>
       <div class="lr-metric"><span>대비 (Contrast)</span><strong>${advice.contrast > 0 ? '+' : ''}${advice.contrast}</strong></div>
       <div class="lr-metric"><span>하이라이트</span><strong>${advice.highlights > 0 ? '+' : ''}${advice.highlights}</strong></div>
       <div class="lr-metric"><span>그림자 (Shadows)</span><strong>${advice.shadows > 0 ? '+' : ''}${advice.shadows}</strong></div>
@@ -616,26 +618,33 @@ function renderLrAdviceContent(advice) {
       <div class="lr-metric"><span>채도 (Saturation)</span><strong>${advice.saturation > 0 ? '+' : ''}${advice.saturation}</strong></div>
     </div>
     <div class="lr-tip-box" style="margin-bottom:8px;">
-      <b style="color:var(--blue)">🌡️ 화이트밸런스/색조:</b> ${advice.temp_tint_notes}
+      <b style="color:var(--blue)">🌡️ 화이트밸런스/색조:</b> ${escapeHtml(advice.temp_tint_notes)}
     </div>
     <div class="lr-tip-box">
-      <b style="color:var(--accent)">🎨 마스킹 및 세부 후보정 팁:</b> ${advice.retouching_guide}
+      <b style="color:var(--accent)">🎨 마스킹 및 세부 후보정 팁:</b> ${escapeHtml(advice.retouching_guide)}
     </div>
   `;
 }
 
 async function requestLrAdvice(recordId, btn) {
   const origText = btn.textContent;
-  btn.textContent = 'Gemini 분석 중...';
+  const item = allData.find(d => d.id === recordId);
+  const shouldForce = Boolean(item && item.lr_advice);
+
+  btn.textContent = shouldForce ? '🔄 보정 수치 재분석 중...' : 'Gemini 분석 중...';
   btn.disabled = true;
   try {
-    const data = await API.fetchLightroomAdvice(recordId);
+    const data = await API.fetchLightroomAdvice(recordId, shouldForce);
     if (data.success && data.advice) {
-      const item = allData.find(d => d.id === recordId);
       if (item) {
         item.lr_advice = data.advice;
-        openDetailModal(recordId);
       }
+      const container = document.getElementById('lr-advice-content');
+      if (container) {
+        container.innerHTML = renderLrAdviceContent(data.advice);
+      }
+      btn.textContent = '🔄 보정 수치 다시 제안';
+      btn.disabled = false;
     } else {
       alert(`보정 수치 제안 실패: ${data.error || '알 수 없는 오류'}`);
       btn.textContent = origText;

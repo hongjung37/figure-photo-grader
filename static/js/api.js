@@ -52,8 +52,9 @@ const API = {
     return await res.json();
   },
 
-  async fetchLightroomAdvice(id) {
-    const res = await fetch(`/api/post-process-advice/${id}`, { method: 'POST' });
+  async fetchLightroomAdvice(id, force = false) {
+    const query = force ? '?force=true' : '';
+    const res = await fetch(`/api/post-process-advice/${id}${query}`, { method: 'POST' });
     return await res.json();
   },
 

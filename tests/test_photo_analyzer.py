@@ -1183,6 +1183,79 @@ class PhotoAnalyzerTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 _load_prepared_photo_for_record(db_path, row_empty)
 
+    def test_post_process_advice_endpoint_force_flag(self) -> None:
+        from app.models.lightroom import LightroomAdvice
+        from app.web.handlers import DashboardRequestHandler
+        from unittest.mock import MagicMock, patch
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            db_path = Path(temporary_directory) / "test.sqlite3"
+            image_path = Path(temporary_directory) / "test.jpg"
+            self._make_jpeg(image_path)
+            photo = prepare_photo(image_path)
+            rec_id = save_analysis(db_path, photo, "test-model", self._valid_analysis())
+
+            # Seed existing cache
+            seed_advice = LightroomAdvice(
+                exposure=0.1,
+                contrast=5,
+                highlights=-10,
+                shadows=10,
+                whites=0,
+                blacks=0,
+                texture=5,
+                clarity=5,
+                dehaze=0,
+                vibrance=5,
+                saturation=0,
+                temp_tint_notes="5000K",
+                retouching_guide="guide1",
+            )
+            from app.db import update_lr_advice
+            update_lr_advice(db_path, rec_id, json.dumps(seed_advice.model_dump()))
+
+            # Handler setup
+            handler = DashboardRequestHandler.__new__(DashboardRequestHandler)
+            handler.db_path = db_path
+            handler.wfile = BytesIO()
+            handler.send_response = MagicMock()
+            handler.send_header = MagicMock()
+            handler.end_headers = MagicMock()
+
+            # 1. Without force (force=false): returns cached advice
+            handler.path = f"/api/post-process-advice/{rec_id}"
+            handler.do_POST()
+            resp = json.loads(handler.wfile.getvalue().decode("utf-8"))
+            self.assertTrue(resp["success"])
+            self.assertTrue(resp["cached"])
+            self.assertEqual(resp["advice"]["temp_tint_notes"], "5000K")
+
+            # 2. With force=true: regenerates advice and returns cached=False
+            new_advice = LightroomAdvice(
+                exposure=0.5,
+                contrast=20,
+                highlights=-30,
+                shadows=20,
+                whites=10,
+                blacks=-5,
+                texture=15,
+                clarity=10,
+                dehaze=5,
+                vibrance=10,
+                saturation=5,
+                temp_tint_notes="5400K (Regenerated)",
+                retouching_guide="guide2",
+            )
+            handler.wfile = BytesIO()
+            handler.path = f"/api/post-process-advice/{rec_id}?force=true"
+            with patch("app.web.handlers.generate_lightroom_advice", return_value=new_advice):
+                handler.do_POST()
+
+            resp_force = json.loads(handler.wfile.getvalue().decode("utf-8"))
+            self.assertTrue(resp_force["success"])
+            self.assertFalse(resp_force["cached"])
+            self.assertEqual(resp_force["advice"]["temp_tint_notes"], "5400K (Regenerated)")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -477,19 +477,25 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
         if parsed.path.startswith("/api/post-process-advice/"):
             try:
-                record_id = int(parsed.path.split("/")[-1])
+                record_id = int(parsed.path.rstrip("/").split("/")[-1])
+                query = parse_qs(parsed.query)
+                force = query.get("force", ["false"])[0].lower() in ("true", "1", "yes")
+
                 row = get_analysis_row_by_id(self.db_path, record_id)
                 if not row:
                     raise ValueError(f"레코드 ID {record_id}를 찾을 수 없습니다.")
 
-                # 이미 캐시가 있으면 즉시 반환 (API 호출 방지)
-                if "lr_advice_json" in row.keys() and row["lr_advice_json"]:
-                    cached_advice = json.loads(row["lr_advice_json"])
-                    self.send_response(HTTPStatus.OK)
-                    self.send_header("Content-Type", "application/json; charset=utf-8")
-                    self.end_headers()
-                    self.wfile.write(json.dumps({"success": True, "advice": cached_advice, "cached": True}, ensure_ascii=False).encode("utf-8"))
-                    return
+                # force=False이고 이미 캐시가 있으면 즉시 반환 (API 호출 방지)
+                if not force and "lr_advice_json" in row.keys() and row["lr_advice_json"]:
+                    try:
+                        cached_advice = json.loads(row["lr_advice_json"])
+                        self.send_response(HTTPStatus.OK)
+                        self.send_header("Content-Type", "application/json; charset=utf-8")
+                        self.end_headers()
+                        self.wfile.write(json.dumps({"success": True, "advice": cached_advice, "cached": True}, ensure_ascii=False).encode("utf-8"))
+                        return
+                    except Exception:
+                        pass  # 캐시 손상 시 재분석 진행
 
                 prepared = _load_prepared_photo_for_record(self.db_path, row)
 

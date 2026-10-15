@@ -26,12 +26,16 @@ class LightroomAdvice(BaseModel):
     temp_tint_notes: str = Field(description="화이트밸런스/색온도/색조 가이드 (예: 5200K 유지, 틴트 +4 등)")
     retouching_guide: str = Field(description="피규어 특성에 맞춘 마스킹 및 세부 후보정 팁 (아이 데칼 캐치라이트 살리기, 피부 번들거림 방지 등)")
 
-    @field_validator("exposure")
+    @field_validator("exposure", mode="before")
     @classmethod
-    def validate_exposure(cls, v: float) -> float:
-        if not -5.0 <= v <= 5.0:
-            raise ValueError(f"exposure는 -5.00 ~ +5.00 범위여야 합니다: {v}")
-        return v
+    def validate_exposure(cls, v: Any) -> float:
+        try:
+            flt_val = float(v)
+        except (TypeError, ValueError):
+            raise ValueError(f"exposure는 실수여야 합니다: {v}")
+        if not -5.0 <= flt_val <= 5.0:
+            raise ValueError(f"exposure는 -5.00 ~ +5.00 범위여야 합니다: {flt_val}")
+        return round(flt_val, 2)
 
     @field_validator(
         "contrast",
@@ -44,9 +48,14 @@ class LightroomAdvice(BaseModel):
         "dehaze",
         "vibrance",
         "saturation",
+        mode="before",
     )
     @classmethod
-    def validate_slider_range(cls, v: int, info: Any) -> int:
-        if not -100 <= v <= 100:
-            raise ValueError(f"{info.field_name}는 -100 ~ +100 범위여야 합니다: {v}")
-        return v
+    def validate_slider_range(cls, v: Any, info: Any) -> int:
+        try:
+            int_val = round(float(v))
+        except (TypeError, ValueError):
+            raise ValueError(f"{info.field_name}는 정수여야 합니다: {v}")
+        if not -100 <= int_val <= 100:
+            raise ValueError(f"{info.field_name}는 -100 ~ +100 범위여야 합니다: {int_val}")
+        return int_val
