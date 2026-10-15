@@ -803,10 +803,10 @@ function renderSnsAdviceContent(advice, recordId) {
 
   const ratios = [
     { key: 'original', icon: '📷', name: '원본 유지 (No Crop)' },
-    { key: 'instagram_crop_4_5', icon: '📸', name: '인스타 4:5 (세로피드)' },
-    { key: 'instagram_crop_1_1', icon: '🟦', name: '인스타 1:1 (정방형)' },
-    { key: 'x_crop_16_9', icon: '🐦', name: 'X 16:9 (가로타임라인)' },
-    { key: 'x_crop_3_4', icon: '📱', name: 'X 3:4 (모바일세로)' }
+    { key: 'instagram_crop_4_5', icon: '📸', name: '4:5 (수직 매거진 / 인스타)' },
+    { key: 'instagram_crop_1_1', icon: '🟦', name: '1:1 (클래식 정방형)' },
+    { key: 'x_crop_16_9', icon: '🐦', name: '16:9 (와이드 시네마틱)' },
+    { key: 'x_crop_3_4', icon: '📱', name: '3:4 (수직 와이드)' }
   ];
 
   const buttonsHtml = ratios.map(r => {
@@ -823,7 +823,7 @@ function renderSnsAdviceContent(advice, recordId) {
     <div class="best-ratio-banner">
       <div class="best-ratio-header">
         <span class="best-ratio-badge-pill">👑 AI Best Pick</span>
-        <b style="color:var(--ink);font-size:0.88rem;">추천 최적 구도: <span style="color:var(--blue);">${escapeHtml(getCropRatioLabel(bestKey))}</span></b>
+        <b style="color:var(--ink);font-size:0.88rem;">AI 큐레이터 추천 최적 구도: <span style="color:var(--blue);">${escapeHtml(getCropRatioLabel(bestKey))}</span></b>
       </div>
       <div class="best-ratio-desc">${escapeHtml(bestReason || '이 사진의 피규어 구도와 여백에 가장 균형 잡힌 최적 비율입니다.')}</div>
     </div>
@@ -833,7 +833,7 @@ function renderSnsAdviceContent(advice, recordId) {
     <div>
       ${bestPickBanner}
       <div style="font-size:0.83rem;font-weight:700;color:var(--blue);margin-bottom:6px;margin-top:${bestKey ? '10px' : '0'};">
-        📐 원하는 비율을 선택하세요 (1회 호출로 4대 규격 + AI 최적 비율 일괄 분석 & 탭 전환 즉시 미리보기):
+        🎨 사진의 미적 완성도가 가장 높은 구도를 우선 제안하며, 규격별 탭을 전환하여 즉시 미리보세요:
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">
         ${buttonsHtml}
@@ -981,10 +981,10 @@ function renderSnsCaptionArea(currentAdv, recordId) {
 
 const TARGET_CROP_RATIOS = {
   original: { name: 'Original', tag: '원본 유지 (No Crop)', w: 0, h: 0, ratio: 0 },
-  instagram_crop_4_5: { name: 'Instagram 4:5', tag: '인스타 4:5 (세로피드)', w: 4, h: 5, ratio: 4 / 5 },
-  instagram_crop_1_1: { name: 'Instagram 1:1', tag: '인스타 1:1 (정방형)', w: 1, h: 1, ratio: 1.0 },
-  x_crop_16_9: { name: 'X 16:9', tag: 'X 16:9 (가로타임라인)', w: 16, h: 9, ratio: 16 / 9 },
-  x_crop_3_4: { name: 'X 3:4', tag: 'X 3:4 (모바일세로)', w: 3, h: 4, ratio: 3 / 4 }
+  instagram_crop_4_5: { name: 'Instagram 4:5', tag: '4:5 (수직 매거진 / 인스타)', w: 4, h: 5, ratio: 4 / 5 },
+  instagram_crop_1_1: { name: 'Instagram 1:1', tag: '1:1 (클래식 정방형)', w: 1, h: 1, ratio: 1.0 },
+  x_crop_16_9: { name: 'X 16:9', tag: '16:9 (와이드 시네마틱)', w: 16, h: 9, ratio: 16 / 9 },
+  x_crop_3_4: { name: 'X 3:4', tag: '3:4 (수직 와이드)', w: 3, h: 4, ratio: 3 / 4 }
 };
 
 function getImageRenderedRect(img) {
