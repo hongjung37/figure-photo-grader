@@ -106,6 +106,40 @@ def get_score_grade(score: float | int) -> str:
     return "개선 필요 (기초 미흡)"
 
 
+FIGURE_CATEGORIES = {
+    "macro": {
+        "label": "접사/디테일",
+        "description": "피규어의 얼굴, 눈동자, 무기, 의상 등 세부 조형과 도색 디테일을 초근접 촬영한 사진",
+        "focus": "눈동자 데칼의 칼초점, 코/귀가 날아가지 않는 적절한 매크로 심도, 미세 먼지 및 도색 마감 통제, 번들거리는 반사광(핫스팟) 제어",
+    },
+    "snap": {
+        "label": "일상/야외 스냅",
+        "description": "야외 출사, 여행 동행, 카페 등 실제 일상 환경 속에서 피규어가 상호작용하는 스냅 사진",
+        "focus": "자연광(역광/측광)의 창의적 활용, 실제 환경과 피규어의 자연스러운 스케일감 조화, 계절감 및 일상적 서사/분위기, 자연스러운 여백",
+    },
+    "staging": {
+        "label": "스튜디오 연출/디오라마",
+        "description": "배경지, 다각도 조명, 디오라마 세트, 이펙트 파츠를 활용해 극적인 세계관이나 액션 씬을 연출한 사진",
+        "focus": "다각도 조명(키/필/림라이트)의 드라마틱한 입체감과 명암비, 디오라마와 피규어의 정교한 스케일 일치, 역동적인 포징, 이펙트 파츠 투과광 연출",
+    },
+    "general": {
+        "label": "일반 피규어 촬영",
+        "description": "피규어 본체 전신 또는 상반신을 중심으로 단정하게 담아낸 스탠다드 촬영",
+        "focus": "피규어 원형의 왜곡 없는 렌즈 화각과 프레이밍, 단정한 배경 분리, 자연스러운 광택 및 피부톤 밸런스",
+    },
+}
+
+FIGURE_CATEGORY_CHOICES = tuple(cat["label"] for cat in FIGURE_CATEGORIES.values())
+
+FOCUS_STATUS_OPTIONS = (
+    "완벽 칼초점",
+    "미세 앞핀",
+    "미세 뒤핀",
+    "초점 이탈",
+    "판별 불가",
+)
+
+
 class PhotoAnalysis(BaseModel):
     """Strict JSON model returned by Gemini and stored in SQLite."""
 
@@ -171,37 +205,17 @@ class PhotoAnalysis(BaseModel):
             raise ValueError("점수는 0 이상 10 이하여야 합니다.")
         return value
 
+    @field_validator("figure_category")
+    @classmethod
+    def validate_figure_category(cls, value: str) -> str:
+        if value not in FIGURE_CATEGORY_CHOICES:
+            raise ValueError(f"허용되지 않은 피규어 카테고리입니다: '{value}'. 허용: {FIGURE_CATEGORY_CHOICES}")
+        return value
 
-FIGURE_CATEGORIES = {
-    "macro": {
-        "label": "접사/디테일",
-        "description": "피규어의 얼굴, 눈동자, 무기, 의상 등 세부 조형과 도색 디테일을 초근접 촬영한 사진",
-        "focus": "눈동자 데칼의 칼초점, 코/귀가 날아가지 않는 적절한 매크로 심도, 미세 먼지 및 도색 마감 통제, 번들거리는 반사광(핫스팟) 제어",
-    },
-    "snap": {
-        "label": "일상/야외 스냅",
-        "description": "야외 출사, 여행 동행, 카페 등 실제 일상 환경 속에서 피규어가 상호작용하는 스냅 사진",
-        "focus": "자연광(역광/측광)의 창의적 활용, 실제 환경과 피규어의 자연스러운 스케일감 조화, 계절감 및 일상적 서사/분위기, 자연스러운 여백",
-    },
-    "staging": {
-        "label": "스튜디오 연출/디오라마",
-        "description": "배경지, 다각도 조명, 디오라마 세트, 이펙트 파츠를 활용해 극적인 세계관이나 액션 씬을 연출한 사진",
-        "focus": "다각도 조명(키/필/림라이트)의 드라마틱한 입체감과 명암비, 디오라마와 피규어의 정교한 스케일 일치, 역동적인 포징, 이펙트 파츠 투과광 연출",
-    },
-    "general": {
-        "label": "일반 피규어 촬영",
-        "description": "피규어 본체 전신 또는 상반신을 중심으로 단정하게 담아낸 스탠다드 촬영",
-        "focus": "피규어 원형의 왜곡 없는 렌즈 화각과 프레이밍, 단정한 배경 분리, 자연스러운 광택 및 피부톤 밸런스",
-    },
-}
-
-FIGURE_CATEGORY_CHOICES = tuple(cat["label"] for cat in FIGURE_CATEGORIES.values())
-
-FOCUS_STATUS_OPTIONS = (
-    "완벽 칼초점",
-    "미세 앞핀",
-    "미세 뒤핀",
-    "초점 이탈",
-    "판별 불가",
-)
+    @field_validator("focus_status")
+    @classmethod
+    def validate_focus_status(cls, value: str) -> str:
+        if value not in FOCUS_STATUS_OPTIONS:
+            raise ValueError(f"허용되지 않은 초점 상태입니다: '{value}'. 허용: {FOCUS_STATUS_OPTIONS}")
+        return value
 

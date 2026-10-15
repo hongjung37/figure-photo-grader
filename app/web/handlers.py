@@ -99,6 +99,46 @@ DASHBOARD_HTML = (
     + "\n</script>\n"
 )
 
+def _load_prepared_photo_for_record(db_path: Path, row: dict[str, Any] | Any) -> PreparedPhoto:
+    """Load PreparedPhoto prioritizing high-res photo_originals, then local files, then DB thumbnail."""
+    sha256 = row["sha256"]
+    fname = row["source_filename"]
+
+    # 1. High-resolution stored original
+    for mime_type in ("image/jpeg", "image/png", "image/webp"):
+        orig_path = get_original_photo_path(db_path, sha256, mime_type)
+        if orig_path.is_file():
+            prep = prepare_photo(orig_path)
+            from dataclasses import replace
+            return replace(prep, source_filename=fname, sha256=sha256)
+
+    # 2. Local candidate paths
+    candidate_paths = [
+        Path("test_photo") / fname,
+        Path(fname),
+        Path("test_photo") / Path(fname).name,
+    ]
+    found_file = next((p for p in candidate_paths if p.is_file()), None)
+    if found_file:
+        prep = prepare_photo(found_file)
+        from dataclasses import replace
+        return replace(prep, source_filename=fname, sha256=sha256)
+
+    # 3. DB thumbnail fallback
+    if row["thumbnail"]:
+        return PreparedPhoto(
+            source_filename=fname,
+            sha256=sha256,
+            width=row["width"],
+            height=row["height"],
+            image_format="WEBP",
+            safe_exif={},
+            upload_bytes=row["thumbnail"],
+            upload_mime_type="image/webp",
+        )
+
+    raise ValueError(f"사진 파일 '{fname}'을 찾을 수 없으며 DB 썸네일도 없습니다.")
+
 
 class DashboardRequestHandler(SimpleHTTPRequestHandler):
     db_path: Path = DEFAULT_DB_PATH
@@ -451,28 +491,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     self.wfile.write(json.dumps({"success": True, "advice": cached_advice, "cached": True}, ensure_ascii=False).encode("utf-8"))
                     return
 
-                fname = row["source_filename"]
-                candidate_paths = [
-                    Path("test_photo") / fname,
-                    Path(fname),
-                    Path("test_photo") / Path(fname).name,
-                ]
-                found_file = next((p for p in candidate_paths if p.is_file()), None)
-                if found_file:
-                    prepared = prepare_photo(found_file)
-                elif row["thumbnail"]:
-                    prepared = PreparedPhoto(
-                        source_filename=fname,
-                        sha256=row["sha256"],
-                        width=row["width"],
-                        height=row["height"],
-                        image_format="WEBP",
-                        safe_exif={},
-                        upload_bytes=row["thumbnail"],
-                        upload_mime_type="image/webp",
-                    )
-                else:
-                    raise ValueError(f"사진 파일 '{fname}'을 찾을 수 없으며 DB 썸네일도 없습니다.")
+                prepared = _load_prepared_photo_for_record(self.db_path, row)
 
                 advice = generate_lightroom_advice(prepared, model=MODEL_PRESETS["lite"])
                 advice_dict = advice.model_dump(mode="json")
@@ -534,28 +553,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     }, ensure_ascii=False).encode("utf-8"))
                     return
 
-                fname = row["source_filename"]
-                candidate_paths = [
-                    Path("test_photo") / fname,
-                    Path(fname),
-                    Path("test_photo") / Path(fname).name,
-                ]
-                found_file = next((p for p in candidate_paths if p.is_file()), None)
-                if found_file:
-                    prepared = prepare_photo(found_file)
-                elif row["thumbnail"]:
-                    prepared = PreparedPhoto(
-                        source_filename=fname,
-                        sha256=row["sha256"],
-                        width=row["width"],
-                        height=row["height"],
-                        image_format="WEBP",
-                        safe_exif={},
-                        upload_bytes=row["thumbnail"],
-                        upload_mime_type="image/webp",
-                    )
-                else:
-                    raise ValueError(f"사진 파일 '{fname}'을 찾을 수 없으며 DB 썸네일도 없습니다.")
+                prepared = _load_prepared_photo_for_record(self.db_path, row)
 
                 if ratio_key in ("all", "original"):
                     crop_set = generate_all_sns_crops(prepared, model=MODEL_PRESETS["lite"])
@@ -630,28 +628,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     }, ensure_ascii=False).encode("utf-8"))
                     return
 
-                fname = row["source_filename"]
-                candidate_paths = [
-                    Path("test_photo") / fname,
-                    Path(fname),
-                    Path("test_photo") / Path(fname).name,
-                ]
-                found_file = next((p for p in candidate_paths if p.is_file()), None)
-                if found_file:
-                    prepared = prepare_photo(found_file)
-                elif row["thumbnail"]:
-                    prepared = PreparedPhoto(
-                        source_filename=fname,
-                        sha256=row["sha256"],
-                        width=row["width"],
-                        height=row["height"],
-                        image_format="WEBP",
-                        safe_exif={},
-                        upload_bytes=row["thumbnail"],
-                        upload_mime_type="image/webp",
-                    )
-                else:
-                    raise ValueError(f"사진 파일 '{fname}'을 찾을 수 없으며 DB 썸네일도 없습니다.")
+                prepared = _load_prepared_photo_for_record(self.db_path, row)
 
                 cap = generate_sns_caption_and_tags(prepared, model=MODEL_PRESETS["lite"])
                 cached_advice["social_caption"] = cap.social_caption
@@ -694,28 +671,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     self.wfile.write(json.dumps({"success": True, "advice": cached_advice, "cached": True}, ensure_ascii=False).encode("utf-8"))
                     return
 
-                fname = row["source_filename"]
-                candidate_paths = [
-                    Path("test_photo") / fname,
-                    Path(fname),
-                    Path("test_photo") / Path(fname).name,
-                ]
-                found_file = next((p for p in candidate_paths if p.is_file()), None)
-                if found_file:
-                    prepared = prepare_photo(found_file)
-                elif row["thumbnail"]:
-                    prepared = PreparedPhoto(
-                        source_filename=fname,
-                        sha256=row["sha256"],
-                        width=row["width"],
-                        height=row["height"],
-                        image_format="WEBP",
-                        safe_exif={},
-                        upload_bytes=row["thumbnail"],
-                        upload_mime_type="image/webp",
-                    )
-                else:
-                    raise ValueError(f"사진 파일 '{fname}'을 찾을 수 없으며 DB 썸네일도 없습니다.")
+                prepared = _load_prepared_photo_for_record(self.db_path, row)
 
                 advice = generate_sns_advice(prepared, model=MODEL_PRESETS["lite"])
                 advice_dict = advice.model_dump(mode="json")

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class CropBox(BaseModel):
@@ -16,6 +16,18 @@ class CropBox(BaseModel):
     xmax: float = Field(description="크롭 영역 우측 X (0.0 ~ 1.0)")
     ratio_label: str = Field(description="비율 라벨 (예: '4:5 (인스타 세로)', '1:1 (정방형)', '16:9 (X 가로)', '3:4 (X 세로)')")
     composition_tip: str = Field(description="해당 비율 크롭 시 피규어 시선/여백/프레이밍 의도 및 연출 팁")
+
+    @model_validator(mode="after")
+    def validate_coordinates(self) -> CropBox:
+        if not (0.0 <= self.ymin < self.ymax <= 1.0):
+            raise ValueError(
+                f"ymin과 ymax는 0.0 <= ymin < ymax <= 1.0 범위여야 합니다: ymin={self.ymin}, ymax={self.ymax}"
+            )
+        if not (0.0 <= self.xmin < self.xmax <= 1.0):
+            raise ValueError(
+                f"xmin과 xmax는 0.0 <= xmin < xmax <= 1.0 범위여야 합니다: xmin={self.xmin}, xmax={self.xmax}"
+            )
+        return self
 
 
 class CropSet(BaseModel):

@@ -1,5 +1,17 @@
 // --- Tag Filter & Insights Module (static/js/tag_filter.js) ---
 
+if (typeof escapeHtml !== 'function') {
+  function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+}
+
 const TAG_CATEGORIES = {
   "viewpoint": "시점",
   "composition_space": "구도·공간",
@@ -99,10 +111,11 @@ function renderTagPills(tags, maxCount = 4) {
   for (const [k, v] of Object.entries(tags)) {
     if (Array.isArray(v)) {
       v.forEach(t => {
+        const escaped = escapeHtml(t);
         const style = getTagColorStyle(t);
         const isSelected = selectedTags && selectedTags.has(t);
         const selBorder = isSelected ? 'box-shadow:0 0 0 2px #0284c7;font-weight:800;' : '';
-        pills.push(`<span class="tag-pill" style="${style}${selBorder}cursor:pointer;" onclick="event.stopPropagation(); toggleTagFilter('${t.replace(/'/g, "\\'")}')" title="클릭하여 #${t} 태그로 필터링">${isSelected ? '✓ ' : ''}${t}</span>`);
+        pills.push(`<span class="tag-pill" data-tag-action="toggle" data-tag="${escaped}" style="${style}${selBorder}cursor:pointer;" title="클릭하여 #${escaped} 태그로 필터링">${isSelected ? '✓ ' : ''}${escaped}</span>`);
       });
     }
   }
@@ -127,14 +140,26 @@ function updateTagFilterUI() {
     activeBar.style.display = 'flex';
     clearBtn.style.display = 'inline-block';
     pillsContainer.innerHTML = Array.from(selectedTags).map(t => {
+      const escaped = escapeHtml(t);
       const style = getTagColorStyle(t);
-      return `<span class="tag-pill" style="${style}font-weight:700;display:inline-flex;align-items:center;gap:4px;cursor:pointer;" onclick="toggleTagFilter('${t.replace(/'/g, "\\'")}')">${t} <span style="font-weight:900;color:#ef4444;font-size:0.8rem;">×</span></span>`;
+      return `<span class="tag-pill" data-tag-action="toggle" data-tag="${escaped}" style="${style}font-weight:700;display:inline-flex;align-items:center;gap:4px;cursor:pointer;">${escaped} <span style="font-weight:900;color:#ef4444;font-size:0.8rem;" data-tag-remove="${escaped}">×</span></span>`;
     }).join('');
   }
 
   document.querySelectorAll('.quick-tag-btn').forEach(btn => {
     const t = btn.getAttribute('data-tag');
     btn.classList.toggle('active', selectedTags.has(t));
+  });
+}
+
+// Global Event Delegation for tag clicks
+if (typeof document !== 'undefined') {
+  document.addEventListener('click', function(e) {
+    const pill = e.target.closest('[data-tag-action="toggle"]');
+    if (pill && pill.dataset.tag) {
+      e.stopPropagation();
+      toggleTagFilter(pill.dataset.tag);
+    }
   });
 }
 

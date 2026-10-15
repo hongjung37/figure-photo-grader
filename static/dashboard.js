@@ -194,16 +194,16 @@ function renderGallery() {
   container.innerHTML = filtered.map(item => `
     <article class="card" onclick="openDetailModal(${item.id})">
       <button class="card-delete-btn" title="이 분석 기록 삭제" onclick="event.stopPropagation(); deleteAnalysisRecord(${item.id})">🗑️</button>
-      <img class="card-thumb" src="/api/image/${item.id}" alt="${item.filename}" loading="lazy">
+      <img class="card-thumb" src="/api/image/${item.id}" alt="${escapeHtml(item.filename)}" loading="lazy">
       <div class="card-body">
         <div class="card-header">
           <div>
-            <h3 class="card-title">${item.filename}</h3>
-            <span style="display:inline-block;margin-top:4px;font-size:0.75rem;font-weight:700;color:#4f46e5;background:#eef2ff;padding:2px 7px;border-radius:6px;">${item.figure_category}</span>
-            <span style="display:inline-block;margin-top:4px;margin-left:4px;font-size:0.75rem;font-weight:700;color:#0d9488;background:#f0fdfa;padding:2px 7px;border-radius:6px;">🎯 ${item.focus_status || '완벽 칼초점'}</span>
+            <h3 class="card-title">${escapeHtml(item.filename)}</h3>
+            <span style="display:inline-block;margin-top:4px;font-size:0.75rem;font-weight:700;color:#4f46e5;background:#eef2ff;padding:2px 7px;border-radius:6px;">${escapeHtml(item.figure_category)}</span>
+            <span style="display:inline-block;margin-top:4px;margin-left:4px;font-size:0.75rem;font-weight:700;color:#0d9488;background:#f0fdfa;padding:2px 7px;border-radius:6px;">🎯 ${escapeHtml(item.focus_status || '완벽 칼초점')}</span>
             ${item.is_burst ? (item.is_best_pick ?
               `<span class="badge-best-pick" style="display:inline-block;margin-top:4px;margin-left:4px;">👑 Best Pick (${item.burst_total}장 1위)</span>` :
-              `<span class="badge-b-cut" style="display:inline-block;margin-top:4px;margin-left:4px;" title="${item.drop_reason}">⚠️ B컷 (${item.drop_reason})</span>`
+              `<span class="badge-b-cut" style="display:inline-block;margin-top:4px;margin-left:4px;" title="${escapeHtml(item.drop_reason)}">⚠️ B컷 (${escapeHtml(item.drop_reason)})</span>`
             ) : ''}
             ${item.review_status === '토너먼트 1위' ? '<span class="badge-best-pick" style="background:#fef3c7;color:#b45309;border:1px solid #fde68a;display:inline-block;margin-top:4px;margin-left:4px;">🏆 토너먼트 1위</span>' : ''}
             ${item.sns_advice ? '<span style="display:inline-block;margin-top:4px;margin-left:4px;font-size:0.75rem;font-weight:700;color:#0284c7;background:#e0f2fe;padding:2px 7px;border-radius:6px;">📱 SNS크롭</span>' : ''}
@@ -213,7 +213,7 @@ function renderGallery() {
           </div>
           <div class="score-badge">
             <span class="score-num">${item.final_score.toFixed(1)}</span>
-            <span class="score-grade">${item.grade}</span>
+            <span class="score-grade">${escapeHtml(item.grade)}</span>
             ${item.user_score !== null && item.user_score !== undefined ? `
               <span style="font-size:0.74rem;font-weight:800;color:#1d4ed8;margin-top:3px;">👤 ${item.user_score.toFixed(1)}점</span>
             ` : ''}
@@ -225,14 +225,14 @@ function renderGallery() {
           <div><span>색감</span><strong>${item.color_score.toFixed(1)}</strong></div>
           <div><span>기술</span><strong>${item.technique_score.toFixed(1)}</strong></div>
         </div>
-        <div class="reason-box">${item.final_reason}</div>
+        <div class="reason-box">${escapeHtml(item.final_reason)}</div>
         <div class="tag-pills">
           ${renderTagPills(item.aesthetic_tags)}
         </div>
         ${currentBurstFilter === 'stack' && item.is_burst && item.is_best_pick ? `
           <div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);display:flex;justify-content:space-between;align-items:center;" onclick="event.stopPropagation()">
             <span style="font-size:0.74rem;color:var(--muted);font-weight:600;">🗂️ 연사 묶음 (${item.burst_total}장)</span>
-            <button class="filter-btn" style="padding:2px 8px;font-size:0.72rem;background:#f0f9ff;border-color:#bae6fd;color:#0369a1;" onclick="toggleExpandBurstGroup('${item.burst_group_id}', event)">
+            <button class="filter-btn" style="padding:2px 8px;font-size:0.72rem;background:#f0f9ff;border-color:#bae6fd;color:#0369a1;" onclick="toggleExpandBurstGroup('${escapeHtml(item.burst_group_id)}', event)">
               ${expandedBurstGroups.has(item.burst_group_id) ? '▲ B컷 접기' : `▼ B컷 ${item.burst_total - 1}장 펼치기`}
             </button>
           </div>
@@ -251,7 +251,7 @@ function renderBurstThumbnails(groupId, currentId) {
   return groupItems.map(m => `
     <img src="/api/image/${m.id}"
          class="burst-thumb-link ${m.id === currentId ? 'current' : ''} ${m.is_best_pick ? 'is-best' : ''}"
-         title="${m.is_best_pick ? '👑 1위 Best Pick' : `${m.burst_rank}위 B컷 (${m.drop_reason})`}"
+         title="${m.is_best_pick ? '👑 1위 Best Pick' : `${m.burst_rank}위 B컷 (${escapeHtml(m.drop_reason)})`}"
          onclick="event.stopPropagation(); openDetailModal(${m.id})">
   `).join('');
 }
@@ -271,7 +271,7 @@ function openDetailModal(id) {
           <span style="font-size:1.4rem;">${item.is_best_pick ? '👑' : '🗂️'}</span>
           <div>
             <div style="font-size:0.92rem;font-weight:800;color:${item.is_best_pick ? '#065f46' : '#991b1b'};">
-              ${item.is_best_pick ? `👑 연사 묶음 베스트 컷 (총 ${item.burst_total}장 중 1위 선정)` : `⚠️ 연사 묶음 B컷 (${item.burst_rank}/${item.burst_total}위 · 탈락 사유: ${item.drop_reason})`}
+              ${item.is_best_pick ? `👑 연사 묶음 베스트 컷 (총 ${item.burst_total}장 중 1위 선정)` : `⚠️ 연사 묶음 B컷 (${item.burst_rank}/${item.burst_total}위 · 탈락 사유: ${escapeHtml(item.drop_reason)})`}
             </div>
             <div style="font-size:0.77rem;color:var(--muted);">동일 구도 및 포즈로 연속 촬영된 연사 세트 중 AI 디테일(초점·조명·완성도) 비교 결과입니다.</div>
           </div>
@@ -285,7 +285,7 @@ function openDetailModal(id) {
 
     <div>
       <div class="zoom-wrap" id="zoom-wrap-container" onclick="toggleZoom(event)" onmousemove="panZoom(event)">
-        <img class="detail-img" id="detail-modal-img" src="/api/image/${item.id}?original=1" alt="${item.filename}" onload="repositionCropOverlay()">
+        <img class="detail-img" id="detail-modal-img" src="/api/image/${item.id}?original=1" alt="${escapeHtml(item.filename)}" onload="repositionCropOverlay()">
         <div class="crop-box-overlay" id="crop-box-overlay">
           <span class="crop-overlay-badge" id="crop-overlay-badge"></span>
         </div>
@@ -299,8 +299,8 @@ function openDetailModal(id) {
         <span><span class="kbd-key">Esc</span> 닫기</span>
       </div>
       <div style="margin-top:12px;font-size:0.84rem;color:var(--muted)">
-        <div><b>해상도:</b> ${item.width} × ${item.height}px (${item.format})</div>
-        <div><b>분석 모델:</b> ${item.model} · <b>분석시각:</b> ${item.created_at}</div>
+        <div><b>해상도:</b> ${item.width} × ${item.height}px (${escapeHtml(item.format)})</div>
+        <div><b>분석 모델:</b> ${escapeHtml(item.model)} · <b>분석시각:</b> ${escapeHtml(item.created_at)}</div>
         ${renderExifSummary(item.exif, item.detected_camera_settings)}
       </div>
 
@@ -348,8 +348,8 @@ function openDetailModal(id) {
     <div>
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;">
         <div>
-          <h2 style="margin:0;">${item.filename}</h2>
-          <span class="score-grade" style="font-size:0.86rem;padding:4px 12px;">${item.grade}</span>
+          <h2 style="margin:0;">${escapeHtml(item.filename)}</h2>
+          <span class="score-grade" style="font-size:0.86rem;padding:4px 12px;">${escapeHtml(item.grade)}</span>
         </div>
         <div style="text-align:right;">
           <div style="font-size:2.8rem;font-weight:900;color:var(--blue);line-height:1;">${item.final_score.toFixed(1)}</div>
@@ -358,7 +358,7 @@ function openDetailModal(id) {
       </div>
 
       <div class="final-reason-box">
-        <b>종합 총평:</b> ${item.final_reason}
+        <b>종합 총평:</b> ${escapeHtml(item.final_reason)}
       </div>
 
       <!-- 사용자 직접 평점 매기기 & AI 비교 영역 -->
@@ -450,28 +450,28 @@ function openDetailModal(id) {
             <span>📐 구도 평가</span>
             <strong style="color:#2563eb;">${item.composition_score.toFixed(1)}</strong>
           </div>
-          <div class="note-body">${item.composition_notes}</div>
+          <div class="note-body">${escapeHtml(item.composition_notes)}</div>
         </div>
         <div class="note-item-compact" style="border-left: 3px solid #f59e0b;">
           <div class="note-header">
             <span>💡 조명/노출 평가</span>
             <strong style="color:#d97706;">${item.lighting_score.toFixed(1)}</strong>
           </div>
-          <div class="note-body">${item.lighting_notes}</div>
+          <div class="note-body">${escapeHtml(item.lighting_notes)}</div>
         </div>
         <div class="note-item-compact" style="border-left: 3px solid #ec4899;">
           <div class="note-header">
             <span>🎨 색감/톤 평가</span>
             <strong style="color:#db2777;">${item.color_score.toFixed(1)}</strong>
           </div>
-          <div class="note-body">${item.color_notes}</div>
+          <div class="note-body">${escapeHtml(item.color_notes)}</div>
         </div>
         <div class="note-item-compact" style="border-left: 3px solid #10b981;">
           <div class="note-header">
             <span>📷 촬영 기술 평가</span>
             <strong style="color:#059669;">${item.technique_score.toFixed(1)}</strong>
           </div>
-          <div class="note-body">${item.technique_notes}</div>
+          <div class="note-body">${escapeHtml(item.technique_notes)}</div>
         </div>
       </div>
 
@@ -479,20 +479,20 @@ function openDetailModal(id) {
       <div class="note-item-compact" style="border-left: 3px solid #6366f1;margin-bottom:6px;">
         <div class="note-header">
           <span>🎯 피규어 눈동자/페이스 초점 핀</span>
-          <strong style="color:#4f46e5;">${item.focus_status || '완벽 칼초점'}</strong>
+          <strong style="color:#4f46e5;">${escapeHtml(item.focus_status || '완벽 칼초점')}</strong>
         </div>
-        <div class="note-body">${item.focus_notes ? item.focus_notes : '눈동자 아이 데칼 및 안면 조형 핀 상태 양호'}</div>
+        <div class="note-body">${escapeHtml(item.focus_notes ? item.focus_notes : '눈동자 아이 데칼 및 안면 조형 핀 상태 양호')}</div>
       </div>
 
       <!-- 주요 장점 및 단점/개선점 (좌우 2열 배치로 세로 공간 50% 절약) -->
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px;">
         <div class="strengths-box">
           <h4>✓ 주요 장점</h4>
-          <ul>${item.strengths.map(s => `<li>${s}</li>`).join('')}</ul>
+          <ul>${item.strengths.map(s => `<li>${escapeHtml(s)}</li>`).join('')}</ul>
         </div>
         <div class="improvements-box">
           <h4>✗ 단점 및 촬영 개선점</h4>
-          <ul>${item.improvements.map(i => `<li>${i}</li>`).join('')}</ul>
+          <ul>${item.improvements.map(i => `<li>${escapeHtml(i)}</li>`).join('')}</ul>
         </div>
       </div>
 
@@ -653,11 +653,11 @@ async function requestLrAdvice(recordId, btn) {
 function renderExifSummary(exif, detectedSettings) {
   const parts = [];
   if (exif && Object.keys(exif).length) {
-    if (exif.Make || exif.Model) parts.push(`${exif.Make || ''} ${exif.Model || ''}`.trim());
-    if (exif.FNumber) parts.push(`F/${exif.FNumber}`);
-    if (exif.ExposureTime) parts.push(`${exif.ExposureTime}s`);
-    if (exif.ISOSpeedRatings) parts.push(`ISO ${exif.ISOSpeedRatings}`);
-    if (exif.FocalLength) parts.push(`${exif.FocalLength}mm`);
+    if (exif.Make || exif.Model) parts.push(`${escapeHtml(exif.Make || '')} ${escapeHtml(exif.Model || '')}`.trim());
+    if (exif.FNumber) parts.push(`F/${escapeHtml(exif.FNumber)}`);
+    if (exif.ExposureTime) parts.push(`${escapeHtml(exif.ExposureTime)}s`);
+    if (exif.ISOSpeedRatings) parts.push(`ISO ${escapeHtml(exif.ISOSpeedRatings)}`);
+    if (exif.FocalLength) parts.push(`${escapeHtml(exif.FocalLength)}mm`);
   }
   let html = '';
   if (parts.length) {
@@ -669,7 +669,7 @@ function renderExifSummary(exif, detectedSettings) {
   if (detectedSettings && typeof detectedSettings === 'object' && Object.keys(detectedSettings).length) {
     const dParts = [];
     for (const [k, v] of Object.entries(detectedSettings)) {
-      if (v) dParts.push(`${v}`);
+      if (v) dParts.push(`${escapeHtml(v)}`);
     }
     if (dParts.length) {
       html += `<div style="margin-top:6px;background:#eef2ff;color:#4338ca;padding:4px 10px;border-radius:6px;font-size:0.8rem;display:inline-block;border:1px solid #c7d2fe;"><b>🔍 워터마크 감지 스펙:</b> ${dParts.join(' · ')}</div>`;
@@ -1102,15 +1102,15 @@ function renderTournamentChampion(winner) {
 
       <div style="background:#1e293b;padding:24px;border-radius:20px;border:1px solid #334155;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-          <h2 style="margin:0;font-size:1.3rem;font-weight:800;color:white;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${winner.filename}">
-            ${winner.filename}
+          <h2 style="margin:0;font-size:1.3rem;font-weight:800;color:white;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(winner.filename)}">
+            ${escapeHtml(winner.filename)}
           </h2>
-          <span class="score-grade" style="font-size:0.82rem;padding:3px 10px;">${winner.grade}</span>
+          <span class="score-grade" style="font-size:0.82rem;padding:3px 10px;">${escapeHtml(winner.grade)}</span>
         </div>
 
         <div style="font-size:0.78rem;color:#94a3b8;margin-bottom:14px;">
-          촬영 세부 유형: <strong style="color:#cbd5e1;">${winner.figure_category}</strong> • 
-          초점: <strong style="color:#2dd4bf;">${winner.focus_status}</strong>
+          촬영 세부 유형: <strong style="color:#cbd5e1;">${escapeHtml(winner.figure_category)}</strong> • 
+          초점: <strong style="color:#2dd4bf;">${escapeHtml(winner.focus_status)}</strong>
         </div>
 
         ${matchInsight}
@@ -1123,7 +1123,7 @@ function renderTournamentChampion(winner) {
         </div>
 
         <div style="font-size:0.84rem;color:#e2e8f0;line-height:1.45;margin-bottom:14px;background:#0f172a;padding:10px 14px;border-radius:10px;">
-          ${winner.final_reason}
+          ${escapeHtml(winner.final_reason)}
         </div>
 
         <div style="margin-bottom:18px;">
@@ -1449,7 +1449,7 @@ function renderTagInsights() {
       <div class="insights-kpi-card">
         <div class="insights-kpi-title">💡 내 취향 최고 태그 (AI 대비 +차이)</div>
         <div class="insights-kpi-value" style="font-size:1.2rem;color:#6366f1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-          ${stats.bestFavTag ? `#${stats.bestFavTag.tag}` : '-'}
+          ${stats.bestFavTag ? `#${escapeHtml(stats.bestFavTag.tag)}` : '-'}
         </div>
         <div class="insights-kpi-sub">${stats.bestFavTag ? `AI 대비 +${stats.bestFavTag.score_diff.toFixed(1)}점 더 선호` : '직접 평가가 쌓이면 노출됩니다'}</div>
       </div>
@@ -1522,15 +1522,16 @@ function renderTagStatRow(t, rank, type) {
   const scoreColor = getScoreColor(score);
   const rankColor = type === 'top' ? (rank === 1 ? '#eab308' : (rank === 2 ? '#94a3b8' : '#b45309')) : '#ef4444';
   const style = getTagColorStyle(t.tag);
+  const escapedTag = escapeHtml(t.tag);
 
   return `
     <div class="tag-stat-row">
       <div style="display:flex;align-items:center;gap:8px;overflow:hidden;">
         <span style="font-weight:900;font-size:0.85rem;color:${rankColor};width:18px;">${rank}</span>
-        <span class="tag-pill" style="${style}cursor:pointer;font-weight:700;" onclick="toggleTagFilter('${t.tag}')" title="클릭하여 #${t.tag} 사진 모아보기">
-          #${t.tag}
+        <span class="tag-pill" data-tag-action="toggle" data-tag="${escapedTag}" style="${style}cursor:pointer;font-weight:700;" title="클릭하여 #${escapedTag} 사진 모아보기">
+          #${escapedTag}
         </span>
-        <small style="color:var(--muted);font-size:0.74rem;">${t.category_name} (${t.count}장)</small>
+        <small style="color:var(--muted);font-size:0.74rem;">${escapeHtml(t.category_name)} (${t.count}장)</small>
       </div>
 
       <div style="text-align:right;min-width:140px;">
@@ -1555,11 +1556,12 @@ function renderCategoryTagRow(t) {
   const score = (insightsRatingMode === 'user' && t.avg_user_score !== null) ? t.avg_user_score : t.avg_ai_score;
   const scoreColor = getScoreColor(score);
   const style = getTagColorStyle(t.tag);
+  const escapedTag = escapeHtml(t.tag);
 
   return `
     <div style="padding:6px 0;border-bottom:1px solid #f8fafc;display:flex;align-items:center;justify-content:space-between;gap:8px;">
-      <span class="tag-pill" style="${style}cursor:pointer;font-size:0.75rem;font-weight:600;" onclick="toggleTagFilter('${t.tag}')" title="클릭하여 #${t.tag} 사진 모아보기">
-        #${t.tag} <small style="opacity:0.75;">(${t.count})</small>
+      <span class="tag-pill" data-tag-action="toggle" data-tag="${escapedTag}" style="${style}cursor:pointer;font-size:0.75rem;font-weight:600;" title="클릭하여 #${escapedTag} 사진 모아보기">
+        #${escapedTag} <small style="opacity:0.75;">(${t.count})</small>
       </span>
 
       <div style="text-align:right;min-width:110px;">
@@ -1595,8 +1597,8 @@ function updateComparison() {
   content.innerHTML = [a, b].map((item, idx) => `
     <div class="compare-col">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-        <h3 style="margin:0;">사진 ${idx === 0 ? 'A' : 'B'}: ${item.filename}</h3>
-        <span class="score-grade">${item.grade}</span>
+        <h3 style="margin:0;">사진 ${idx === 0 ? 'A' : 'B'}: ${escapeHtml(item.filename)}</h3>
+        <span class="score-grade">${escapeHtml(item.grade)}</span>
       </div>
       <img class="compare-img" src="/api/image/${item.id}">
       <div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0;">
@@ -1610,15 +1612,15 @@ function updateComparison() {
         <div><span>기술</span><strong>${item.technique_score.toFixed(1)}</strong></div>
       </div>
       <div class="final-reason-box" style="margin-bottom:12px;">
-        <b>한줄 총평:</b> ${item.final_reason}
+        <b>한줄 총평:</b> ${escapeHtml(item.final_reason)}
       </div>
       <div class="strengths-box">
         <h4>✓ 주요 장점</h4>
-        <ul>${item.strengths.map(s => `<li>${s}</li>`).join('')}</ul>
+        <ul>${item.strengths.map(s => `<li>${escapeHtml(s)}</li>`).join('')}</ul>
       </div>
       <div class="improvements-box" style="margin-top:8px;">
         <h4>✗ 단점 및 아쉬운 점</h4>
-        <ul>${item.improvements.map(i => `<li>${i}</li>`).join('')}</ul>
+        <ul>${item.improvements.map(i => `<li>${escapeHtml(i)}</li>`).join('')}</ul>
       </div>
     </div>
   `).join('');

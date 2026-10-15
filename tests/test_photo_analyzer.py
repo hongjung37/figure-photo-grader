@@ -1040,6 +1040,149 @@ class PhotoAnalyzerTests(unittest.TestCase):
             self.assertEqual(deleted, [rec_id])
             self.assertIsNone(db.get_analysis_row_by_id(db_path, rec_id))
 
+    def test_pydantic_figure_category_and_focus_status_constraints(self) -> None:
+        valid_dict = self._valid_analysis().model_dump()
+
+        # Valid options should work
+        PhotoAnalysis(**{**valid_dict, "figure_category": "스튜디오 연출/디오라마", "focus_status": "초점 이탈"})
+
+        # Invalid figure_category
+        with self.assertRaises(ValidationError):
+            PhotoAnalysis(**{**valid_dict, "figure_category": "존재하지않는카테고리"})
+
+        # Invalid focus_status
+        with self.assertRaises(ValidationError):
+            PhotoAnalysis(**{**valid_dict, "focus_status": "완전흔들림"})
+
+    def test_pydantic_crop_box_coordinates_constraints(self) -> None:
+        from app.models.crop import CropBox
+
+        # Valid box
+        box = CropBox(
+            ymin=0.1,
+            xmin=0.1,
+            ymax=0.9,
+            xmax=0.9,
+            ratio_label="1:1",
+            composition_tip="test tip",
+        )
+        self.assertEqual(box.ymin, 0.1)
+
+        # Inverted Y
+        with self.assertRaises(ValidationError):
+            CropBox(
+                ymin=0.8,
+                xmin=0.1,
+                ymax=0.2,
+                xmax=0.9,
+                ratio_label="1:1",
+                composition_tip="test",
+            )
+
+        # Inverted X
+        with self.assertRaises(ValidationError):
+            CropBox(
+                ymin=0.1,
+                xmin=0.9,
+                ymax=0.8,
+                xmax=0.1,
+                ratio_label="1:1",
+                composition_tip="test",
+            )
+
+        # Out of bounds
+        with self.assertRaises(ValidationError):
+            CropBox(
+                ymin=-0.1,
+                xmin=0.1,
+                ymax=0.8,
+                xmax=0.9,
+                ratio_label="1:1",
+                composition_tip="test",
+            )
+
+    def test_pydantic_lightroom_advice_slider_constraints(self) -> None:
+        from app.models.lightroom import LightroomAdvice
+
+        base_advice = {
+            "exposure": 0.5,
+            "contrast": 10,
+            "highlights": -20,
+            "shadows": 15,
+            "whites": 5,
+            "blacks": -10,
+            "texture": 15,
+            "clarity": 10,
+            "dehaze": 5,
+            "vibrance": 10,
+            "saturation": -5,
+            "temp_tint_notes": "5200K",
+            "retouching_guide": "아이 데칼 마스킹",
+        }
+        # Valid should succeed
+        LightroomAdvice(**base_advice)
+
+        # Out of range exposure (> 5.0)
+        with self.assertRaises(ValidationError):
+            LightroomAdvice(**{**base_advice, "exposure": 5.5})
+
+        # Out of range slider (> 100)
+        with self.assertRaises(ValidationError):
+            LightroomAdvice(**{**base_advice, "contrast": 105})
+
+        # Out of range slider (< -100)
+        with self.assertRaises(ValidationError):
+            LightroomAdvice(**{**base_advice, "shadows": -110})
+
+    def test_load_prepared_photo_for_record_prioritizes_originals(self) -> None:
+        from app.services.image_processor import save_original_photo
+        from app.web.handlers import _load_prepared_photo_for_record
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            db_path = Path(temporary_directory) / "test.sqlite3"
+            orig_img_path = Path(temporary_directory) / "source_shot.jpg"
+            self._make_jpeg(orig_img_path)
+            photo = prepare_photo(orig_img_path)
+
+            # 1. Save original to photo_originals
+            save_original_photo(db_path, photo)
+
+            row = {
+                "sha256": photo.sha256,
+                "source_filename": "source_shot.jpg",
+                "width": 16,
+                "height": 12,
+                "thumbnail": b"fake_thumb",
+            }
+
+            # Should load from photo_originals
+            loaded = _load_prepared_photo_for_record(db_path, row)
+            self.assertEqual(loaded.sha256, photo.sha256)
+            self.assertEqual(loaded.upload_mime_type, "image/jpeg")
+
+            # 2. Thumbnail fallback when no file exists
+            row_thumb_only = {
+                "sha256": "nonexistent_hash",
+                "source_filename": "missing.jpg",
+                "width": 100,
+                "height": 100,
+                "thumbnail": b"dummy_thumb_bytes",
+            }
+            loaded_fallback = _load_prepared_photo_for_record(db_path, row_thumb_only)
+            self.assertEqual(loaded_fallback.upload_bytes, b"dummy_thumb_bytes")
+            self.assertEqual(loaded_fallback.image_format, "WEBP")
+
+            # 3. Raise ValueError when neither original nor thumbnail exists
+            row_empty = {
+                "sha256": "missing_hash",
+                "source_filename": "missing.jpg",
+                "width": 100,
+                "height": 100,
+                "thumbnail": None,
+            }
+            with self.assertRaises(ValueError):
+                _load_prepared_photo_for_record(db_path, row_empty)
+
 
 if __name__ == "__main__":
     unittest.main()
