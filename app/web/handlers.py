@@ -307,8 +307,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
                 file_bytes = None
                 filename = "uploaded.webp"
-                tier = "luna"
-                provider = "openai"
+                tier = "standard"
+                provider = "gemini"
                 category_param = "auto"
 
                 for part in parts:
@@ -366,12 +366,9 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                         if tier == "ensemble" or normalized_provider == "ensemble":
                             active_provider = "ensemble"
                             model = f"ensemble(gemini+{DEFAULT_OPENAI_MODEL})"
-                        elif normalized_provider == "openai" or tier in OPENAI_MODEL_PRESETS:
-                            active_provider = "openai"
-                            model = OPENAI_MODEL_PRESETS.get(tier, tier if tier not in MODEL_PRESETS else DEFAULT_OPENAI_MODEL)
                         else:
                             active_provider = "gemini"
-                            model = MODEL_PRESETS.get(tier, MODEL_PRESETS["lite"])
+                            model = MODEL_PRESETS.get(tier, MODEL_PRESETS["standard"])
 
                         category_hint = category_param if category_param != "auto" else None
                         analysis = analyze_photo(prepared, provider=active_provider, model=model, category_hint=category_hint)
