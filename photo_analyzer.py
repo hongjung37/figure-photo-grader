@@ -702,7 +702,7 @@ def _call_gemini_interaction(
     schema: Any,
     task_desc: str,
 ) -> str:
-    """Execute Gemini interactions.create with automatic fallback to stable model on 503/429 spikes.
+    """Execute Gemini interactions.create with fallback for unavailable models and transient errors.
 
     Calls are concurrency-limited and each call (success or failure) is logged to api_usage_log.
     """
@@ -737,13 +737,18 @@ def _call_gemini_interaction(
             return output_text
         except Exception as exc:
             err_msg = str(exc)
+            is_model_unavailable = any(
+                marker in err_msg
+                for marker in ("404", "NOT_FOUND", "not found", "model not found", "does not exist")
+            )
             is_transient = any(
                 code in err_msg
                 for code in ("503", "429", "high demand", "ResourceExhausted", "UNAVAILABLE", "service_unavailable")
             )
-            if is_transient and active_model != FALLBACK_MODEL:
+            if (is_model_unavailable or is_transient) and active_model != FALLBACK_MODEL:
                 print(
-                    f"[{active_model}] 서버 과부하/일시 장애 감지 -> 대체 안정 모델({FALLBACK_MODEL})로 자동 전환합니다...",
+                    f"[{active_model}] 지원되지 않거나 일시적으로 사용할 수 없는 모델 감지 -> "
+                    f"대체 안정 모델({FALLBACK_MODEL})로 자동 전환합니다...",
                     file=sys.stderr,
                 )
                 active_model = FALLBACK_MODEL

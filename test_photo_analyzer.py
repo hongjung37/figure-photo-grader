@@ -850,6 +850,31 @@ class PhotoAnalyzerTests(unittest.TestCase):
             self.assertEqual(row["input_tokens"], 120)
             self.assertEqual(row["output_tokens"], 30)
 
+    def test_missing_model_falls_back_to_stable_model(self) -> None:
+        import photo_analyzer
+        from types import SimpleNamespace
+
+        class FakeInteractions:
+            def __init__(self) -> None:
+                self.models: list[str] = []
+
+            def create(self, model, **kwargs):
+                self.models.append(model)
+                if model != photo_analyzer.FALLBACK_MODEL:
+                    raise RuntimeError("404 NOT_FOUND model not found")
+                return SimpleNamespace(
+                    output_text="{}",
+                    usage=SimpleNamespace(total_input_tokens=10, total_output_tokens=5),
+                )
+
+        fake = SimpleNamespace(interactions=FakeInteractions())
+        out = photo_analyzer._call_gemini_interaction(
+            client=fake, model="unsupported-model", input_payload=[], schema={}, task_desc="404 폴백 테스트"
+        )
+
+        self.assertEqual(out, "{}")
+        self.assertEqual(fake.interactions.models, ["unsupported-model", photo_analyzer.FALLBACK_MODEL])
+
     def test_get_client_is_reused_per_key(self) -> None:
         import photo_analyzer
 
