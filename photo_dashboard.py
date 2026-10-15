@@ -2426,11 +2426,7 @@ async function deleteAnalysisRecord(id) {
       if (currentDetailId === id) {
         closeDetailModal();
       }
-      allData = allData.filter(d => d.id !== id);
-      renderGallery();
-      updateStats();
-      renderCategoryFilters();
-      renderTagFilters();
+      await loadData();
     } else {
       alert(`삭제 실패: ${result.error || '알 수 없는 오류'}`);
     }
