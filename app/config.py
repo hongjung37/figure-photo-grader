@@ -30,11 +30,13 @@ FALLBACK_MODEL = "gemini-3.5-flash-lite"
 
 # OpenAI Models
 OPENAI_MODEL_PRESETS: dict[str, str] = {
+    "luna": os.environ.get("OPENAI_LUNA_MODEL", "gpt-6-luna"),
+    "gpt-6 luna": "gpt-6-luna",
+    "gpt-6-luna": "gpt-6-luna",
     "mini": "gpt-4o-mini",
     "standard": "gpt-4o",
-    "luna": os.environ.get("OPENAI_LUNA_MODEL", "gpt-4o-mini"),
 }
-DEFAULT_OPENAI_TIER = "mini"
+DEFAULT_OPENAI_TIER = "luna"
 DEFAULT_OPENAI_MODEL = os.environ.get("OPENAI_DEFAULT_MODEL", OPENAI_MODEL_PRESETS[DEFAULT_OPENAI_TIER])
 
 ORIGINALS_DIR_NAME = "photo_originals"

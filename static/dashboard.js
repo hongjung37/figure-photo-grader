@@ -1849,7 +1849,7 @@ async function processBatchUpload(files) {
     const pct = Math.round(((i) / total) * 100);
     progPercent.textContent = `${pct}%`;
     progBar.style.width = `${pct}%`;
-    progText.textContent = `[${currentNum} / ${total}장] Gemini 분석 진행 중...`;
+    progText.textContent = `[${currentNum} / ${total}장] AI 모델 분석 진행 중...`;
     progFile.textContent = `현재 분석 파일: ${file.name} (${(file.size / 1024 / 1024).toFixed(1)}MB)`;
 
     const formData = new FormData();

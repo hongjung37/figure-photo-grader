@@ -307,8 +307,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
                 file_bytes = None
                 filename = "uploaded.webp"
-                tier = "lite"
-                provider = "gemini"
+                tier = "luna"
+                provider = "openai"
                 category_param = "auto"
 
                 for part in parts:
@@ -363,12 +363,12 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                         duplicate = True
                     else:
                         normalized_provider = provider.lower()
-                        if normalized_provider == "openai" or tier in OPENAI_MODEL_PRESETS:
+                        if tier == "ensemble" or normalized_provider == "ensemble":
+                            active_provider = "ensemble"
+                            model = f"ensemble(gemini+{DEFAULT_OPENAI_MODEL})"
+                        elif normalized_provider == "openai" or tier in OPENAI_MODEL_PRESETS:
                             active_provider = "openai"
                             model = OPENAI_MODEL_PRESETS.get(tier, tier if tier not in MODEL_PRESETS else DEFAULT_OPENAI_MODEL)
-                        elif normalized_provider == "ensemble":
-                            active_provider = "ensemble"
-                            model = f"ensemble({MODEL_PRESETS.get(tier, 'gemini')}+{DEFAULT_OPENAI_MODEL})"
                         else:
                             active_provider = "gemini"
                             model = MODEL_PRESETS.get(tier, MODEL_PRESETS["lite"])
