@@ -803,14 +803,18 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                         except Exception:
                             cached_advice = {}
 
-                    if not force and ratio_key in cached_advice and cached_advice[ratio_key]:
+                    is_cached = (
+                        (ratio_key == "original" and "best_ratio_key" in cached_advice)
+                        or (ratio_key in cached_advice and cached_advice[ratio_key])
+                    )
+                    if not force and is_cached:
                         self.send_response(HTTPStatus.OK)
                         self.send_header("Content-Type", "application/json; charset=utf-8")
                         self.end_headers()
                         self.wfile.write(json.dumps({
                             "success": True,
                             "ratio_key": ratio_key,
-                            "crop_box": cached_advice[ratio_key],
+                            "crop_box": cached_advice.get(ratio_key),
                             "advice": cached_advice,
                             "cached": True,
                         }, ensure_ascii=False).encode("utf-8"))
@@ -839,11 +843,11 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     else:
                         raise ValueError(f"사진 파일 '{fname}'을 찾을 수 없으며 DB 썸네일도 없습니다.")
 
-                    if ratio_key == "all":
+                    if ratio_key in ("all", "original"):
                         crop_set = generate_all_sns_crops(prepared, model=MODEL_PRESETS["lite"])
                         for key, box in crop_set.model_dump(mode="json").items():
                             cached_advice[key] = box
-                        crop_dict = cached_advice.get("instagram_crop_4_5", {})
+                        crop_dict = cached_advice.get(ratio_key) if ratio_key != "all" else cached_advice.get("instagram_crop_4_5", {})
                     elif ratio_key not in SNS_CROP_RATIO_CONFIGS:
                         raise ValueError(f"지원하지 않는 SNS 크롭 비율 키입니다: {ratio_key}")
                     elif force:
@@ -856,7 +860,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                         # so the other ratio buttons need no further API calls.
                         crop_set = generate_all_sns_crops(prepared, model=MODEL_PRESETS["lite"])
                         for key, box in crop_set.model_dump(mode="json").items():
-                            if key == ratio_key or not cached_advice.get(key):
+                            if key in ("best_ratio_key", "best_ratio_reason") or key == ratio_key or not cached_advice.get(key):
                                 cached_advice[key] = box
                         crop_dict = cached_advice[ratio_key]
                     advice_json = json.dumps(cached_advice, ensure_ascii=False)

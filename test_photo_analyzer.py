@@ -592,11 +592,14 @@ class PhotoAnalyzerTests(unittest.TestCase):
             instagram_crop_1_1=crop_1_1,
             x_crop_16_9=crop_16_9,
             x_crop_3_4=crop_3_4,
+            best_ratio_key="original",
+            best_ratio_reason="원본의 와이드 공간감이 안정적",
             social_caption="빛과 조형의 완벽한 조화 ✨ 피규어 컬렉션",
             hashtags=["#피규어", "#figurephotography", "#toyphotography", "#フィギュア"],
         )
         self.assertEqual(advice.instagram_crop_4_5.ymin, 0.05)
         self.assertEqual(advice.x_crop_16_9.ratio_label, "16:9 (X 가로)")
+        self.assertEqual(advice.best_ratio_key, "original")
         self.assertIn("#figurephotography", advice.hashtags)
 
     def test_dashboard_sns_advice_caching_and_columns(self) -> None:
@@ -911,7 +914,10 @@ class PhotoAnalyzerTests(unittest.TestCase):
         import photo_analyzer
 
         box = {"ymin": 0.1, "xmin": 0.1, "ymax": 0.9, "xmax": 0.9, "ratio_label": "r", "composition_tip": "t"}
-        payload = json.dumps({key: box for key in photo_analyzer.SNS_CROP_RATIO_CONFIGS})
+        crop_data = {key: box for key in photo_analyzer.SNS_CROP_RATIO_CONFIGS}
+        crop_data["best_ratio_key"] = "original"
+        crop_data["best_ratio_reason"] = "원본 프레이밍이 피규어 공간감에 가장 이상적임"
+        payload = json.dumps(crop_data)
 
         with tempfile.TemporaryDirectory() as temporary_directory:
             image_path = Path(temporary_directory) / "batch.jpg"
@@ -923,10 +929,14 @@ class PhotoAnalyzerTests(unittest.TestCase):
                 crops = photo_analyzer.generate_all_sns_crops(photo)
 
         self.assertEqual(call.call_count, 1)
-        self.assertEqual(set(crops.model_dump()), set(photo_analyzer.SNS_CROP_RATIO_CONFIGS))
+        self.assertEqual(set(crops.model_dump()), set(photo_analyzer.SNS_CROP_RATIO_CONFIGS) | {"best_ratio_key", "best_ratio_reason"})
+        self.assertEqual(crops.best_ratio_key, "original")
+        self.assertEqual(crops.best_ratio_reason, "원본 프레이밍이 피규어 공간감에 가장 이상적임")
         prompt_text = call.call_args.kwargs["input_payload"][0]["text"]
         for key in photo_analyzer.SNS_CROP_RATIO_CONFIGS:
             self.assertIn(key, prompt_text)
+        self.assertIn("best_ratio_key", prompt_text)
+        self.assertIn("original", prompt_text)
 
 
 if __name__ == "__main__":

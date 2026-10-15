@@ -97,6 +97,50 @@ class DashboardModularizationTests(unittest.TestCase):
             httpd.shutdown()
             httpd.server_close()
 
+    def test_ai_best_pick_and_original_no_crop(self):
+        import json
+        import subprocess
+
+        css_path = Path("static/dashboard.css")
+        js_path = Path("static/dashboard.js")
+        css = css_path.read_text(encoding="utf-8")
+        js = js_path.read_text(encoding="utf-8")
+
+        # 1. Verify CSS classes for AI Best Pick banner and badges
+        self.assertIn(".best-ratio-banner", css)
+        self.assertIn(".best-ratio-badge-pill", css)
+        self.assertIn(".best-ratio-badge", css)
+        self.assertIn(".is-best-ratio-btn", css)
+        self.assertIn("body.darkroom .best-ratio-banner", css)
+
+        # 2. Verify JS components and No Crop options
+        self.assertIn("원본 유지 (No Crop)", js)
+        self.assertIn("best_ratio_key", js)
+        self.assertIn("best_ratio_reason", js)
+        self.assertIn("best-ratio-banner", js)
+        self.assertIn("👑 AI Best Pick", js)
+        self.assertIn("👑 AI 추천", js)
+        self.assertIn("downloadCroppedImage", js)
+
+        # 3. Test calculateExactCrop in node with 'original' returning null
+        func_body = "function calculateExactCrop" + js.split("function calculateExactCrop")[1].split("function selectCropRatio")[0]
+        node_script = """
+        const TARGET_CROP_RATIOS = {
+          original: { name: 'Original', tag: '원본 유지 (No Crop)', w: 0, h: 0, ratio: 0 },
+          instagram_crop_1_1: { name: '1:1', tag: '1:1', w: 1, h: 1, ratio: 1.0 },
+          x_crop_16_9: { name: '16:9', tag: '16:9', w: 16, h: 9, ratio: 16/9 }
+        };
+        """ + func_body + """
+        const box = { ymin: 0.1, xmin: 0.1, ymax: 0.9, xmax: 0.9 };
+        const cropOriginal = calculateExactCrop('original', box, 4000, 3000);
+        const crop11 = calculateExactCrop('instagram_crop_1_1', box, 4000, 3000);
+        console.log(JSON.stringify({ cropOriginal, crop11 }));
+        """
+        res = subprocess.run(["node", "-e", node_script], capture_output=True, text=True, check=True)
+        data = json.loads(res.stdout.strip())
+        self.assertIsNone(data["cropOriginal"], "calculateExactCrop on 'original' must return null")
+        self.assertIsNotNone(data["crop11"], "calculateExactCrop on valid ratio must return crop data")
+
 
 if __name__ == "__main__":
     unittest.main()

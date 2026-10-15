@@ -677,11 +677,14 @@ function openDetailModal(id) {
   `;
   modal.style.display = 'flex';
   currentCropBox = null;
-  currentCropRatioKey = 'instagram_crop_4_5';
+  const defaultRatio = (item.sns_advice && item.sns_advice.best_ratio_key)
+    ? item.sns_advice.best_ratio_key
+    : 'instagram_crop_4_5';
+  currentCropRatioKey = defaultRatio;
   const overlay = document.getElementById('crop-box-overlay');
   if (overlay) overlay.style.display = 'none';
-  if (item.sns_advice && item.sns_advice[currentCropRatioKey]) {
-    setTimeout(() => { selectCropRatio('instagram_crop_4_5', item.id); }, 150);
+  if (item.sns_advice && (item.sns_advice[defaultRatio] || defaultRatio === 'original')) {
+    setTimeout(() => { selectCropRatio(defaultRatio, item.id); }, 150);
   }
 }
 
@@ -768,15 +771,25 @@ function clearUserScore(id) {
 let currentCropBox = null;
 let currentCropRatioKey = 'instagram_crop_4_5';
 
+function getCropRatioLabel(ratioKey) {
+  if (ratioKey === 'original') return '📷 원본 유지 (No Crop)';
+  if (TARGET_CROP_RATIOS[ratioKey]) return TARGET_CROP_RATIOS[ratioKey].tag;
+  return ratioKey;
+}
+
 function renderSnsAdviceContent(advice, recordId) {
   const item = allData.find(d => d.id === recordId);
   const currentAdv = (item && item.sns_advice) ? item.sns_advice : (advice || {});
 
+  const bestKey = currentAdv ? currentAdv.best_ratio_key : null;
+  const bestReason = currentAdv ? currentAdv.best_ratio_reason : null;
+
   if (!currentCropRatioKey) {
-    currentCropRatioKey = 'instagram_crop_4_5';
+    currentCropRatioKey = bestKey || 'instagram_crop_4_5';
   }
 
   const ratios = [
+    { key: 'original', icon: '📷', name: '원본 유지 (No Crop)' },
     { key: 'instagram_crop_4_5', icon: '📸', name: '인스타 4:5 (세로피드)' },
     { key: 'instagram_crop_1_1', icon: '🟦', name: '인스타 1:1 (정방형)' },
     { key: 'x_crop_16_9', icon: '🐦', name: 'X 16:9 (가로타임라인)' },
@@ -784,16 +797,30 @@ function renderSnsAdviceContent(advice, recordId) {
   ];
 
   const buttonsHtml = ratios.map(r => {
-    const hasData = Boolean(currentAdv && currentAdv[r.key]);
+    const isOriginal = (r.key === 'original');
+    const hasData = isOriginal ? Boolean(bestKey) : Boolean(currentAdv && currentAdv[r.key]);
     const isActive = (r.key === currentCropRatioKey);
-    const badge = hasData ? '<span style="color:#0284c7;font-size:0.75rem;margin-left:4px;font-weight:700;">✓</span>' : '';
-    return `<button class="crop-ratio-btn ${isActive ? 'active' : ''}" id="btn-crop-${r.key}" onclick="selectCropRatio('${r.key}', ${recordId})">${r.icon} ${r.name}${badge}</button>`;
+    const isBest = (bestKey && r.key === bestKey);
+    const checkBadge = hasData && !isBest ? '<span style="color:#0284c7;font-size:0.75rem;margin-left:4px;font-weight:700;">✓</span>' : '';
+    const bestBadge = isBest ? '<span class="best-ratio-badge">👑 AI 추천</span>' : '';
+    return `<button class="crop-ratio-btn ${isActive ? 'active' : ''} ${isBest ? 'is-best-ratio-btn' : ''}" id="btn-crop-${r.key}" onclick="selectCropRatio('${r.key}', ${recordId})">${r.icon} ${r.name}${bestBadge}${checkBadge}</button>`;
   }).join('');
+
+  const bestPickBanner = bestKey ? `
+    <div class="best-ratio-banner">
+      <div class="best-ratio-header">
+        <span class="best-ratio-badge-pill">👑 AI Best Pick</span>
+        <b style="color:var(--ink);font-size:0.88rem;">추천 최적 구도: <span style="color:var(--blue);">${getCropRatioLabel(bestKey)}</span></b>
+      </div>
+      <div class="best-ratio-desc">${bestReason || '이 사진의 피규어 구도와 여백에 가장 균형 잡힌 최적 비율입니다.'}</div>
+    </div>
+  ` : '';
 
   return `
     <div>
-      <div style="font-size:0.83rem;font-weight:700;color:#0369a1;margin-bottom:6px;">
-        📐 원하는 비율을 선택하세요 (1회 호출로 4대 규격 일괄 분석 & 탭 전환 즉시 미리보기):
+      ${bestPickBanner}
+      <div style="font-size:0.83rem;font-weight:700;color:var(--blue);margin-bottom:6px;margin-top:${bestKey ? '10px' : '0'};">
+        📐 원하는 비율을 선택하세요 (1회 호출로 4대 규격 + AI 최적 비율 일괄 분석 & 탭 전환 즉시 미리보기):
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">
         ${buttonsHtml}
@@ -813,14 +840,40 @@ function renderSnsAdviceContent(advice, recordId) {
 }
 
 function renderCropRatioDetailArea(ratioKey, currentAdv, recordId) {
+  const isOriginal = (ratioKey === 'original');
   const target = TARGET_CROP_RATIOS[ratioKey] || TARGET_CROP_RATIOS['instagram_crop_4_5'];
   const box = currentAdv ? currentAdv[ratioKey] : null;
+  const isBest = currentAdv && currentAdv.best_ratio_key === ratioKey;
+
+  if (isOriginal) {
+    const originalReason = (isBest && currentAdv.best_ratio_reason)
+      ? currentAdv.best_ratio_reason
+      : '촬영 당시의 원본 프레이밍과 공간 여백이 안정적입니다. 별도의 크롭 없이 원본 그대로 게시하는 것을 권장합니다.';
+    return `
+      <div id="crop-tip-box" class="sns-tip-box ${isBest ? 'is-best-tip-box' : ''}">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:6px;">
+          <div style="display:flex;align-items:center;gap:6px;">
+            <b id="crop-tip-title" style="color:var(--blue);font-size:0.92rem;">📷 원본 구도 유지 (No Crop)</b>
+            ${isBest ? '<span class="best-ratio-badge-pill">👑 AI Best Pick</span>' : ''}
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+            <button class="filter-btn" style="padding:4px 9px;font-size:0.76rem;background:var(--card);color:var(--muted);border-color:var(--line);" onclick="requestAllSnsCrops(${recordId}, this)">🔄 전체 일괄 재분석</button>
+            <a class="upload-btn" style="padding:5px 12px;font-size:0.78rem;background:#0284c7;text-decoration:none;display:inline-flex;align-items:center;color:white;" href="/api/image/${recordId}?original=1" download target="_blank">📥 원본 고해상도 다운로드</a>
+          </div>
+        </div>
+        <div id="crop-tip-desc" style="color:var(--ink);line-height:1.45;">${originalReason}</div>
+      </div>
+    `;
+  }
 
   if (box) {
     return `
-      <div id="crop-tip-box" class="sns-tip-box">
+      <div id="crop-tip-box" class="sns-tip-box ${isBest ? 'is-best-tip-box' : ''}">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:6px;">
-          <b id="crop-tip-title" style="color:var(--blue);font-size:0.92rem;">${box.ratio_label || target.tag}</b>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <b id="crop-tip-title" style="color:var(--blue);font-size:0.92rem;">${box.ratio_label || target.tag}</b>
+            ${isBest ? '<span class="best-ratio-badge-pill">👑 AI Best Pick</span>' : ''}
+          </div>
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
             <button class="filter-btn" style="padding:4px 9px;font-size:0.76rem;background:rgba(56,189,248,0.15);color:var(--blue);border-color:var(--line);" onclick="requestSingleSnsCrop('${ratioKey}', ${recordId}, this, true)">🔄 이 비율만 다시 제안</button>
             <button class="filter-btn" style="padding:4px 9px;font-size:0.76rem;background:var(--card);color:var(--muted);border-color:var(--line);" onclick="requestAllSnsCrops(${recordId}, this)">🔄 전체 4종 일괄 재분석</button>
@@ -838,10 +891,10 @@ function renderCropRatioDetailArea(ratioKey, currentAdv, recordId) {
         SNS 최적 크롭 제안이 아직 생성되지 않았습니다.
       </div>
       <div style="color:var(--muted);font-size:0.8rem;margin-bottom:12px;">
-        단 1회의 Gemini 호출로 4대 규격(인스타 4:5, 1:1, X 16:9, 3:4)을 한 번에 분석하여 토큰을 대폭 절약합니다.
+        단 1회의 Gemini 호출로 4대 규격(인스타 4:5, 1:1, X 16:9, 3:4)과 AI 자체 선정 최적 비율(원본 유지 포함)을 한 번에 분석합니다.
       </div>
       <button class="upload-btn" style="background:#0284c7;padding:8px 20px;font-size:0.86rem;margin:0 auto;display:inline-flex;" onclick="requestSingleSnsCrop('${ratioKey}', ${recordId}, this, false)">
-        ✨ SNS 4대 규격 맞춤 크롭 일괄 제안 받기 (1회 호출)
+        ✨ SNS 4대 규격 + 최적 비율 일괄 제안 받기 (1회 호출)
       </button>
     </div>
   `;
@@ -886,6 +939,7 @@ function renderSnsCaptionArea(currentAdv, recordId) {
 }
 
 const TARGET_CROP_RATIOS = {
+  original: { name: 'Original', tag: '원본 유지 (No Crop)', w: 0, h: 0, ratio: 0 },
   instagram_crop_4_5: { name: 'Instagram 4:5', tag: '인스타 4:5 (세로피드)', w: 4, h: 5, ratio: 4 / 5 },
   instagram_crop_1_1: { name: 'Instagram 1:1', tag: '인스타 1:1 (정방형)', w: 1, h: 1, ratio: 1.0 },
   x_crop_16_9: { name: 'X 16:9', tag: 'X 16:9 (가로타임라인)', w: 16, h: 9, ratio: 16 / 9 },
@@ -927,6 +981,7 @@ function getImageRenderedRect(img) {
 }
 
 function calculateExactCrop(ratioKey, box, naturalW, naturalH) {
+  if (ratioKey === 'original' || !box) return null;
   const target = TARGET_CROP_RATIOS[ratioKey] || { name: '1:1', tag: '1:1', w: 1, h: 1, ratio: 1.0 };
   const targetRatio = target.ratio;
 
@@ -1025,7 +1080,11 @@ function selectCropRatio(ratioKey, recordId) {
     detailArea.innerHTML = renderCropRatioDetailArea(ratioKey, currentAdv, recordId);
   }
 
-  if (box) {
+  if (ratioKey === 'original') {
+    currentCropBox = null;
+    const overlay = document.getElementById('crop-box-overlay');
+    if (overlay) overlay.style.display = 'none';
+  } else if (box) {
     currentCropBox = box;
     repositionCropOverlay();
   } else {
@@ -1046,7 +1105,7 @@ function clearCropOverlay() {
 function repositionCropOverlay() {
   const overlay = document.getElementById('crop-box-overlay');
   const img = document.getElementById('detail-modal-img');
-  if (!overlay || !img || !currentCropBox || !currentCropRatioKey) {
+  if (!overlay || !img || !currentCropBox || !currentCropRatioKey || currentCropRatioKey === 'original') {
     if (overlay) overlay.style.display = 'none';
     return;
   }
@@ -1087,6 +1146,16 @@ function repositionCropOverlay() {
 window.addEventListener('resize', repositionCropOverlay);
 
 async function downloadCroppedImage(ratioKey, recordId) {
+  if (ratioKey === 'original') {
+    const a = document.createElement('a');
+    a.href = `/api/image/${recordId}?original=1`;
+    a.download = '';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    return;
+  }
+
   const item = allData.find(d => d.id === recordId);
   if (!item || !item.sns_advice) return;
   const box = item.sns_advice[ratioKey];
@@ -1159,13 +1228,15 @@ async function requestSingleSnsCrop(ratioKey, recordId, btn, force=false) {
     const url = `/api/sns-crop/${ratioKey}/${recordId}${force ? '?force=true' : ''}`;
     const res = await fetch(url, { method: 'POST' });
     const data = await res.json();
-    if (data.success && data.crop_box) {
+    if (data.success && (data.crop_box || ratioKey === 'original' || data.advice)) {
       const item = allData.find(d => d.id === recordId);
       if (item) {
         if (!item.sns_advice) item.sns_advice = {};
         // The server may have generated all 4 ratios at once; keep every cached crop.
         Object.assign(item.sns_advice, data.advice || {});
-        item.sns_advice[ratioKey] = data.crop_box;
+        if (data.crop_box) {
+          item.sns_advice[ratioKey] = data.crop_box;
+        }
         currentCropRatioKey = ratioKey;
         const container = document.getElementById('sns-advice-content');
         if (container) {
@@ -1199,11 +1270,13 @@ async function requestAllSnsCrops(recordId, btn) {
       if (item) {
         if (!item.sns_advice) item.sns_advice = {};
         Object.assign(item.sns_advice, data.advice);
+        const bestRatio = item.sns_advice.best_ratio_key || currentCropRatioKey || 'instagram_crop_4_5';
+        currentCropRatioKey = bestRatio;
         const container = document.getElementById('sns-advice-content');
         if (container) {
           container.innerHTML = renderSnsAdviceContent(item.sns_advice, recordId);
         }
-        selectCropRatio(currentCropRatioKey || 'instagram_crop_4_5', recordId);
+        selectCropRatio(bestRatio, recordId);
       }
     } else {
       alert(`크롭 제안 생성 실패: ${data.error || '알 수 없는 오류'}`);

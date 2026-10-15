@@ -207,6 +207,14 @@ class SNSAdvice(BaseModel):
     instagram_crop_1_1: CropBox | None = Field(default=None, description="인스타그램 1:1 정방형 크롭 영역")
     x_crop_16_9: CropBox | None = Field(default=None, description="X(트위터) 타임라인 최적화 16:9 가로 크롭 영역")
     x_crop_3_4: CropBox | None = Field(default=None, description="X(트위터) 세로 최적화 3:4 크롭 영역")
+    best_ratio_key: str | None = Field(
+        default=None,
+        description="AI 자체 선정 최적 비율 키: 'original'(크롭 불필요/원본 최적), 'instagram_crop_4_5', 'instagram_crop_1_1', 'x_crop_16_9', 'x_crop_3_4' 중 택1",
+    )
+    best_ratio_reason: str | None = Field(
+        default=None,
+        description="해당 비율(또는 원본 유지)을 최적의 구도로 선정한 구체적인 시각적/미학적 근거 1~2줄",
+    )
     social_caption: str | None = Field(default=None, description="인스타 및 X 피드용 감성적인 짧은 캡션 (2~3줄, 이모지 포함)")
     hashtags: list[str] | None = Field(default=None, description="피규어 특화 추천 해시태그 목록 (#피규어, #figurephotography 등 8~12개)")
 
@@ -898,6 +906,13 @@ def generate_sns_advice(photo: PreparedPhoto, model: str = DEFAULT_MODEL) -> SNS
 [소셜 캡션 및 해시태그]
 - social_caption: 인스타/X에 바로 복사해 올릴 수 있는 세련된 2~3줄 캡션 (이모지 포함, 한국어).
 - hashtags: 한국어/일본어/영어 피규어 특화 해시태그 8~12개 (예: #피규어, #피규어사진, #figurephotography, #toyphotography, #フィギュア 등).
+
+[★핵심: AI 최적 비율 자체 선정 (best_ratio_key & best_ratio_reason)]
+- best_ratio_key: 이 사진의 피규어 구도, 피사체 크기, 배경 공간감에 가장 이상적인 비율 키를 하나 선택하세요.
+  선택지: 'original', 'instagram_crop_4_5', 'instagram_crop_1_1', 'x_crop_16_9', 'x_crop_3_4'
+  * 크롭을 하지 않고 원본 프레이밍(원래 종횡비) 그대로 두는 것이 여백의 미나 구도상 가장 완벽하다면 주저 없이 'original'을 선택하세요.
+  * 인물/상반신 클로즈업이나 특정 플랫폼에 맞춘 시선 집중이 필요하다면 해당 크롭 비율을 선택하세요.
+- best_ratio_reason: 왜 그 비율(또는 원본 유지)이 이 사진에 가장 적합한지 미학적/구도적 근거를 1~2줄로 명확히 설명하세요.
 """
 
     client = _get_client(api_key)
@@ -1014,7 +1029,7 @@ def generate_single_sns_crop(photo: PreparedPhoto, ratio_key: str, model: str = 
 
 
 class CropSet(BaseModel):
-    """All four SNS crop recommendations produced by a single Gemini call."""
+    """All four SNS crop recommendations and AI best ratio recommendation produced by a single Gemini call."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -1022,10 +1037,18 @@ class CropSet(BaseModel):
     instagram_crop_1_1: CropBox
     x_crop_16_9: CropBox
     x_crop_3_4: CropBox
+    best_ratio_key: str = Field(
+        default="instagram_crop_4_5",
+        description="AI 자체 선정 최적 비율 키: 'original'(크롭 불필요/원본 최적), 'instagram_crop_4_5', 'instagram_crop_1_1', 'x_crop_16_9', 'x_crop_3_4' 중 택1",
+    )
+    best_ratio_reason: str = Field(
+        default="",
+        description="해당 비율(또는 원본 유지)을 최적의 구도로 선정한 구체적인 시각적/미학적 근거 1~2줄",
+    )
 
 
 def generate_all_sns_crops(photo: PreparedPhoto, model: str = DEFAULT_MODEL) -> CropSet:
-    """Generate the 4 SNS crop boxes in ONE call (instead of 4 per-ratio calls).
+    """Generate the 4 SNS crop boxes and AI best ratio recommendation in ONE call (instead of multiple calls).
 
     Sharing one call also keeps the subject/face reference consistent across ratios.
     """
@@ -1045,7 +1068,8 @@ def generate_all_sns_crops(photo: PreparedPhoto, model: str = DEFAULT_MODEL) -> 
 
     prompt = f"""당신은 피규어 사진 및 SNS(Instagram, X/Twitter) 비주얼 디렉터입니다.
 제시된 피규어 사진(원본 해상도: {photo.width} × {photo.height})을 분석하고,
-아래 4가지 규격 각각에 가장 이상적인 크롭 영역(정규화 좌표 0.0~1.0)과 구도 연출 조언을 JSON으로 한 번에 제안하세요.
+아래 4가지 규격 각각에 가장 이상적인 크롭 영역(정규화 좌표 0.0~1.0)과 구도 연출 조언을 제안하는 동시에,
+이 사진에 가장 추천하는 최적의 비율(또는 원본 유지)을 자체 선정하여 JSON으로 한 번에 제안하세요.
 먼저 사진 속 피규어의 얼굴 위치를 하나 정하고, 4개 크롭 모두 그 얼굴을 기준으로 일관되게 구성하세요.
 
 [규격별 지침]
@@ -1057,6 +1081,13 @@ def generate_all_sns_crops(photo: PreparedPhoto, model: str = DEFAULT_MODEL) -> 
   각 크롭의 (가로/세로) 픽셀 비율이 해당 목표 종횡비에 최대한 근접하도록 폭과 높이를 조율하세요.
 - ★핵심(헤드룸 보존 및 안면 중심 프레이밍): 얼굴과 눈이 잘리지 않도록 정수리 위 여백(헤드룸)을 자연스럽게 살리고, 가로로 넓은 비율(1:1, 16:9)에서는 하단(베이스/다리)을 덜어내어 얼굴이 프레임 상단 3분할선 또는 중앙에 오게 하세요.
 - composition_tip: 각 비율에서 왜 그 위치로 잘라야 피규어가 돋보이는지 1~2줄로 설명하세요.
+
+[★핵심: AI 최적 비율 자체 선정 (best_ratio_key & best_ratio_reason)]
+- best_ratio_key: 이 사진의 피규어 구도, 피사체 크기, 배경 공간감에 가장 이상적인 비율 키를 하나 선택하세요.
+  선택지: 'original', 'instagram_crop_4_5', 'instagram_crop_1_1', 'x_crop_16_9', 'x_crop_3_4'
+  * 크롭을 하지 않고 원본 프레이밍(원래 종횡비) 그대로 두는 것이 여백의 미나 구도상 가장 완벽하다면 주저 없이 'original'을 선택하세요.
+  * 인물/상반신 클로즈업이나 특정 플랫폼에 맞춘 시선 집중이 필요하다면 해당 크롭 비율을 선택하세요.
+- best_ratio_reason: 왜 그 비율(또는 원본 유지)이 이 사진에 가장 적합한지 미학적/구도적 근거를 1~2줄로 명확히 설명하세요.
 """
 
     client = _get_client(api_key)
