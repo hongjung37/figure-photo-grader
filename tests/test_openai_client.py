@@ -1,0 +1,175 @@
+from __future__ import annotations
+
+import sys
+import unittest
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from app.models.analysis import AestheticTags, PhotoAnalysis
+from app.models.lightroom import LightroomAdvice
+from app.services.image_processor import PreparedPhoto
+from app.services.multi_llm import _merge_analyses, analyze_photo
+from app.services.openai_client import (
+    analyze_with_openai,
+    suggest_lightroom_advice_with_openai,
+)
+
+
+class OpenAIClientTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.sample_photo = PreparedPhoto(
+            source_filename="test.jpg",
+            sha256="abcdef1234567890" * 4,
+            width=800,
+            height=600,
+            image_format="JPEG",
+            safe_exif={"Make": "Sony"},
+            upload_bytes=b"\xFF\xD8\xFF\xE0dummy_jpeg_data",
+            upload_mime_type="image/jpeg",
+        )
+
+    def _sample_analysis(self, score: float = 8.0, reason: str = "Good") -> PhotoAnalysis:
+        return PhotoAnalysis(
+            composition_score=score,
+            composition_notes="구도 분석",
+            lighting_score=score,
+            lighting_notes="조명 분석",
+            color_score=score,
+            color_notes="색감 분석",
+            technique_score=score,
+            technique_notes="기술 분석",
+            final_score=score,
+            final_reason=reason,
+            strengths=["구도가 좋음"],
+            improvements=["조명 각도 개선"],
+            figure_category="일반 피규어 촬영",
+            focus_status="완벽 칼초점",
+            focus_notes="얼굴에 초점 맞음",
+            aesthetic_tags=AestheticTags.empty().model_copy(
+                update={"mood": ["고요함"], "viewpoint": ["정면"]}
+            ),
+        )
+
+    def test_missing_api_key_raises_runtime_error(self) -> None:
+        with patch.dict("os.environ", {}, clear=True), patch("app.services.openai_client.load_dotenv"):
+            with self.assertRaises(RuntimeError) as ctx:
+                analyze_with_openai(self.sample_photo, api_key=None)
+            self.assertIn("OPENAI_API_KEY", str(ctx.exception))
+
+    def test_analyze_with_openai_success(self) -> None:
+        expected = self._sample_analysis(8.5, "훌륭한 피규어 사진")
+
+        mock_choice = MagicMock()
+        mock_choice.message.refusal = None
+        mock_choice.message.parsed = expected
+
+        mock_completion = MagicMock()
+        mock_completion.choices = [mock_choice]
+        mock_completion.usage.prompt_tokens = 150
+        mock_completion.usage.completion_tokens = 50
+
+        mock_client = MagicMock()
+        mock_client.beta.chat.completions.parse.return_value = mock_completion
+
+        with patch("app.services.openai_client._get_client", return_value=mock_client):
+            result = analyze_with_openai(
+                self.sample_photo,
+                model="gpt-4o-mini",
+                api_key="sk-test-fake-key",
+            )
+
+        self.assertEqual(result.final_score, 8.5)
+        mock_client.beta.chat.completions.parse.assert_called_once()
+        call_kwargs = mock_client.beta.chat.completions.parse.call_args.kwargs
+        self.assertEqual(call_kwargs["model"], "gpt-4o-mini")
+        self.assertEqual(call_kwargs["response_format"], PhotoAnalysis)
+
+    def test_suggest_lightroom_advice_with_openai_success(self) -> None:
+        expected_advice = LightroomAdvice(
+            exposure=0.3,
+            contrast=10,
+            highlights=-15,
+            shadows=20,
+            whites=5,
+            blacks=-5,
+            texture=10,
+            clarity=10,
+            dehaze=5,
+            vibrance=15,
+            saturation=0,
+            temp_tint_notes="5200K 유지, 틴트 +2",
+            retouching_guide="얼굴 부분 암부를 살리고 채도를 보정합니다.",
+        )
+
+        mock_choice = MagicMock()
+        mock_choice.message.refusal = None
+        mock_choice.message.parsed = expected_advice
+
+        mock_completion = MagicMock()
+        mock_completion.choices = [mock_choice]
+        mock_completion.usage.prompt_tokens = 100
+        mock_completion.usage.completion_tokens = 30
+
+        mock_client = MagicMock()
+        mock_client.beta.chat.completions.parse.return_value = mock_completion
+
+        with patch("app.services.openai_client._get_client", return_value=mock_client):
+            advice = suggest_lightroom_advice_with_openai(
+                self.sample_photo,
+                self._sample_analysis(),
+                model="gpt-4o-mini",
+                api_key="sk-test-fake-key",
+            )
+
+        self.assertEqual(advice.exposure, 0.3)
+        self.assertEqual(advice.shadows, 20)
+        self.assertEqual(advice.retouching_guide, "얼굴 부분 암부를 살리고 채도를 보정합니다.")
+
+    def test_multi_llm_ensemble_averages_scores_and_synthesizes_reason(self) -> None:
+        g_analysis = self._sample_analysis(7.0, "Gemini 평가: 노출 부족")
+        o_analysis = self._sample_analysis(9.0, "OpenAI 평가: 구도 우수")
+
+        merged = _merge_analyses(g_analysis, o_analysis)
+
+        # Average of 7.0 and 9.0 is 8.0
+        self.assertEqual(merged.final_score, 8.0)
+        self.assertIn("앙상블 종합: 평균 8.0점", merged.final_reason)
+        self.assertIn("Gemini: 7.0점", merged.final_reason)
+        self.assertIn("OpenAI: 9.0점", merged.final_reason)
+
+    def test_analyze_photo_router_provider_dispatch(self) -> None:
+        g_res = self._sample_analysis(8.0, "Gemini")
+        o_res = self._sample_analysis(8.4, "OpenAI")
+
+        with patch("app.services.multi_llm.analyze_with_gemini", return_value=g_res) as mock_g, \
+             patch("app.services.multi_llm.analyze_with_openai", return_value=o_res) as mock_o:
+
+            # Provider: gemini
+            res1 = analyze_photo(self.sample_photo, provider="gemini")
+            self.assertEqual(res1.final_reason, "Gemini")
+            mock_g.assert_called_once()
+            mock_o.assert_not_called()
+
+            # Provider: openai
+            mock_g.reset_mock()
+            mock_o.reset_mock()
+            res2 = analyze_photo(self.sample_photo, provider="openai")
+            self.assertEqual(res2.final_reason, "OpenAI")
+            mock_g.assert_not_called()
+            mock_o.assert_called_once()
+
+            # Provider: ensemble (8.0 + 8.4) / 2 = 8.2
+            mock_g.reset_mock()
+            mock_o.reset_mock()
+            res3 = analyze_photo(self.sample_photo, provider="ensemble")
+            self.assertEqual(res3.final_score, 8.2)
+            mock_g.assert_called_once()
+            mock_o.assert_called_once()
+
+
+if __name__ == "__main__":
+    unittest.main()

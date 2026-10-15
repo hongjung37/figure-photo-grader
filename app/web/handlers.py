@@ -17,8 +17,10 @@ from urllib.parse import parse_qs, urlparse
 
 from app.config import (
     DEFAULT_DB_PATH,
+    DEFAULT_OPENAI_MODEL,
     MAX_UPLOAD_SIZE,
     MODEL_PRESETS,
+    OPENAI_MODEL_PRESETS,
     PORT,
     PROJECT_ROOT,
     SNS_CROP_RATIO_CONFIGS,
@@ -61,6 +63,7 @@ from app.services.gemini_client import (
     get_usage_stats,
     set_usage_log_db,
 )
+from app.services.multi_llm import analyze_photo
 from app.services.image_processor import (
     PreparedPhoto,
     compute_dhash_from_bytes,
@@ -305,6 +308,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 file_bytes = None
                 filename = "uploaded.webp"
                 tier = "lite"
+                provider = "gemini"
                 category_param = "auto"
 
                 for part in parts:
@@ -320,6 +324,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
                     if b'name="tier"' in header:
                         tier = data.decode("utf-8", errors="replace").strip()
+                    elif b'name="provider"' in header:
+                        provider = data.decode("utf-8", errors="replace").strip()
                     elif b'name="category"' in header:
                         category_param = data.decode("utf-8", errors="replace").strip()
                     elif b'name="image"' in header:
@@ -356,9 +362,19 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                         record_id, analysis_dict = existing
                         duplicate = True
                     else:
-                        model = MODEL_PRESETS.get(tier, MODEL_PRESETS["lite"])
+                        normalized_provider = provider.lower()
+                        if normalized_provider == "openai" or tier in OPENAI_MODEL_PRESETS:
+                            active_provider = "openai"
+                            model = OPENAI_MODEL_PRESETS.get(tier, tier if tier not in MODEL_PRESETS else DEFAULT_OPENAI_MODEL)
+                        elif normalized_provider == "ensemble":
+                            active_provider = "ensemble"
+                            model = f"ensemble({MODEL_PRESETS.get(tier, 'gemini')}+{DEFAULT_OPENAI_MODEL})"
+                        else:
+                            active_provider = "gemini"
+                            model = MODEL_PRESETS.get(tier, MODEL_PRESETS["lite"])
+
                         category_hint = category_param if category_param != "auto" else None
-                        analysis = analyze_with_gemini(prepared, model=model, category_hint=category_hint)
+                        analysis = analyze_photo(prepared, provider=active_provider, model=model, category_hint=category_hint)
                         record_id = save_analysis(self.db_path, prepared, model, analysis)
                         analysis_dict = analysis.model_dump(mode="json")
                         duplicate = False

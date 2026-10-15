@@ -28,6 +28,14 @@ from app.services.image_processor import (
     prepare_photo,
     save_original_photo,
 )
+from app.services.openai_client import (
+    analyze_with_openai,
+    suggest_lightroom_advice_with_openai,
+)
+from app.services.multi_llm import (
+    analyze_photo,
+    suggest_lightroom_advice,
+)
 from app.services.batch_service import run_batch_pipeline
 from app.services.xmp_service import (
     generate_xmp_xml,
@@ -62,4 +70,8 @@ __all__ = [
     "score_to_rating_and_label",
     "write_xmp_sidecar",
     "run_batch_pipeline",
+    "analyze_with_openai",
+    "suggest_lightroom_advice_with_openai",
+    "analyze_photo",
+    "suggest_lightroom_advice",
 ]

@@ -31,6 +31,8 @@ from app.config import (
     MAX_BASE64_IMAGE_BYTES,
     MAX_IMAGE_EDGE,
     MODEL_PRESETS,
+    OPENAI_MODEL_PRESETS,
+    DEFAULT_OPENAI_MODEL,
     ORIGINALS_DIR_NAME,
     PORT,
     SAFE_EXIF_FIELDS,
@@ -91,6 +93,14 @@ from app.services.gemini_client import (
     generate_sns_caption_and_tags,
     get_usage_stats,
     set_usage_log_db,
+)
+from app.services.openai_client import (
+    analyze_with_openai,
+    suggest_lightroom_advice_with_openai,
+)
+from app.services.multi_llm import (
+    analyze_photo,
+    suggest_lightroom_advice,
 )
 from app.services.image_processor import (
     PreparedPhoto,
