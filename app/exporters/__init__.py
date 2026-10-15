@@ -7,6 +7,7 @@ from app.exporters.excel_exporter import (
     summarize_tags,
 )
 from app.exporters.html_exporter import (
+    render_batch_comparison_html,
     render_html_report,
     save_html_report,
 )
@@ -18,4 +19,5 @@ __all__ = [
     "summarize_tags",
     "render_html_report",
     "save_html_report",
+    "render_batch_comparison_html",
 ]

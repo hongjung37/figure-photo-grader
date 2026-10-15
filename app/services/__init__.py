@@ -28,6 +28,7 @@ from app.services.image_processor import (
     prepare_photo,
     save_original_photo,
 )
+from app.services.batch_service import run_batch_pipeline
 from app.services.xmp_service import (
     generate_xmp_xml,
     score_to_rating_and_label,
@@ -60,4 +61,5 @@ __all__ = [
     "generate_xmp_xml",
     "score_to_rating_and_label",
     "write_xmp_sidecar",
+    "run_batch_pipeline",
 ]

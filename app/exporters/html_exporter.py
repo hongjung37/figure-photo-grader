@@ -231,3 +231,123 @@ def save_html_report(
             temporary_path.unlink(missing_ok=True)
         raise
     return output.resolve()
+
+
+def render_batch_comparison_html(
+    results: list[dict[str, Any]],
+    model: str,
+    db_path: Path,
+) -> str:
+    """Render a standalone, modern HTML summary comparing all analyzed photos in a batch."""
+    from html import escape
+    from statistics import mean
+
+    scores = [float(r["analysis"].final_score) for r in results] if results else [0.0]
+    avg_score = mean(scores)
+    max_score = max(scores)
+    min_score = min(scores)
+
+    rows_html = []
+    for r in results:
+        analysis = r["analysis"]
+        grade = get_score_grade(analysis.final_score)
+        report_link = f'<a href="{escape(r["relative_report"])}">개별 보고서</a>' if r.get("relative_report") else "-"
+        rows_html.append(
+            f"""<tr>
+              <td><strong>{escape(r["filename"])}</strong></td>
+              <td><span class="badge" style="background:#eef2ff;color:#4338ca;">{escape(getattr(analysis, 'figure_category', '일반'))}</span></td>
+              <td><span class="badge">{escape(grade)}</span></td>
+              <td><strong class="score">{analysis.final_score:.1f}</strong></td>
+              <td>{analysis.composition_score:.1f}</td>
+              <td>{analysis.lighting_score:.1f}</td>
+              <td>{analysis.color_score:.1f}</td>
+              <td>{analysis.technique_score:.1f}</td>
+              <td class="reason-cell">{escape(analysis.final_reason)}</td>
+              <td>{report_link}</td>
+            </tr>"""
+        )
+
+    return f"""<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>피규어 사진 일괄 평가 결과</title>
+<style>
+:root {{ --ink:#17233b; --muted:#61708a; --navy:#182b49; --blue:#436cf5; --teal:#11a898; --line:#e5eaf2; --paper:#f4f7fb; }}
+* {{ box-sizing:border-box; }}
+body {{ margin:0; background:var(--paper); color:var(--ink); font-family: "Segoe UI", "Malgun Gothic", sans-serif; line-height:1.6; }}
+main {{ width:min(1240px, calc(100% - 36px)); margin:32px auto 60px; }}
+.hero {{ padding:32px 36px; border-radius:24px; color:white; background:linear-gradient(125deg,#142440,#253f68 65%,#3757a3); box-shadow:0 18px 48px #20395b24; }}
+.hero h1 {{ margin:0 0 8px; font-size:clamp(1.8rem, 3.5vw, 2.5rem); }}
+.hero p {{ margin:4px 0; color:#e0e8f7; font-size:.95rem; }}
+.stats-grid {{ display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:14px; margin-top:22px; }}
+.stat-card {{ background:rgba(255,255,255,.1); backdrop-filter:blur(10px); border:1px solid rgba(255,255,255,.2); border-radius:16px; padding:16px 20px; }}
+.stat-card small {{ display:block; color:#b9c9ff; font-size:.8rem; }}
+.stat-card strong {{ font-size:1.9rem; color:white; }}
+.section {{ margin-top:28px; }}
+.table-wrap {{ overflow-x:auto; background:white; border:1px solid var(--line); border-radius:18px; box-shadow:0 8px 26px #2439570a; }}
+table {{ border-collapse:collapse; width:100%; min-width:850px; font-size:.92rem; }}
+th, td {{ padding:13px 15px; text-align:left; border-bottom:1px solid var(--line); vertical-align:middle; }}
+th {{ background:#f8fafc; color:var(--muted); font-weight:700; font-size:.84rem; }}
+tr:last-child td {{ border-bottom:none; }}
+tr:hover td {{ background:#fbfdff; }}
+.badge {{ display:inline-block; padding:4px 9px; border-radius:999px; background:#e6f8f5; color:#0e8477; font-size:.8rem; font-weight:700; white-space:nowrap; }}
+.score {{ color:var(--blue); font-size:1.15rem; }}
+.reason-cell {{ max-width:320px; color:#4a5568; font-size:.86rem; line-height:1.45; }}
+a {{ color:var(--blue); text-decoration:none; font-weight:650; }}
+a:hover {{ text-decoration:underline; }}
+.guide {{ margin-top:20px; padding:15px 20px; border-radius:14px; background:white; border:1px solid var(--line); color:var(--muted); font-size:.85rem; }}
+.guide strong {{ color:var(--ink); }}
+footer {{ margin-top:30px; text-align:center; color:var(--muted); font-size:.82rem; }}
+</style>
+</head>
+<body>
+<main>
+  <header class="hero">
+    <h1>피규어 사진 일괄 평가 결과</h1>
+    <p>Gemini 모델: {escape(model)} · 분석 완료: {len(results)}장 · SQLite DB: {escape(db_path.name)}</p>
+    <div class="stats-grid">
+      <div class="stat-card"><small>총 분석 장수</small><strong>{len(results)}<span style="font-size:1rem;font-weight:normal">장</span></strong></div>
+      <div class="stat-card"><small>평균 점수</small><strong>{avg_score:.1f}<span style="font-size:1rem;font-weight:normal"> / 10</span></strong></div>
+      <div class="stat-card"><small>최고 점수</small><strong>{max_score:.1f}<span style="font-size:1rem;font-weight:normal"> / 10</span></strong></div>
+      <div class="stat-card"><small>최저 점수</small><strong>{min_score:.1f}<span style="font-size:1rem;font-weight:normal"> / 10</span></strong></div>
+    </div>
+  </header>
+
+  <section class="section">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>파일명</th>
+            <th>유형</th>
+            <th>등급</th>
+            <th>최종</th>
+            <th>구도</th>
+            <th>조명</th>
+            <th>색감</th>
+            <th>기술</th>
+            <th>총평 요약</th>
+            <th>상세</th>
+          </tr>
+        </thead>
+        <tbody>
+          {"".join(rows_html)}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <aside class="guide">
+    <strong>채점 기준 척도:</strong>
+    <span><b>9.0~10</b> 프로사진작가 및 전문가급</span> ·
+    <span><b>8.0~8.9</b> 매우 우수</span> ·
+    <span><b>7.0~7.9</b> 우수</span> ·
+    <span><b>5.0~6.9</b> 보통 (일반 스냅)</span> ·
+    <span><b>5.0 미만</b> 개선 필요 (기초 미흡)</span>
+  </aside>
+  <footer>생성된 일괄 평가 보고서 · 피규어 사진 미학 및 기술 기준 적용</footer>
+</main>
+</body>
+</html>"""

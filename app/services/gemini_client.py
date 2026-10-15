@@ -22,6 +22,15 @@ from app.config import (
     FALLBACK_MODEL,
     SNS_CROP_RATIO_CONFIGS,
 )
+
+
+def _get_env_file_path() -> Path:
+    import sys
+    mod = sys.modules.get("photo_analyzer")
+    if mod is not None and hasattr(mod, "ENV_FILE_PATH"):
+        return getattr(mod, "ENV_FILE_PATH")
+    return ENV_FILE_PATH
+
 from app.models.analysis import PhotoAnalysis
 from app.models.crop import (
     CropBox,
@@ -55,6 +64,24 @@ def _get_client(api_key: str) -> genai.Client:
             client = genai.Client(api_key=api_key)
             _CLIENT_CACHE[api_key] = client
         return client
+
+
+def _dispatch_call_gemini_interaction(*args: Any, **kwargs: Any) -> str:
+    mod = sys.modules.get("photo_analyzer")
+    if mod is not None and hasattr(mod, "_call_gemini_interaction"):
+        fn = getattr(mod, "_call_gemini_interaction")
+        if fn is not _call_gemini_interaction:
+            return fn(*args, **kwargs)
+    return _call_gemini_interaction(*args, **kwargs)
+
+
+def _dispatch_get_client(api_key: str) -> Any:
+    mod = sys.modules.get("photo_analyzer")
+    if mod is not None and hasattr(mod, "_get_client"):
+        fn = getattr(mod, "_get_client")
+        if fn is not _get_client:
+            return fn(api_key)
+    return _get_client(api_key)
 
 
 def set_usage_log_db(db_path: str | Path | None) -> None:
@@ -263,12 +290,12 @@ def analyze_with_gemini(
     category_hint: str | None = None,
 ) -> PhotoAnalysis:
     """Analyze figure photo and return strictly validated PhotoAnalysis."""
-    load_dotenv(dotenv_path=ENV_FILE_PATH, override=False)
+    load_dotenv(dotenv_path=_get_env_file_path(), override=False)
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY를 .env 파일 또는 환경변수에 설정해 주세요.")
 
-    client = _get_client(api_key)
+    client = _dispatch_get_client(api_key)
     input_payload = [
         {"type": "text", "text": build_grader_prompt(photo, category_hint=category_hint)},
         {
@@ -277,7 +304,7 @@ def analyze_with_gemini(
             "mime_type": photo.upload_mime_type,
         },
     ]
-    output_text = _call_gemini_interaction(
+    output_text = _dispatch_call_gemini_interaction(
         client=client,
         model=model,
         input_payload=input_payload,
@@ -289,13 +316,13 @@ def analyze_with_gemini(
 
 def generate_lightroom_advice(photo: PreparedPhoto, model: str = DEFAULT_MODEL) -> LightroomAdvice:
     """Generate on-demand Adobe Lightroom post-processing slider recommendations."""
-    load_dotenv(dotenv_path=ENV_FILE_PATH, override=False)
+    load_dotenv(dotenv_path=_get_env_file_path(), override=False)
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY를 .env 파일 또는 환경변수에 설정해 주세요.")
 
     prompt = build_lightroom_prompt()
-    client = _get_client(api_key)
+    client = _dispatch_get_client(api_key)
     input_payload = [
         {"type": "text", "text": prompt},
         {
@@ -304,7 +331,7 @@ def generate_lightroom_advice(photo: PreparedPhoto, model: str = DEFAULT_MODEL) 
             "mime_type": photo.upload_mime_type,
         },
     ]
-    output_text = _call_gemini_interaction(
+    output_text = _dispatch_call_gemini_interaction(
         client=client,
         model=model,
         input_payload=input_payload,
@@ -316,13 +343,13 @@ def generate_lightroom_advice(photo: PreparedPhoto, model: str = DEFAULT_MODEL) 
 
 def generate_sns_advice(photo: PreparedPhoto, model: str = DEFAULT_MODEL) -> SNSAdvice:
     """Generate on-demand SNS platform crop coordinates and social captions for Instagram & X."""
-    load_dotenv(dotenv_path=ENV_FILE_PATH, override=False)
+    load_dotenv(dotenv_path=_get_env_file_path(), override=False)
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY를 .env 파일 또는 환경변수에 설정해 주세요.")
 
     prompt = build_sns_advice_prompt(photo)
-    client = _get_client(api_key)
+    client = _dispatch_get_client(api_key)
     input_payload = [
         {"type": "text", "text": prompt},
         {
@@ -331,7 +358,7 @@ def generate_sns_advice(photo: PreparedPhoto, model: str = DEFAULT_MODEL) -> SNS
             "mime_type": photo.upload_mime_type,
         },
     ]
-    output_text = _call_gemini_interaction(
+    output_text = _dispatch_call_gemini_interaction(
         client=client,
         model=model,
         input_payload=input_payload,
@@ -347,13 +374,13 @@ def generate_single_sns_crop(photo: PreparedPhoto, ratio_key: str, model: str = 
         raise ValueError(f"지원하지 않는 SNS 크롭 비율 키입니다: {ratio_key}")
 
     cfg = SNS_CROP_RATIO_CONFIGS[ratio_key]
-    load_dotenv(dotenv_path=ENV_FILE_PATH, override=False)
+    load_dotenv(dotenv_path=_get_env_file_path(), override=False)
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY를 .env 파일 또는 환경변수에 설정해 주세요.")
 
     prompt = build_single_crop_prompt(photo, ratio_key, cfg)
-    client = _get_client(api_key)
+    client = _dispatch_get_client(api_key)
     input_payload = [
         {"type": "text", "text": prompt},
         {
@@ -362,7 +389,7 @@ def generate_single_sns_crop(photo: PreparedPhoto, ratio_key: str, model: str = 
             "mime_type": photo.upload_mime_type,
         },
     ]
-    output_text = _call_gemini_interaction(
+    output_text = _dispatch_call_gemini_interaction(
         client=client,
         model=model,
         input_payload=input_payload,
@@ -374,7 +401,7 @@ def generate_single_sns_crop(photo: PreparedPhoto, ratio_key: str, model: str = 
 
 def generate_all_sns_crops(photo: PreparedPhoto, model: str = DEFAULT_MODEL) -> CropSet:
     """Generate the 4 SNS crop boxes and AI best ratio recommendation in ONE call."""
-    load_dotenv(dotenv_path=ENV_FILE_PATH, override=False)
+    load_dotenv(dotenv_path=_get_env_file_path(), override=False)
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY를 .env 파일 또는 환경변수에 설정해 주세요.")
@@ -389,7 +416,7 @@ def generate_all_sns_crops(photo: PreparedPhoto, model: str = DEFAULT_MODEL) -> 
     ratio_block = "\n".join(ratio_lines)
 
     prompt = build_all_sns_crops_prompt(photo, ratio_block)
-    client = _get_client(api_key)
+    client = _dispatch_get_client(api_key)
     input_payload = [
         {"type": "text", "text": prompt},
         {
@@ -398,7 +425,7 @@ def generate_all_sns_crops(photo: PreparedPhoto, model: str = DEFAULT_MODEL) -> 
             "mime_type": photo.upload_mime_type,
         },
     ]
-    output_text = _call_gemini_interaction(
+    output_text = _dispatch_call_gemini_interaction(
         client=client,
         model=model,
         input_payload=input_payload,
@@ -410,13 +437,13 @@ def generate_all_sns_crops(photo: PreparedPhoto, model: str = DEFAULT_MODEL) -> 
 
 def generate_sns_caption_and_tags(photo: PreparedPhoto, model: str = DEFAULT_MODEL) -> SNSCaptionAndTags:
     """Generate social caption and hashtags on-demand without re-analyzing crops."""
-    load_dotenv(dotenv_path=ENV_FILE_PATH, override=False)
+    load_dotenv(dotenv_path=_get_env_file_path(), override=False)
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY를 .env 파일 또는 환경변수에 설정해 주세요.")
 
     prompt = build_caption_and_tags_prompt(photo)
-    client = _get_client(api_key)
+    client = _dispatch_get_client(api_key)
     input_payload = [
         {"type": "text", "text": prompt},
         {
@@ -425,7 +452,7 @@ def generate_sns_caption_and_tags(photo: PreparedPhoto, model: str = DEFAULT_MOD
             "mime_type": photo.upload_mime_type,
         },
     ]
-    output_text = _call_gemini_interaction(
+    output_text = _dispatch_call_gemini_interaction(
         client=client,
         model=model,
         input_payload=input_payload,

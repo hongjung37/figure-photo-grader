@@ -19,31 +19,53 @@ PORT = 8080
 
 # Gemini Models
 MODEL_PRESETS: dict[str, str] = {
-    "flash": "gemini-3.8-flash",
-    "pro": "gemini-3.1-pro",
-    "lite": "gemini-3.5-flash-lite",
+    "lite": "gemini-3.1-flash-lite",      # 빠르고 가벼운 대량 분류/스크리닝 모드 (과부하시 자동 폴백)
+    "standard": "gemini-3.5-flash-lite",   # 균형 잡힌 표준 화질 평가 모드
+    "pro": "gemini-3.8-flash",            # 고화질 심층 비평 모드 (서버 과부하시 자동 폴백)
 }
-DEFAULT_MODEL = MODEL_PRESETS["flash"]
-FALLBACK_MODEL = MODEL_PRESETS["lite"]
+DEFAULT_TIER = "lite"
+DEFAULT_MODEL = MODEL_PRESETS[DEFAULT_TIER]
+FALLBACK_MODEL = "gemini-3.5-flash-lite"
 
-# EXIF Whitelist
-UPLOAD_EXIF_FIELDS: set[str] = {
+ORIGINALS_DIR_NAME = "photo_originals"
+SUPPORTED_FORMATS = {
+    "JPEG": "image/jpeg",
+    "MPO": "image/jpeg",
+    "PNG": "image/png",
+    "WEBP": "image/webp",
+}
+MAX_IMAGE_EDGE = 4096
+MAX_BASE64_IMAGE_BYTES = 18 * 1024 * 1024
+EXIF_IFD_ID = 34665
+
+SAFE_EXIF_FIELDS = {
     "Make",
     "Model",
     "LensModel",
-    "FocalLength",
-    "FNumber",
+    "LensSpecification",
     "ExposureTime",
-    "ISOSpeedRatings",
+    "FNumber",
     "ExposureProgram",
+    "ISOSpeedRatings",
+    "PhotographicSensitivity",
+    "ShutterSpeedValue",
+    "ApertureValue",
+    "ExposureBiasValue",
+    "MaxApertureValue",
     "MeteringMode",
     "Flash",
+    "FocalLength",
+    "FocalLengthIn35mmFilm",
     "WhiteBalance",
-    "DateTimeOriginal",
-    "OffsetTimeOriginal",
-    "OffsetTime",
+    "ExposureMode",
+    "SceneCaptureType",
+    "DigitalZoomRatio",
+    "LightSource",
+    "ColorSpace",
+    "Orientation",
 }
-EXIF_IFD_ID = 0x8769
+EXIF_IFD_TAG_NAMES = SAFE_EXIF_FIELDS - {"Make", "Model", "Orientation"}
+UPLOAD_EXIF_FIELDS = SAFE_EXIF_FIELDS - {"Orientation"}
 EXIF_DATETIME_ORIGINAL_ID = 0x9003
 EXIF_OFFSET_TIME_ORIGINAL_ID = 0x9011
 EXIF_OFFSET_TIME_ID = 0x9010
