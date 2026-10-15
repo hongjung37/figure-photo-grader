@@ -9,8 +9,9 @@ import tempfile
 import unittest
 from contextlib import closing
 from io import BytesIO
+from http import HTTPStatus
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -1182,6 +1183,26 @@ class PhotoAnalyzerTests(unittest.TestCase):
             }
             with self.assertRaises(ValueError):
                 _load_prepared_photo_for_record(db_path, row_empty)
+
+    def test_analyze_rejects_oversized_request_before_reading_body(self) -> None:
+        from app.config import MAX_UPLOAD_SIZE
+        from app.web.handlers import DashboardRequestHandler
+
+        handler = DashboardRequestHandler.__new__(DashboardRequestHandler)
+        handler.path = "/api/analyze"
+        handler.headers = {
+            "Content-Type": "multipart/form-data; boundary=test",
+            "Content-Length": str(MAX_UPLOAD_SIZE + 1),
+        }
+        handler.rfile = BytesIO(b"request body must not be read")
+        handler.wfile = BytesIO()
+        handler.send_error = MagicMock()
+
+        handler.do_POST()
+
+        handler.send_error.assert_called_once()
+        self.assertEqual(handler.send_error.call_args.args[0], HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+        self.assertEqual(handler.rfile.tell(), 0)
 
     def test_post_process_advice_endpoint_force_flag(self) -> None:
         from app.models.lightroom import LightroomAdvice

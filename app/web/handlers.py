@@ -17,6 +17,7 @@ from urllib.parse import parse_qs, urlparse
 
 from app.config import (
     DEFAULT_DB_PATH,
+    MAX_UPLOAD_SIZE,
     MODEL_PRESETS,
     PORT,
     PROJECT_ROOT,
@@ -279,7 +280,21 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/analyze":
             try:
                 content_type = self.headers.get("Content-Type", "")
-                content_length = int(self.headers.get("Content-Length", 0))
+                content_length_header = self.headers.get("Content-Length")
+                if content_length_header is None:
+                    self.send_error(HTTPStatus.LENGTH_REQUIRED, "Content-Length header is required")
+                    return
+                try:
+                    content_length = int(content_length_header)
+                except ValueError:
+                    self.send_error(HTTPStatus.BAD_REQUEST, "Invalid Content-Length header")
+                    return
+                if content_length < 0:
+                    self.send_error(HTTPStatus.BAD_REQUEST, "Invalid Content-Length header")
+                    return
+                if content_length > MAX_UPLOAD_SIZE:
+                    self.send_error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "Upload request is too large")
+                    return
                 body = self.rfile.read(content_length)
 
                 # Parse multipart form data
