@@ -1,4 +1,8 @@
-# 사진 EXIF + Gemini 평가기
+# Figure Photo Grader
+
+피규어 사진을 Gemini로 평가하고, SQLite에 저장한 뒤 웹 대시보드·Excel·HTML·Lightroom XMP로 검토하는 Python 도구입니다.
+
+이 파일을 프로젝트의 공식 사용 설명서로 사용합니다.
 
 사진 파일에서 촬영에 필요한 EXIF만 추출하고, Gemini의 구조화 출력(JSON Schema)을 사용해 구도·조명·색감·촬영 기술·최종 점수(각 10점 만점)와 범주별 미학 태그를 평가한 뒤 SQLite에 저장하는 단일 이미지 CLI입니다.
 
@@ -9,7 +13,7 @@ GPS 위치, 촬영 시각, 소유자/코멘트, MakerNote, 카메라·렌즈 일
 ## 설치 및 API 키 설정 (Windows PowerShell)
 
 ```powershell
-cd F:\desk\teamproject
+cd C:\desk\figure-photo-grader\figure-photo-grader
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade -r .\requirements-photo-analyzer.txt
@@ -54,8 +58,8 @@ python .\photo_analyzer.py ".\photos\" --category snap --workers 4
 분석기는 피규어 및 캐릭터 모델 사진(Figure Photography)의 완성도를 전문적으로 비평하도록 최적화되어 있습니다. 작업 목적에 맞춰 세 가지 모델 티어 중 하나를 선택할 수 있습니다.
 
 - `--tier lite`: `gemini-3.1-flash-lite` (기본값) — 빠르고 가벼운 대량 분류 및 스크리닝용
-- `--tier standard`: `gemini-2.5-flash` — 균형 잡힌 표준 화질 평가용
-- `--tier pro`: `gemini-2.5-pro` — 미세 디테일, 조명 질감, 심도 표현을 심층 분석하는 전문가급 모드
+- `--tier standard`: `gemini-3.5-flash-lite` — 균형 잡힌 표준 화질 평가용
+- `--tier pro`: `gemini-3.8-flash` — 미세 디테일, 조명 질감, 심도 표현을 심층 분석하는 전문가급 모드
 
 ```powershell
 # 1. 단일 사진 기본 분석 (Lite)
@@ -65,7 +69,7 @@ python .\photo_analyzer.py "F:\photos\sample.jpg"
 python .\photo_analyzer.py "F:\photos\sample.jpg" --tier pro
 
 # 3. 모델명을 직접 지정할 수도 있습니다.
-python .\photo_analyzer.py "F:\photos\sample.jpg" --model "gemini-2.5-pro"
+python .\photo_analyzer.py "F:\photos\sample.jpg" --model "gemini-3.8-flash"
 ```
 
 ## 폴더 일괄 분석 (Batch Mode)
@@ -154,7 +158,7 @@ python .\photo_excel_manager.py import "F:/data/photo_analyses.xlsx" --db "F:/da
 python .\photo_excel_manager.py tags
 ```
 
-워크북에는 분석 기록 표와 사용 안내 시트가 들어갑니다. 점수(0~10), 초점 상태/분석, 평가 메모, 최종 평가, 강점·개선점, 8개 범주의 태그, 검토 상태, 사용자 메모를 수정할 수 있습니다. 태그는 범주별 셀에서 줄바꿈으로 나누고, 안내 시트에 기재된 허용 어휘 중 범주당 최대 3개를 입력합니다. 검토 상태에는 `미검토`, `확인 필요`, `검토 완료` 목록이 제공됩니다. ID와 파일 정보는 표시용이며, 가져올 때는 DB의 해당 정보를 덮어쓰지 않습니다.
+워크북에는 분석 기록 표와 사용 안내 시트가 들어갑니다. 점수(0~10), 초점 상태/분석, 평가 메모, 최종 평가, 강점·개선점, 8개 범주의 태그, 검토 상태, 사용자 메모를 수정할 수 있습니다. 태그는 범주별 셀에서 줄바꿈으로 나누고, 안내 시트에 기재된 허용 어휘 중 범주당 최대 3개를 입력합니다. 검토 상태에는 `미검토`, `확인 필요`, `검토 완료`, `토너먼트 1위` 목록이 제공됩니다. ID와 파일 정보는 표시용이며, 가져올 때는 DB의 해당 정보를 덮어쓰지 않습니다.
 
 Excel 내보내기는 DB를 읽기 전용으로 열어 스키마나 데이터를 수정하지 않습니다. 가져오기는 기존 ID의 분석 내용·태그·검토 상태·사용자 메모만 갱신합니다. 새 행을 DB에 추가하거나 DB 행을 삭제하지 않으며, ID 중복·미등록 ID·필수 열 누락·잘못된 점수·허용되지 않은 태그·잘못된 검토 상태가 하나라도 있으면 전체 반영을 취소합니다. SQLite 트랜잭션으로 반영하므로 검증에 실패해 일부 행만 바뀌지 않습니다. 처음 가져오면 검토 필드와 태그 카탈로그·사진별 태그 테이블이 추가될 수 있으며, 기존 분석 기록은 유지됩니다.
 
@@ -262,4 +266,3 @@ python .\photo_analyzer.py "F:/photos/sample.jpg" --html "F:/reports/photo_analy
 ```
 
 생성된 `.html` 파일을 Edge나 다른 브라우저에서 열면 됩니다. 보고서는 이미지 미리보기와 스타일을 안에 포함하므로 오프라인에서도 열 수 있습니다.
-
