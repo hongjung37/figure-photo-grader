@@ -144,6 +144,48 @@ class DashboardModularizationTests(unittest.TestCase):
         self.assertIsNone(data["cropOriginal"], "calculateExactCrop on 'original' must return null")
         self.assertIsNotNone(data["crop11"], "calculateExactCrop on valid ratio must return crop data")
 
+        # 4. Test renderCropRatioDetailArea and renderSnsAdviceContent execution in Node
+        # Verifies that 'item' is defined and no ReferenceError occurs, and XSS is escaped.
+        exec_script = """
+        const allData = [{
+            id: 42,
+            filename: 'fig.jpg',
+            composition_notes: '피규어 전신과 베이스 배치가 균형 잡힘',
+            sns_advice: {
+                best_ratio_key: 'instagram_crop_4_5',
+                best_ratio_reason: '얼굴 집중 클로즈업 <script>alert("xss")</script>',
+                original_tip: '배경 공간감 보존',
+                instagram_crop_4_5: { ratio_label: '4:5', composition_tip: '헤드룸 확보' }
+            }
+        }];
+        let currentCropRatioKey = 'original';
+        """ + ("function escapeHtml" + js.split("function escapeHtml")[1].split("// --- Darkroom Theme Management ---")[0]) + """
+        """ + ("function getCropRatioLabel" + js.split("function getCropRatioLabel")[1].split("function getImageRenderedRect")[0]) + """
+        // Test 1: render original when best_ratio_key is instagram_crop_4_5 (must not throw ReferenceError)
+        const htmlCropOther = renderCropRatioDetailArea('original', allData[0].sns_advice, 42);
+
+        // Test 2: render original when best_ratio_key is original
+        const advOriginal = {
+            best_ratio_key: 'original',
+            best_ratio_reason: '원본 구도가 완벽함 <b>굵게</b>',
+            original_tip: '원본 여백 최적'
+        };
+        const htmlCropOrig = renderCropRatioDetailArea('original', advOriginal, 42);
+
+        // Test 3: render full advice container
+        const htmlFull = renderSnsAdviceContent(allData[0].sns_advice, 42);
+
+        console.log(JSON.stringify({ htmlCropOther, htmlCropOrig, htmlFull }));
+        """
+        res_exec = subprocess.run(["node"], input=exec_script, capture_output=True, text=True, encoding="utf-8", check=True)
+        exec_data = json.loads(res_exec.stdout.strip())
+        self.assertIn("원본 구도에 대한 AI 분석", exec_data["htmlCropOther"])
+        self.assertIn("&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;", exec_data["htmlCropOther"])
+        self.assertNotIn("<script>", exec_data["htmlCropOther"])
+        self.assertIn("👑 AI Best Pick", exec_data["htmlCropOrig"])
+        self.assertIn("&lt;b&gt;굵게&lt;/b&gt;", exec_data["htmlCropOrig"])
+        self.assertNotIn("<b>굵게</b>", exec_data["htmlCropOrig"])
+
 
 if __name__ == "__main__":
     unittest.main()

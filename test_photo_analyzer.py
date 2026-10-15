@@ -621,6 +621,9 @@ class PhotoAnalyzerTests(unittest.TestCase):
                         "ymin": 0.1, "xmin": 0.1, "ymax": 0.9, "xmax": 0.74,
                         "ratio_label": "4:5 (인스타 세로)", "composition_tip": "테스트 팁"
                     },
+                    "best_ratio_key": "original",
+                    "best_ratio_reason": "원본 구도 안정적",
+                    "original_tip": "배경과 조화 우수",
                     "social_caption": "테스트 캡션입니다",
                     "hashtags": ["#피규어"]
                 }
@@ -631,6 +634,8 @@ class PhotoAnalyzerTests(unittest.TestCase):
             self.assertEqual(len(items), 1)
             self.assertIsNotNone(items[0]["sns_advice"])
             self.assertEqual(items[0]["sns_advice"]["social_caption"], "테스트 캡션입니다")
+            self.assertEqual(items[0]["sns_advice"]["best_ratio_key"], "original")
+            self.assertEqual(items[0]["sns_advice"]["original_tip"], "배경과 조화 우수")
 
     def test_single_sns_crop_ratio_config_and_caption_schema(self) -> None:
         from photo_analyzer import SNS_CROP_RATIO_CONFIGS, SNSCaptionAndTags, CropBox

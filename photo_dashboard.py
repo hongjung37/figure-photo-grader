@@ -803,9 +803,13 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                         except Exception:
                             cached_advice = {}
 
+                    has_original_cache = (
+                        "best_ratio_key" in cached_advice
+                        and bool(cached_advice.get("original_tip"))
+                    )
                     is_cached = (
-                        (ratio_key == "original" and "best_ratio_key" in cached_advice)
-                        or (ratio_key in cached_advice and cached_advice[ratio_key])
+                        (ratio_key == "original" and has_original_cache)
+                        or (ratio_key != "original" and ratio_key in cached_advice and bool(cached_advice.get(ratio_key)))
                     )
                     if not force and is_cached:
                         self.send_response(HTTPStatus.OK)
@@ -851,17 +855,18 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     elif ratio_key not in SNS_CROP_RATIO_CONFIGS:
                         raise ValueError(f"지원하지 않는 SNS 크롭 비율 키입니다: {ratio_key}")
                     elif force:
-                        # Explicit regenerate: refresh only the requested ratio.
-                        crop_box = generate_single_sns_crop(prepared, ratio_key=ratio_key, model=MODEL_PRESETS["lite"])
-                        cached_advice[ratio_key] = crop_box.model_dump(mode="json")
+                        # Explicit regenerate: refresh all crops and recommendations together in ONE call
+                        # so that crop boxes, best_ratio_key, best_ratio_reason, and original_tip remain 100% consistent.
+                        crop_set = generate_all_sns_crops(prepared, model=MODEL_PRESETS["lite"])
+                        for key, box in crop_set.model_dump(mode="json").items():
+                            cached_advice[key] = box
                         crop_dict = cached_advice[ratio_key]
                     else:
-                        # First crop request for this photo: get all 4 ratios in ONE call and cache them,
+                        # First crop request for this photo: get all 4 ratios + best pick in ONE call and cache them,
                         # so the other ratio buttons need no further API calls.
                         crop_set = generate_all_sns_crops(prepared, model=MODEL_PRESETS["lite"])
                         for key, box in crop_set.model_dump(mode="json").items():
-                            if key in ("best_ratio_key", "best_ratio_reason", "original_tip") or key == ratio_key or not cached_advice.get(key):
-                                cached_advice[key] = box
+                            cached_advice[key] = box
                         crop_dict = cached_advice[ratio_key]
                     advice_json = json.dumps(cached_advice, ensure_ascii=False)
 
