@@ -337,6 +337,7 @@ def load_template_file(rel_path: str) -> str:
 # Backward compatibility for existing tests checking strings in DASHBOARD_HTML:
 _INDEX_HTML = load_template_file("templates/index.html")
 _DASHBOARD_CSS = load_template_file("static/dashboard.css")
+_CROP_VIEWER_JS = load_template_file("static/js/crop_viewer.js")
 _DASHBOARD_JS = load_template_file("static/dashboard.js")
 DASHBOARD_HTML = (
     _INDEX_HTML
@@ -344,6 +345,8 @@ DASHBOARD_HTML = (
     + _DASHBOARD_CSS
     + "\n</style>\n"
     + "\n<script>\n"
+    + _CROP_VIEWER_JS
+    + "\n"
     + _DASHBOARD_JS
     + "\n</script>\n"
 )
