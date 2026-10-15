@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>피규어 포토 그레이더 — Culling & Review 대시보드</title>
+<link rel="stylesheet" href="/static/dashboard.css">
+<script>
+  (function() {
+    try {
+      const saved = localStorage.getItem('theme');
+      const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      if (saved === 'dark' || (!saved && prefersDark)) {
+        document.documentElement.classList.add('darkroom');
+      }
+    } catch(e) {}
+  })();
+</script>
+</head>
+<body>
+
+<header>
+  <div class="top-bar">
+    <h1>피규어 포토 그레이더 <span>PRO GRADER</span></h1>
+    <div class="stats-bar">
+      <div>총 사진 <strong id="total-count">0</strong>장</div>
+      <div>평균 점수 <strong id="avg-score">0.0</strong>점</div>
+      <div>우수(7.0+) <strong id="good-count">0</strong>장</div>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;">
+      <button class="upload-btn theme-toggle-btn" id="theme-toggle-btn" style="background:#334155;" onclick="toggleTheme()" title="다크룸 모드 전환">🌙 다크룸</button>
+      <button class="upload-btn" style="background:#f59e0b;" onclick="openTournamentModal()">🏆 블라인드 토너먼트 (B-3)</button>
+      <button class="upload-btn" style="background:#0d9488;" onclick="exportAllXmp(this)">📥 라이트룸 XMP 내보내기</button>
+      <button class="upload-btn" style="background:#475569;" onclick="openUsageModal()">📊 API 사용량</button>
+      <button class="upload-btn" onclick="openUploadModal()">+ 새 사진 분석하기</button>
+    </div>
+  </div>
+</header>
+
+<main class="main-container">
+  <div class="controls">
+    <div class="filter-group">
+      <span style="font-size:0.84rem;font-weight:700;color:var(--muted)">등급:</span>
+      <button class="filter-btn active" onclick="setFilter('all', this)">전체</button>
+      <button class="filter-btn" onclick="setFilter('pro', this)">프로작가급 (9.0+)</button>
+      <button class="filter-btn" onclick="setFilter('very_good', this)">매우 우수 (8.0+)</button>
+      <button class="filter-btn" onclick="setFilter('good', this)">우수 (7.0+)</button>
+      <button class="filter-btn" onclick="setFilter('normal', this)">보통 스냅 (5.0~6.9)</button>
+    </div>
+    <div class="filter-group" style="margin-top:8px;">
+      <span style="font-size:0.84rem;font-weight:700;color:var(--muted)">피규어 유형:</span>
+      <button class="filter-btn active cat-btn" onclick="setCatFilter('all', this)">전체 유형</button>
+      <button class="filter-btn cat-btn" onclick="setCatFilter('접사/디테일', this)">🔍 접사/디테일</button>
+      <button class="filter-btn cat-btn" onclick="setCatFilter('일상/야외 스냅', this)">🌿 일상/야외 스냅</button>
+      <button class="filter-btn cat-btn" onclick="setCatFilter('스튜디오 연출/디오라마', this)">🎬 스튜디오 연출</button>
+      <button class="filter-btn cat-btn" onclick="setCatFilter('일반 피규어 촬영', this)">📷 일반 촬영</button>
+    </div>
+    <div class="filter-group" style="margin-top:8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+      <span style="font-size:0.84rem;font-weight:700;color:var(--muted)">연사 선별(B-1):</span>
+      <button class="filter-btn active burst-btn" onclick="setBurstFilter('all', this)">전체 컷</button>
+      <button class="filter-btn burst-btn" onclick="setBurstFilter('best_only', this)" style="color:#065f46;">👑 Best Pick만 보기</button>
+      <button class="filter-btn burst-btn" onclick="setBurstFilter('stack', this)" style="color:#0369a1;">🗂️ 연사 묶어보기 (Stack)</button>
+      <div style="display:inline-flex;align-items:center;gap:4px;margin-left:8px;background:#f1f5f9;padding:3px 10px;border-radius:8px;border:1px solid #e2e8f0;">
+        <span style="font-size:0.75rem;font-weight:700;color:#64748b;">연사 감도:</span>
+        <select id="burst-dist-select" class="select-input" style="padding:1px 6px;font-size:0.75rem;height:auto;border:none;background:transparent;font-weight:700;color:#0284c7;cursor:pointer;" onchange="changeBurstSensitivity(this.value)">
+          <option value="12">엄격 (삼각대 연사: 12)</option>
+          <option value="15" selected>표준 (핸드헬드 연사: 15 - 권장)</option>
+          <option value="18">여유 (유사 앵글 묶기: 18)</option>
+          <option value="20">최대 (동일 피규어 넓게: 20)</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="filter-group tag-filter-group" style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);width:100%;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+      <span style="font-size:0.84rem;font-weight:700;color:var(--muted)">🏷️ 태그 필터:</span>
+      
+      <div class="tag-logic-toggle" style="display:inline-flex;background:#e2e8f0;border-radius:8px;padding:2px;gap:2px;">
+        <button id="tag-logic-and" class="toggle-logic-btn active" onclick="setTagLogic('AND')" title="선택한 모든 태그를 만족하는 사진만 표시">AND (모두 포함)</button>
+        <button id="tag-logic-or" class="toggle-logic-btn" onclick="setTagLogic('OR')" title="선택한 태그 중 하나라도 있는 사진 표시">OR (하나라도 포함)</button>
+      </div>
+
+      <select id="tag-select-box" class="select-input" onchange="onTagSelectChange(this)" style="max-width:210px;font-size:0.78rem;padding:3px 6px;">
+        <option value="">+ 전체 태그 목록에서 선택...</option>
+      </select>
+
+      <div id="quick-popular-tags" style="display:inline-flex;gap:4px;flex-wrap:wrap;align-items:center;"></div>
+
+      <button id="btn-clear-tag-filter" class="filter-btn" style="display:none;padding:2px 8px;font-size:0.74rem;color:#ef4444;border-color:#fca5a5;background:#fff5f5;" onclick="clearAllSelectedTags()">✕ 태그 해제</button>
+    </div>
+
+    <div id="active-tags-container" style="display:none;width:100%;margin-top:4px;gap:6px;align-items:center;flex-wrap:wrap;">
+      <span style="font-size:0.75rem;font-weight:700;color:#0284c7;">적용 중인 태그:</span>
+      <div id="active-tags-pills" style="display:inline-flex;gap:4px;flex-wrap:wrap;"></div>
+    </div>
+
+    <div style="display:flex;gap:12px;align-items:center;width:100%;justify-content:space-between;margin-top:4px;flex-wrap:wrap;">
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span style="font-size:0.84rem;font-weight:700;color:var(--muted)">정렬:</span>
+        <select class="select-input" id="sort-select" onchange="renderGallery()">
+          <option value="score_desc">AI 점수 높은 순</option>
+          <option value="score_asc">AI 점수 낮은 순</option>
+          <option value="user_score_desc">👤 내 점수 높은 순</option>
+          <option value="user_score_asc">👤 내 점수 낮은 순</option>
+          <option value="gap_desc">⚖️ AI와 점수 차이 큰 순</option>
+          <option value="newest">최신 분석 순</option>
+          <option value="name">파일명 순</option>
+        </select>
+      </div>
+
+      <div class="view-tabs">
+        <button class="tab-btn active" id="tab-gallery" onclick="switchView('gallery')">갤러리 뷰</button>
+        <button class="tab-btn" id="tab-compare" onclick="switchView('compare')">1:1 비교(Culling)</button>
+        <button class="tab-btn" id="tab-tournament" onclick="openTournamentModal()" style="background:#fef3c7;border-color:#fde68a;color:#b45309;font-weight:700;">🏆 블라인드 토너먼트</button>
+        <button class="tab-btn" id="tab-insights" onclick="switchView('insights')">📊 태그 인사이트</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Gallery View -->
+  <div class="grid" id="gallery-grid"></div>
+
+  <!-- Comparison View -->
+  <div class="compare-container" id="compare-view">
+    <div class="compare-selectors">
+      <div>
+        <label style="font-weight:700;font-size:0.88rem;display:block;margin-bottom:6px;">비교 사진 A (기준컷)</label>
+        <select class="select-input" id="comp-a-select" style="width:100%" onchange="updateComparison()"></select>
+      </div>
+      <div>
+        <label style="font-weight:700;font-size:0.88rem;display:block;margin-bottom:6px;">비교 사진 B (비교컷)</label>
+        <select class="select-input" id="comp-b-select" style="width:100%" onchange="updateComparison()"></select>
+      </div>
+    </div>
+    <div class="compare-columns" id="compare-content"></div>
+  </div>
+
+  <!-- Tag Insights View (방안 A) -->
+  <div class="insights-container" id="insights-view" style="display:none;margin-top:22px;"></div>
+</main>
+
+<!-- Detail Modal -->
+<div class="modal-overlay" id="detail-modal" onclick="closeModal(event)">
+  <div class="modal-content" onclick="event.stopPropagation()">
+    <button class="close-btn" onclick="closeDetailModal()">&times;</button>
+    <div class="modal-grid" id="modal-body"></div>
+  </div>
+</div>
+
+<!-- Tournament Modal (B-3 Blind Culling) -->
+<div class="tour-modal-overlay" id="tournament-modal" onclick="closeTournamentModal(event)">
+  <div class="tour-modal-content" onclick="event.stopPropagation()">
+    <div class="tour-header">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <span style="font-size:1.6rem;">🏆</span>
+        <div>
+          <h3 style="margin:0;font-size:1.15rem;font-weight:800;color:#f8fafc;">블라인드 토너먼트 선별 (Blind Culling)</h3>
+          <span style="font-size:0.78rem;color:#94a3b8;" id="tour-subtitle">선입견 없이 순수 시각적 느낌만으로 최고의 A컷을 토너먼트로 선별합니다.</span>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:14px;">
+        <span id="tour-round-badge" style="background:#0284c7;color:white;font-weight:700;font-size:0.8rem;padding:4px 12px;border-radius:999px;display:none;"></span>
+        <button class="close-btn" style="position:static;color:#94a3b8;" onclick="closeTournamentModal()">&times;</button>
+      </div>
+    </div>
+    <div id="tour-progress-wrap" style="height:4px;background:#1e293b;width:100%;display:none;">
+      <div id="tour-progress-bar" style="height:100%;width:0%;background:linear-gradient(90deg, #38bdf8, #818cf8);transition:width 0.3s ease;"></div>
+    </div>
+    <div class="tour-body" id="tour-body-container"></div>
+  </div>
+</div>
+
+<!-- API Usage Modal -->
+<div class="modal-overlay" id="usage-modal" onclick="closeUsageModal(event)">
+  <div class="modal-content" style="max-width:860px;max-height:88vh;overflow-y:auto;" onclick="event.stopPropagation()">
+    <button class="close-btn" onclick="closeUsageModal()">&times;</button>
+    <div style="display:flex;align-items:center;gap:12px;margin:0 0 6px;">
+      <h2 style="margin:0;">📊 Gemini API 사용량</h2>
+      <button class="upload-btn" style="padding:4px 12px;font-size:0.78rem;background:#475569;" onclick="refreshUsageStats()">새로고침</button>
+    </div>
+    <p style="color:var(--muted);font-size:0.85rem;margin:0 0 14px;">호출 횟수, 재시도/폴백, 토큰, 소요 시간을 기능별로 집계합니다. (중복 업로드로 생략된 호출은 집계되지 않습니다)</p>
+    <div id="usage-body"></div>
+  </div>
+</div>
+
+<!-- Upload Modal -->
+<div class="modal-overlay" id="upload-modal" onclick="closeUploadModal(event)">
+  <div class="modal-content" style="max-width:550px;" onclick="event.stopPropagation()">
+    <button class="close-btn" onclick="closeUploadModal()">&times;</button>
+    <h2 style="margin:0 0 10px;">새 피규어 사진 분석</h2>
+    <p style="color:var(--muted);font-size:0.88rem;margin:0 0 16px;">사진 파일을 선택하면 피규어 비평 기준에 따라 자동 분석 후 SQLite에 저장합니다.</p>
+    
+    <label style="font-weight:700;font-size:0.84rem;display:block;margin-bottom:6px;">분석 모델 티어 선택:</label>
+    <select class="select-input" id="upload-tier" style="width:100%;margin-bottom:12px;">
+      <option value="lite" selected>Flash-Lite 3.1 / 3.5 (초고속 스크리닝 / 기본값)</option>
+      <option value="standard">Flash-Lite 3.5 (균형 잡힌 표준 화질 평가)</option>
+      <option value="pro">Flash 3.8 (고화질 심층 비평 / 과부하시 자동 전환)</option>
+    </select>
+
+    <label style="font-weight:700;font-size:0.84rem;display:block;margin-bottom:6px;">피규어 촬영 세부 유형:</label>
+    <select class="select-input" id="upload-category" style="width:100%;margin-bottom:14px;">
+      <option value="auto">자동 판별 (Gemini가 사진을 분석하여 자동 분류)</option>
+      <option value="macro">🔍 접사/디테일 (도색, 접합선, 데칼 초점 심사)</option>
+      <option value="snap">🌿 일상/야외 스냅 (배경 조화, 자연광, 생활감 심사)</option>
+      <option value="staging">🎬 스튜디오 연출/디오라마 (드라마틱 조명, 콘트라스트)</option>
+      <option value="general">📷 일반 피규어 촬영 (기본 전시/조형 중심)</option>
+    </select>
+
+    <label style="display:flex;align-items:flex-start;gap:8px;font-size:0.84rem;margin-bottom:14px;cursor:pointer;">
+      <input type="checkbox" id="upload-force" style="margin-top:3px;">
+      <span><strong>이미 분석된 사진도 다시 분석</strong><br><span style="color:var(--muted);font-size:0.78rem;">체크하지 않으면 같은 파일은 API 호출 없이 기존 결과를 재사용합니다. 체크하면 새로 호출하며 별도 기록으로 추가됩니다.</span></span>
+    </label>
+
+    <div class="drop-zone" id="drop-zone" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)">
+      <div style="font-size:2.2rem;margin-bottom:6px;">📁</div>
+      <strong style="font-size:0.95rem;">사진 파일(들) 또는 폴더를 드래그하여 놓으세요</strong>
+      <div style="font-size:0.78rem;margin:6px 0 14px;color:var(--muted)">폴더를 통째로 놓으면 하위 사진까지 자동 탐색 (JPG, PNG, WEBP, MPO 지원)</div>
+      <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;" onclick="event.stopPropagation()">
+        <button type="button" class="upload-btn" style="padding:7px 14px;font-size:0.82rem;" onclick="document.getElementById('file-input-multi').click()">📸 여러 사진 선택</button>
+        <button type="button" class="upload-btn" style="background:#0d9488;padding:7px 14px;font-size:0.82rem;" onclick="document.getElementById('folder-input').click()">📁 폴더 통째로 선택</button>
+      </div>
+      <input type="file" id="file-input-multi" style="display:none" accept="image/jpeg,image/png,image/webp" multiple onchange="handleFilesSelect(this.files)">
+      <input type="file" id="folder-input" style="display:none" webkitdirectory directory multiple onchange="handleFilesSelect(this.files)">
+    </div>
+
+    <div id="progress-container" style="display:none;margin-top:16px;">
+      <div style="display:flex;justify-content:space-between;font-size:0.84rem;margin-bottom:6px;">
+        <span id="progress-text" style="font-weight:700;color:var(--navy);">분석 준비 중...</span>
+        <span id="progress-percent" style="font-weight:700;color:var(--blue);">0%</span>
+      </div>
+      <div style="background:#e2e8f0;border-radius:999px;height:10px;overflow:hidden;">
+        <div id="progress-bar" style="background:linear-gradient(90deg, #3b82f6, #0d9488);height:100%;width:0%;transition:width 0.2s;"></div>
+      </div>
+      <div id="progress-current-file" style="font-size:0.78rem;color:var(--muted);margin-top:6px;overflow-wrap:anywhere;"></div>
+    </div>
+    <div id="upload-status" style="font-size:0.88rem;font-weight:600;text-align:center;margin-top:12px;"></div>
+  </div>
+</div>
+
+<script src="/static/dashboard.js"></script>
+</body>
+</html>

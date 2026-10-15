@@ -783,8 +783,8 @@ class PhotoAnalyzerTests(unittest.TestCase):
         self.assertEqual(cfg["h"], 1)
 
         # 2. Test calculateExactCrop in node against tall portrait photo
-        with open("photo_dashboard.py", encoding="utf-8") as f:
-            code = f.read()
+        js_file = Path("static/dashboard.js")
+        code = js_file.read_text(encoding="utf-8") if js_file.is_file() else Path("photo_dashboard.py").read_text(encoding="utf-8")
         func_body = "function calculateExactCrop" + code.split("function calculateExactCrop")[1].split("function selectCropRatio")[0]
         node_script = """
         const TARGET_CROP_RATIOS = {
