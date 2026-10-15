@@ -1589,7 +1589,7 @@ function renderCategoryTagRow(t) {
 function populateCompareSelects() {
   const selA = document.getElementById('comp-a-select');
   const selB = document.getElementById('comp-b-select');
-  const options = allData.map(d => `<option value="${d.id}">${d.filename} (${d.final_score.toFixed(1)}점 - ${d.grade})</option>`).join('');
+  const options = allData.map(d => `<option value="${d.id}">${escapeHtml(d.filename)} (${d.final_score.toFixed(1)}점 - ${escapeHtml(d.grade)})</option>`).join('');
   selA.innerHTML = options;
   selB.innerHTML = options;
   if (allData.length > 1) selB.selectedIndex = 1;
