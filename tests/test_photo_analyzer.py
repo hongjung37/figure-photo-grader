@@ -985,6 +985,61 @@ class PhotoAnalyzerTests(unittest.TestCase):
             self.assertIn("social_caption", caption_p)
             self.assertIn("hashtags", caption_p)
 
+    def test_db_repository_modularization(self) -> None:
+        import db
+        from db import repository
+
+        # 1. Verify re-exports and module identity
+        self.assertIs(photo_dashboard.find_existing_analysis, repository.find_existing_analysis)
+        self.assertIs(photo_dashboard.ensure_db_columns, repository.ensure_db_columns)
+        self.assertIs(photo_dashboard.get_all_analyses, repository.get_all_analyses)
+        self.assertIs(photo_dashboard.get_tag_stats, repository.get_tag_stats)
+
+        # 2. Test CRUD workflow using db.repository
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            db_path = Path(temporary_directory) / "test_repo.sqlite3"
+            image_path = Path(temporary_directory) / "repo_img.jpg"
+            self._make_jpeg(image_path)
+            photo = prepare_photo(image_path)
+            rec_id = save_analysis(db_path, photo, "test-model", self._valid_analysis())
+
+            # get_analysis_row_by_id
+            row = db.get_analysis_row_by_id(db_path, rec_id)
+            self.assertIsNotNone(row)
+            self.assertEqual(row["source_filename"], "repo_img.jpg")
+
+            # get_photo_thumbnail_and_hash
+            thumb_info = db.get_photo_thumbnail_and_hash(db_path, rec_id)
+            self.assertIsNotNone(thumb_info)
+            self.assertEqual(thumb_info[1], "repo_img.jpg")
+            self.assertEqual(thumb_info[2], photo.sha256)
+
+            # update_review_status
+            db.update_review_status(db_path, rec_id, "선택완료")
+            updated_row = db.get_analysis_row_by_id(db_path, rec_id)
+            self.assertEqual(updated_row["review_status"], "선택완료")
+
+            # update_user_score
+            db.update_user_score(db_path, rec_id, 9.5)
+            updated_row = db.get_analysis_row_by_id(db_path, rec_id)
+            self.assertEqual(updated_row["user_score"], 9.5)
+
+            # update_lr_advice & update_sns_advice
+            db.update_lr_advice(db_path, rec_id, '{"preset": "vivid"}')
+            db.update_sns_advice(db_path, rec_id, '{"best_ratio_key": "original"}')
+            updated_row = db.get_analysis_row_by_id(db_path, rec_id)
+            self.assertEqual(updated_row["lr_advice_json"], '{"preset": "vivid"}')
+            self.assertEqual(updated_row["sns_advice_json"], '{"best_ratio_key": "original"}')
+
+            # get_analyses_and_tags_for_export
+            export_rows, export_tags = db.get_analyses_and_tags_for_export(db_path)
+            self.assertEqual(len(export_rows), 1)
+
+            # delete_analyses
+            deleted = db.delete_analyses(db_path, [rec_id])
+            self.assertEqual(deleted, [rec_id])
+            self.assertIsNone(db.get_analysis_row_by_id(db_path, rec_id))
+
 
 if __name__ == "__main__":
     unittest.main()
