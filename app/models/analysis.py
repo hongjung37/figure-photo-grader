@@ -140,6 +140,33 @@ FOCUS_STATUS_OPTIONS = (
 )
 
 
+class CrossCheckOpinion(BaseModel):
+    """Independent second opinion / critique provided by a secondary LLM (e.g. OpenAI GPT-6 Luna)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    model: str = Field(default="gpt-6-luna", description="보조 비평 모델명 (예: gpt-6-luna)")
+    score: float = Field(description="보조 모델이 부여한 종합 점수 (0.0~10.0)")
+    reason: str = Field(description="보조 모델의 종합 비평 및 총평")
+    strengths: list[str] = Field(default_factory=list, description="보조 모델이 본 주요 강점")
+    improvements: list[str] = Field(default_factory=list, description="보조 모델이 제안하는 개선점")
+    composition_critique: str = Field(default="", description="구도 및 프레이밍 비평")
+    lighting_critique: str = Field(default="", description="조명 및 명암 비평")
+
+
+class OpenAICrossCheck(BaseModel):
+    """Lightweight structured output model for OpenAI second-opinion critique (no aesthetic tags)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    score: float = Field(description="피규어 사진에 대한 10점 만점 기준 종합 평가 점수 (0.0 ~ 10.0)")
+    reason: str = Field(description="종합 비평 및 총평 (Gemini와 독립적인 관점의 평가 총평)")
+    strengths: list[str] = Field(description="사진의 주요 장점 (2~3개)")
+    improvements: list[str] = Field(description="사진의 단점 및 촬영 개선점 (2~3개)")
+    composition_critique: str = Field(description="구도/프레이밍에 대한 비평 ([장점]과 [단점] 구분)")
+    lighting_critique: str = Field(description="조명/노출/명암에 대한 비평 ([장점]과 [단점] 구분)")
+
+
 class PhotoAnalysis(BaseModel):
     """Strict JSON model returned by Gemini and stored in SQLite."""
 
@@ -176,6 +203,10 @@ class PhotoAnalysis(BaseModel):
     aesthetic_tags: AestheticTags = Field(
         default_factory=AestheticTags.empty,
         description="시각적 근거에 기반한 범주별 미학 태그",
+    )
+    cross_check_opinion: CrossCheckOpinion | None = Field(
+        default=None,
+        description="크로스 체크/앙상블 시 보조 LLM의 독립적인 평가 의견 (태그/점수 평균 대신 추가 의견으로 제공)",
     )
 
     @classmethod

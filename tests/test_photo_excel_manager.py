@@ -184,7 +184,7 @@ class PhotoExcelManagerTests(unittest.TestCase):
     def test_export_includes_the_expected_analysis_fields(self) -> None:
         self.assertEqual(
             set(ANALYSIS_HEADERS.values()),
-            set(PhotoAnalysis.model_fields) - {"aesthetic_tags"},
+            set(PhotoAnalysis.model_fields) - {"aesthetic_tags", "cross_check_opinion"},
         )
         self.assertEqual(set(AESTHETIC_TAG_HEADERS.values()), set(AestheticTags.model_fields))
 

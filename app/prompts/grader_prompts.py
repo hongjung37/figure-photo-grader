@@ -16,17 +16,29 @@ from app.models.analysis import (
 )
 
 
-def build_grader_prompt(photo: Any, category_hint: str | None = None) -> str:
-    """Build the prompt for Gemini figure photo evaluation."""
+def build_grader_prompt(
+    photo: Any,
+    category_hint: str | None = None,
+    compact_tags: bool = False,
+) -> str:
+    """Build the prompt for figure photo evaluation."""
     safe_exif = getattr(photo, "safe_exif", {})
     camera_settings = json.dumps(safe_exif, ensure_ascii=False, sort_keys=True)
     if not safe_exif:
         camera_settings = "{} (사용 가능한 안전한 EXIF 촬영 설정 없음)"
 
-    tag_taxonomy = "\n".join(
-        f"- {category_key} ({AESTHETIC_TAG_CATEGORIES[category_key]}): {', '.join(options)}"
-        for category_key, options in AESTHETIC_TAG_OPTIONS.items()
-    )
+    if compact_tags:
+        tag_section = (
+            "viewpoint(시점), composition_space(구도·공간), pose_gaze(포즈·시선), mood(분위기), "
+            "subject_background(피사체-배경), light_expression(빛 표현), color_impression(색조 인상), "
+            "narrative_implication(이야기 암시)의 8개 범주에 대해, "
+            "응답 JSON 스키마(aesthetic_tags)에 정의된 허용 어휘 목록 중에서 적합한 태그를 0~3개(필수 항목은 1~3개) 정확히 선택하세요."
+        )
+    else:
+        tag_section = "키와 허용 어휘는 다음과 같습니다:\n" + "\n".join(
+            f"- {category_key} ({AESTHETIC_TAG_CATEGORIES[category_key]}): {', '.join(options)}"
+            for category_key, options in AESTHETIC_TAG_OPTIONS.items()
+        )
 
     category_instruction = ""
     if category_hint and category_hint in FIGURE_CATEGORIES:
@@ -96,8 +108,8 @@ figure_category 값에 반드시 '{cat_info['label']}'을 입력하고, 아래 �
 - viewpoint(시점)는 촬영 방향을 판별할 수 있을 때 정면·측면·후면·사선 등을 선택하고, 높이/시점도 함께 표현할 수 있습니다.
 - pose_gaze(포즈·시선)는 인물이나 동물 등 해당 피사체가 보일 때만 적용하세요.
 - narrative_implication(이야기 암시)은 보이는 단서에 한정하고 인물의 신원·관계·사건을 단정하지 마세요.
-- 모든 키를 포함한 객체로 반환하세요. 키와 허용 어휘는 다음과 같습니다:
-{tag_taxonomy}
+- 모든 키를 포함한 객체로 반환하세요.
+{tag_section}
 
 모든 점수는 0.0~10.0 범위의 숫자로 작성하세요. 최종 점수는 네 항목을 기계적으로 단순 산술평균하지 말고 전체 인상과 완성도를 위 점수 기준에 맞춰 반영하세요. EXIF가 없거나 불완전하면 추정하지 말고 이미지에서 확인되는 내용만 평가하세요. 답변의 텍스트 값은 한국어로 작성하세요.
 
@@ -114,6 +126,36 @@ figure_category 값에 반드시 '{cat_info['label']}'을 입력하고, 아래 �
 """
 
 
+def build_cross_check_prompt(
+    photo: Any,
+    category_hint: str | None = None,
+) -> str:
+    """Build lightweight figure photo critique prompt for OpenAI cross-check second opinion (no aesthetic tags)."""
+    safe_exif = getattr(photo, "safe_exif", {})
+    camera_settings = json.dumps(safe_exif, ensure_ascii=False, sort_keys=True)
+    if not safe_exif:
+        camera_settings = "{} (사용 가능한 안전한 EXIF 촬영 설정 없음)"
+
+    category_info = ""
+    if category_hint and category_hint in FIGURE_CATEGORIES:
+        cat = FIGURE_CATEGORIES[category_hint]
+        category_info = f"\n[지정된 촬영 유형: {cat['label']}]\n- 특화 심사 중점: {cat['focus']}\n"
+
+    return f"""당신은 피규어 사진(Figure Photography)을 객관적이고 엄격하게 비평하는 전문 사진 비평가입니다.
+제공된 사진을 시각적으로 면밀히 관찰하고 피규어 사진으로서의 완성도를 심사하여 독립적인 2차 평가 의견(Second Opinion / Cross-Check)을 제시하세요.
+{category_info}
+[핵심 심사 원칙: 솔직하고 냉정한 비평]
+- 과도한 호의나 칭찬을 지양하고, 구도·조명·색감·디테일 표현의 강점뿐만 아니라 아쉬운 점과 한계를 명확히 짚어주세요.
+- composition_critique와 lighting_critique는 반드시 '[장점]'과 '[단점]'을 명확히 구분하여 서술하세요.
+- score는 10점 만점 척도(7: 우수, 8: 매우 우수, 9: 프로/전문가급, 5~6: 보통 스냅)를 엄격히 적용하여 책정하세요.
+- 태그 분류는 필요하지 않으며, 순수 시각적 비평과 촬영자를 위한 건설적 조언에 집중하세요.
+- 한국어로 작성하세요.
+
+촬영 관련 안전 EXIF:
+{camera_settings}
+"""
+
+
 _build_prompt = build_grader_prompt
 
-__all__ = ["build_grader_prompt", "_build_prompt"]
+__all__ = ["build_grader_prompt", "_build_prompt", "build_cross_check_prompt"]

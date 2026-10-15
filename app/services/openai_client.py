@@ -16,11 +16,14 @@ from openai import OpenAI
 from app.config import (
     DEFAULT_OPENAI_MODEL,
     ENV_FILE_PATH,
+    OPENAI_IMAGE_MAX_EDGE,
+    OPENAI_IMAGE_QUALITY,
     OPENAI_MODEL_PRESETS,
 )
-from app.models.analysis import PhotoAnalysis
+from app.models.analysis import OpenAICrossCheck, PhotoAnalysis
 from app.models.lightroom import LightroomAdvice
 from app.prompts import (
+    build_cross_check_prompt,
     build_grader_prompt,
     build_lightroom_prompt,
 )
@@ -38,25 +41,31 @@ MAX_CONCURRENT_OPENAI_CALLS = 3
 _OPENAI_SEMAPHORE = threading.BoundedSemaphore(MAX_CONCURRENT_OPENAI_CALLS)
 
 
-def _get_client(api_key: str) -> OpenAI:
-    """Return a process-wide OpenAI client (cached per API key)."""
+def _get_client(api_key: str, base_url: str | None = None) -> OpenAI:
+    """Return a process-wide OpenAI client (cached per API key and base_url)."""
+    clean_key = api_key.strip()
+    resolved_base_url = (base_url or os.environ.get("OPENAI_BASE_URL", "")).strip() or None
+    cache_key = f"{clean_key}:{resolved_base_url}"
     with _CLIENT_LOCK:
-        client = _CLIENT_CACHE.get(api_key)
+        client = _CLIENT_CACHE.get(cache_key)
         if client is None:
-            client = OpenAI(api_key=api_key)
-            _CLIENT_CACHE[api_key] = client
+            kwargs: dict[str, Any] = {"api_key": clean_key}
+            if resolved_base_url:
+                kwargs["base_url"] = resolved_base_url
+            client = OpenAI(**kwargs)
+            _CLIENT_CACHE[cache_key] = client
         return client
 
 
 def _resolve_api_key(explicit_key: str | None = None) -> str:
     """Resolve OpenAI API key from arguments or .env / environment variables."""
     if explicit_key:
-        return explicit_key
+        return explicit_key.strip()
     load_dotenv(dotenv_path=_get_env_file_path(), override=False)
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY를 .env 파일 또는 환경변수에 설정해 주세요.")
-    return api_key
+    return api_key.strip()
 
 
 def _format_openai_error(model: str, exc: Exception) -> RuntimeError:
@@ -68,6 +77,37 @@ def _format_openai_error(model: str, exc: Exception) -> RuntimeError:
             f"OpenAI API 할당량 초과 또는 속도 제한이 발생했습니다. 모델: {model} ({exc})"
         )
     return RuntimeError(f"OpenAI API 호출 중 오류가 발생했습니다. 모델: {model} | 내용: {exc}")
+
+
+def _prepare_openai_image_payload(
+    photo: PreparedPhoto,
+    max_edge: int = OPENAI_IMAGE_MAX_EDGE,
+) -> tuple[str, str]:
+    """Resize photo for OpenAI to reduce vision token consumption while preserving fine details."""
+    import io
+    from PIL import Image
+
+    if photo.width <= max_edge and photo.height <= max_edge:
+        b64_image = base64.b64encode(photo.upload_bytes).decode("utf-8")
+        return b64_image, photo.upload_mime_type
+
+    try:
+        img = Image.open(io.BytesIO(photo.upload_bytes))
+        img.thumbnail((max_edge, max_edge), Image.Resampling.LANCZOS)
+        if img.mode not in ("RGB", "RGBA"):
+            img = img.convert("RGB")
+        elif img.mode == "RGBA":
+            bg = Image.new("RGB", img.size, (255, 255, 255))
+            bg.paste(img, mask=img.split()[3])
+            img = bg
+
+        out = io.BytesIO()
+        img.save(out, format="JPEG", quality=OPENAI_IMAGE_QUALITY, optimize=True)
+        b64_image = base64.b64encode(out.getvalue()).decode("utf-8")
+        return b64_image, "image/jpeg"
+    except Exception:
+        b64_image = base64.b64encode(photo.upload_bytes).decode("utf-8")
+        return b64_image, photo.upload_mime_type
 
 
 def _call_openai_structured(
@@ -87,14 +127,14 @@ def _call_openai_structured(
     def _elapsed_ms() -> int:
         return int((time.perf_counter() - t0) * 1000)
 
-    # Build multimodal content payload
+    # Build multimodal content payload with optimized image resolution
     content: list[dict[str, Any]] = [{"type": "text", "text": prompt_text}]
     if photo is not None:
-        b64_image = base64.b64encode(photo.upload_bytes).decode("utf-8")
+        b64_image, mime_type = _prepare_openai_image_payload(photo)
         content.append({
             "type": "image_url",
             "image_url": {
-                "url": f"data:{photo.upload_mime_type};base64,{b64_image}",
+                "url": f"data:{mime_type};base64,{b64_image}",
             },
         })
 
@@ -104,17 +144,31 @@ def _call_openai_structured(
         attempts = attempt
         try:
             with _OPENAI_SEMAPHORE:
-                completion = client.beta.chat.completions.parse(
-                    model=model,
-                    messages=messages,
-                    response_format=response_model,
-                )
+                try:
+                    completion = client.beta.chat.completions.parse(
+                        model=model,
+                        messages=messages,
+                        response_format=response_model,
+                    )
+                    choice = completion.choices[0]
+                    if getattr(choice.message, "refusal", None):
+                        raise RuntimeError(f"OpenAI가 요청을 거부했습니다: {choice.message.refusal}")
+                    parsed = choice.message.parsed
+                except Exception as parse_err:
+                    # Do not swallow auth or quota errors
+                    err_s = str(parse_err)
+                    if any(c in err_s for c in ("401", "invalid_api_key", "insufficient_quota")):
+                        raise
+                    # Fallback to standard chat completions with JSON mode for custom gateways
+                    completion = client.chat.completions.create(
+                        model=model,
+                        messages=messages,
+                        response_format={"type": "json_object"},
+                    )
+                    choice = completion.choices[0]
+                    raw_content = choice.message.content or ""
+                    parsed = response_model.model_validate_json(raw_content)
 
-            choice = completion.choices[0]
-            if getattr(choice.message, "refusal", None):
-                raise RuntimeError(f"OpenAI가 요청을 거부했습니다: {choice.message.refusal}")
-
-            parsed = choice.message.parsed
             if parsed is None:
                 raise RuntimeError(f"OpenAI가 {task_desc} 정형 결과를 생성하지 못했습니다.")
 
@@ -176,6 +230,28 @@ def _call_openai_structured(
     raise RuntimeError(f"{task_desc} 처리 중 알 수 없는 오류로 완료하지 못했습니다.")
 
 
+def cross_check_with_openai(
+    photo: PreparedPhoto,
+    model: str = DEFAULT_OPENAI_MODEL,
+    category_hint: str | None = None,
+    api_key: str | None = None,
+) -> OpenAICrossCheck:
+    """Generate a lightweight second-opinion critique from OpenAI without aesthetic tags."""
+    key = _resolve_api_key(api_key)
+    client = _get_client(key)
+    resolved_model = OPENAI_MODEL_PRESETS.get(model, model)
+    prompt_text = build_cross_check_prompt(photo, category_hint=category_hint)
+
+    return _call_openai_structured(
+        client=client,
+        model=resolved_model,
+        prompt_text=prompt_text,
+        photo=photo,
+        response_model=OpenAICrossCheck,
+        task_desc="OpenAI 크로스 체크 비평",
+    )
+
+
 def analyze_with_openai(
     photo: PreparedPhoto,
     model: str = DEFAULT_OPENAI_MODEL,
@@ -186,7 +262,7 @@ def analyze_with_openai(
     key = _resolve_api_key(api_key)
     client = _get_client(key)
     resolved_model = OPENAI_MODEL_PRESETS.get(model, model)
-    prompt_text = build_grader_prompt(photo, category_hint=category_hint)
+    prompt_text = build_grader_prompt(photo, category_hint=category_hint, compact_tags=True)
 
     return _call_openai_structured(
         client=client,
