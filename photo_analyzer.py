@@ -44,6 +44,7 @@ MODEL_PRESETS = {
 DEFAULT_TIER = "lite"
 DEFAULT_MODEL = MODEL_PRESETS[DEFAULT_TIER]
 DEFAULT_DB_PATH = Path(__file__).resolve().with_name("photo_analysis.sqlite3")
+ORIGINALS_DIR_NAME = "photo_originals"
 ENV_FILE_PATH = Path(__file__).resolve().with_name(".env")
 SUPPORTED_FORMATS = {
     "JPEG": "image/jpeg",
@@ -258,6 +259,28 @@ class PreparedPhoto:
     upload_mime_type: str
     thumbnail_bytes: bytes | None = None
     dhash: int | None = None
+
+
+def get_original_photo_path(db_path: str | Path, sha256: str, mime_type: str) -> Path:
+    """Return the managed high-resolution path for a stored, privacy-filtered upload."""
+    suffix = {
+        "image/jpeg": ".jpg",
+        "image/png": ".png",
+        "image/webp": ".webp",
+    }.get(mime_type)
+    if suffix is None:
+        raise ValueError(f"지원하지 않는 업로드 MIME 형식입니다: {mime_type}")
+    return Path(db_path).expanduser().parent / ORIGINALS_DIR_NAME / f"{sha256}{suffix}"
+
+
+def save_original_photo(db_path: str | Path, photo: PreparedPhoto) -> Path:
+    """Store the privacy-filtered high-resolution upload beside the SQLite database."""
+    target = get_original_photo_path(db_path, photo.sha256, photo.upload_mime_type)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(f".{target.name}.tmp")
+    temporary.write_bytes(photo.upload_bytes)
+    temporary.replace(target)
+    return target
 
 
 def _json_safe(value: Any) -> Any:
@@ -1222,6 +1245,7 @@ def save_analysis(
         )
         record_id = int(cursor.lastrowid)
         sync_analysis_tags(connection, record_id, analysis.aesthetic_tags)
+        save_original_photo(database, photo)
         return record_id
 
 

@@ -97,6 +97,8 @@ python .\photo_analyzer.py "F:\photos\" `
 
 `photo_analyses` 테이블에 파일명, SHA-256, 표시 방향 기준 크기, 형식, 모델, 개인정보를 제외한 `exif_json`, 검증된 `analysis_json`, UTC 저장 시각을 저장합니다. 미학 태그는 `analysis_json.aesthetic_tags`에도 포함되며, 집계·검색을 위해 허용 어휘를 `photo_tag_catalog`, 사진별 태그를 `photo_analysis_tags`에 정규화해 저장합니다. 같은 사진을 다시 분석하면 새 행이 추가됩니다.
 
+분석 시 Gemini 업로드에 사용하는 개인정보 필터링·재인코딩 이미지(`upload_bytes`)도 DB 옆의 `photo_originals` 폴더에 고해상도 표시용으로 보관합니다. 갤러리는 기존 `thumbnail`을 사용하고, 상세 확대와 SNS 크롭은 이 관리 이미지에서 처리합니다. 관리 이미지가 유실되면 상세/크롭 API가 DB의 썸네일로 즉시 fallback하므로 기존 기록은 계속 확인할 수 있습니다. DB를 백업하거나 다른 PC에서 대시보드를 실행할 때는 `photo_analysis.sqlite3`와 `photo_originals` 폴더를 함께 복사하세요.
+
 태그 범주는 시점, 구도·공간, 포즈·시선, 분위기, 피사체-배경 관계, 빛 표현, 색조 인상, 이야기 암시의 8가지입니다. 시점 어휘에는 정면·측면·후면·사선과 로우/하이 앵글 등이 포함됩니다. 각 범주는 이미지에서 확인되는 태그만 최대 3개 기록하며, 해당되지 않거나 근거가 부족하면 빈 배열로 둡니다.
 
 ## 점수 평가 척도 및 비평 기준

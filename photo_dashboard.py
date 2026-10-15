@@ -38,6 +38,7 @@ from photo_analyzer import (
     get_usage_stats,
     hamming_distance,
     prepare_photo,
+    get_original_photo_path,
     save_analysis,
     set_usage_log_db,
 )
@@ -1487,7 +1488,7 @@ function openDetailModal(id) {
 
     <div>
       <div class="zoom-wrap" id="zoom-wrap-container" onclick="toggleZoom(event)" onmousemove="panZoom(event)">
-        <img class="detail-img" id="detail-modal-img" src="/api/image/${item.id}" alt="${item.filename}" onload="repositionCropOverlay()">
+        <img class="detail-img" id="detail-modal-img" src="/api/image/${item.id}?original=1" alt="${item.filename}" onload="repositionCropOverlay()">
         <div class="crop-box-overlay" id="crop-box-overlay">
           <span class="crop-overlay-badge" id="crop-overlay-badge"></span>
         </div>
@@ -2126,7 +2127,7 @@ async function downloadCroppedImage(ratioKey, recordId) {
 
   const img = new Image();
   img.crossOrigin = 'anonymous';
-  img.src = `/api/image/${recordId}`;
+  img.src = `/api/image/${recordId}?original=1`;
   await new Promise((resolve, reject) => {
     img.onload = resolve;
     img.onerror = reject;
@@ -3643,13 +3644,26 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
         if path.startswith("/api/image/"):
             try:
                 record_id = int(path.split("/")[-1])
+                wants_original = parse_qs(parsed.query).get("original", ["0"])[0].lower() in ("1", "true", "yes")
                 from contextlib import closing
                 with closing(sqlite3.connect(self.db_path)) as conn:
                     row = conn.execute(
-                        "SELECT thumbnail, source_filename FROM photo_analyses WHERE id = ?", (record_id,)
+                        "SELECT thumbnail, source_filename, sha256 FROM photo_analyses WHERE id = ?", (record_id,)
                     ).fetchone()
                     if row:
-                        thumb_blob, fname = row[0], row[1]
+                        thumb_blob, fname, sha256 = row[0], row[1], row[2]
+                        if wants_original:
+                            for mime_type in ("image/jpeg", "image/png", "image/webp"):
+                                original_path = get_original_photo_path(self.db_path, sha256, mime_type)
+                                if original_path.is_file():
+                                    image_bytes = original_path.read_bytes()
+                                    self.send_response(HTTPStatus.OK)
+                                    self.send_header("Content-Type", mime_type)
+                                    self.send_header("Content-Length", str(len(image_bytes)))
+                                    self.send_header("Cache-Control", "public, max-age=86400")
+                                    self.end_headers()
+                                    self.wfile.write(image_bytes)
+                                    return
                         if thumb_blob:
                             self.send_response(HTTPStatus.OK)
                             self.send_header("Content-Type", "image/webp")
@@ -3854,8 +3868,22 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 with closing(sqlite3.connect(self.db_path)) as conn, conn:
                     conn.execute("PRAGMA foreign_keys = ON")
                     placeholders = ",".join("?" for _ in record_ids)
+                    rows = conn.execute(
+                        f"SELECT sha256 FROM photo_analyses WHERE id IN ({placeholders})",
+                        record_ids,
+                    ).fetchall()
                     conn.execute(f"DELETE FROM photo_analysis_tags WHERE analysis_id IN ({placeholders})", record_ids)
                     conn.execute(f"DELETE FROM photo_analyses WHERE id IN ({placeholders})", record_ids)
+                    remaining_hashes = {
+                        row[0]
+                        for row in conn.execute("SELECT sha256 FROM photo_analyses").fetchall()
+                    }
+                    for row in rows:
+                        if row[0] in remaining_hashes:
+                            continue
+                        for mime_type in ("image/jpeg", "image/png", "image/webp"):
+                            original_path = get_original_photo_path(self.db_path, row[0], mime_type)
+                            original_path.unlink(missing_ok=True)
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.end_headers()

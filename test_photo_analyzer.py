@@ -194,6 +194,9 @@ class PhotoAnalyzerTests(unittest.TestCase):
 
             record_id = save_analysis(database_path, photo, "test-model", self._valid_analysis())
             self.assertGreater(record_id, 0)
+            stored_originals = list((directory / photo_analyzer.ORIGINALS_DIR_NAME).iterdir())
+            self.assertEqual(len(stored_originals), 1)
+            self.assertEqual(stored_originals[0].read_bytes(), photo.upload_bytes)
 
             with closing(sqlite3.connect(database_path)) as connection:
                 row = connection.execute(
