@@ -952,6 +952,39 @@ class PhotoAnalyzerTests(unittest.TestCase):
         self.assertIn("original_tip", prompt_text)
         self.assertIn("original", prompt_text)
 
+    def test_prompts_package_modularization(self) -> None:
+        import prompts
+
+        # Verify all prompt builders exist in prompts package
+        self.assertTrue(callable(prompts.build_grader_prompt))
+        self.assertTrue(callable(prompts.build_lightroom_prompt))
+        self.assertTrue(callable(prompts.build_all_sns_crops_prompt))
+        self.assertTrue(callable(prompts.build_single_crop_prompt))
+        self.assertTrue(callable(prompts.build_sns_advice_prompt))
+        self.assertTrue(callable(prompts.build_caption_and_tags_prompt))
+
+        # Test Lightroom prompt builder
+        lr_prompt = prompts.build_lightroom_prompt()
+        self.assertIn("Adobe Lightroom 마스터", lr_prompt)
+        self.assertIn("exposure:", lr_prompt)
+
+        # Test photo-based prompt builders
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            image_path = Path(temporary_directory) / "test_prompt.jpg"
+            self._make_jpeg(image_path)
+            photo = prepare_photo(image_path)
+
+            grader_p = prompts.build_grader_prompt(photo)
+            self.assertIn("피규어 및 캐릭터 모델 사진(Figure Photography)", grader_p)
+
+            sns_adv_p = prompts.build_sns_advice_prompt(photo)
+            self.assertIn("갤러리 큐레이터이자 사진 예술 감독", sns_adv_p)
+            self.assertIn("best_ratio_key", sns_adv_p)
+
+            caption_p = prompts.build_caption_and_tags_prompt(photo)
+            self.assertIn("social_caption", caption_p)
+            self.assertIn("hashtags", caption_p)
+
 
 if __name__ == "__main__":
     unittest.main()
