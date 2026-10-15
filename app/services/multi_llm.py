@@ -13,6 +13,8 @@ from app.config import (
 )
 from app.models.analysis import (
     AestheticTags,
+    CrossCheckOpinion,
+    OpenAICrossCheck,
     PhotoAnalysis,
 )
 from app.models.lightroom import LightroomAdvice
@@ -23,68 +25,39 @@ from app.services.gemini_client import (
 from app.services.image_processor import PreparedPhoto
 from app.services.openai_client import (
     analyze_with_openai,
+    cross_check_with_openai,
     suggest_lightroom_advice_with_openai,
 )
 
 
-def _merge_analyses(g_res: PhotoAnalysis, o_res: PhotoAnalysis) -> PhotoAnalysis:
-    """Synthesize results from multiple LLMs by averaging numeric scores and combining insights."""
-    avg_composition = round((g_res.composition_score + o_res.composition_score) / 2.0, 1)
-    avg_lighting = round((g_res.lighting_score + o_res.lighting_score) / 2.0, 1)
-    avg_color = round((g_res.color_score + o_res.color_score) / 2.0, 1)
-    avg_technique = round((g_res.technique_score + o_res.technique_score) / 2.0, 1)
-    avg_final = round((g_res.final_score + o_res.final_score) / 2.0, 1)
+def _merge_analyses(g_res: PhotoAnalysis, o_res: Any, model_name: str = DEFAULT_OPENAI_MODEL) -> PhotoAnalysis:
+    """Attach OpenAI's independent critique as CrossCheckOpinion to Gemini's primary analysis without score averaging."""
+    if isinstance(o_res, OpenAICrossCheck):
+        opinion = CrossCheckOpinion(
+            model=model_name,
+            score=o_res.score,
+            reason=o_res.reason,
+            strengths=o_res.strengths,
+            improvements=o_res.improvements,
+            composition_critique=o_res.composition_critique,
+            lighting_critique=o_res.lighting_critique,
+        )
+    elif isinstance(o_res, PhotoAnalysis):
+        opinion = CrossCheckOpinion(
+            model=model_name,
+            score=o_res.final_score,
+            reason=o_res.final_reason,
+            strengths=o_res.strengths,
+            improvements=o_res.improvements,
+            composition_critique=o_res.composition_notes,
+            lighting_critique=o_res.lighting_notes,
+        )
+    elif isinstance(o_res, CrossCheckOpinion):
+        opinion = o_res
+    else:
+        opinion = None
 
-    # Merge aesthetic tags uniquely per category (limit to 3)
-    def _merge_tag_list(l1: list[str], l2: list[str]) -> list[str]:
-        merged = []
-        for item in l1 + l2:
-            if item not in merged:
-                merged.append(item)
-            if len(merged) == 3:
-                break
-        return merged
-
-    combined_tags = AestheticTags(
-        viewpoint=_merge_tag_list(g_res.aesthetic_tags.viewpoint, o_res.aesthetic_tags.viewpoint),
-        composition_space=_merge_tag_list(g_res.aesthetic_tags.composition_space, o_res.aesthetic_tags.composition_space),
-        pose_gaze=_merge_tag_list(g_res.aesthetic_tags.pose_gaze, o_res.aesthetic_tags.pose_gaze),
-        mood=_merge_tag_list(g_res.aesthetic_tags.mood, o_res.aesthetic_tags.mood),
-        subject_background=_merge_tag_list(g_res.aesthetic_tags.subject_background, o_res.aesthetic_tags.subject_background),
-        light_expression=_merge_tag_list(g_res.aesthetic_tags.light_expression, o_res.aesthetic_tags.light_expression),
-        color_impression=_merge_tag_list(g_res.aesthetic_tags.color_impression, o_res.aesthetic_tags.color_impression),
-        narrative_implication=_merge_tag_list(g_res.aesthetic_tags.narrative_implication, o_res.aesthetic_tags.narrative_implication),
-    )
-
-    # Combine strengths and improvements
-    merged_strengths = list(dict.fromkeys(g_res.strengths + o_res.strengths))[:5]
-    merged_improvements = list(dict.fromkeys(g_res.improvements + o_res.improvements))[:5]
-
-    combined_reason = (
-        f"[앙상블 종합: 평균 {avg_final:.1f}점] "
-        f"[Gemini: {g_res.final_score:.1f}점] {g_res.final_reason} | "
-        f"[OpenAI: {o_res.final_score:.1f}점] {o_res.final_reason}"
-    )
-
-    return PhotoAnalysis(
-        composition_score=avg_composition,
-        composition_notes=g_res.composition_notes or o_res.composition_notes,
-        lighting_score=avg_lighting,
-        lighting_notes=g_res.lighting_notes or o_res.lighting_notes,
-        color_score=avg_color,
-        color_notes=g_res.color_notes or o_res.color_notes,
-        technique_score=avg_technique,
-        technique_notes=g_res.technique_notes or o_res.technique_notes,
-        final_score=avg_final,
-        final_reason=combined_reason,
-        strengths=merged_strengths,
-        improvements=merged_improvements,
-        figure_category=g_res.figure_category,
-        focus_status=g_res.focus_status,
-        focus_notes=g_res.focus_notes or o_res.focus_notes,
-        detected_camera_settings=g_res.detected_camera_settings or o_res.detected_camera_settings,
-        aesthetic_tags=combined_tags,
-    )
+    return g_res.model_copy(update={"cross_check_opinion": opinion})
 
 
 def analyze_photo(
@@ -94,19 +67,11 @@ def analyze_photo(
     category_hint: str | None = None,
     api_key: str | None = None,
 ) -> PhotoAnalysis:
-    """Unified entry point for photo evaluation with Gemini, OpenAI, or Ensemble."""
+    """Unified entry point for photo evaluation with Gemini or Gemini+OpenAI Cross-Check Ensemble."""
     normalized_provider = (provider or "gemini").strip().lower()
 
-    if normalized_provider == "openai":
-        target_model = model or DEFAULT_OPENAI_MODEL
-        return analyze_with_openai(
-            photo=photo,
-            model=target_model,
-            category_hint=category_hint,
-            api_key=api_key,
-        )
-
     if normalized_provider == "ensemble":
+        target_openai_model = DEFAULT_OPENAI_MODEL
         with ThreadPoolExecutor(max_workers=2) as executor:
             gemini_fut = executor.submit(
                 analyze_with_gemini,
@@ -115,17 +80,17 @@ def analyze_photo(
                 category_hint=category_hint,
             )
             openai_fut = executor.submit(
-                analyze_with_openai,
+                cross_check_with_openai,
                 photo=photo,
-                model=DEFAULT_OPENAI_MODEL,
+                model=target_openai_model,
                 category_hint=category_hint,
                 api_key=api_key,
             )
             gemini_res = gemini_fut.result()
             openai_res = openai_fut.result()
-            return _merge_analyses(gemini_res, openai_res)
+            return _merge_analyses(gemini_res, openai_res, model_name=target_openai_model)
 
-    # Default to Gemini
+    # Standalone evaluation is exclusively handled by Gemini
     target_model = model or DEFAULT_MODEL
     return analyze_with_gemini(
         photo=photo,

@@ -209,6 +209,7 @@ def get_all_analyses(db_path: Path, max_hamming_dist: int = 15) -> list[dict]:
                 "improvements": analysis_data.get("improvements", []),
                 "aesthetic_tags": tags_by_id.get(aid, analysis_data.get("aesthetic_tags", {})),
                 "detected_camera_settings": analysis_data.get("detected_camera_settings"),
+                "cross_check_opinion": analysis_data.get("cross_check_opinion"),
                 "lr_advice": lr_advice,
                 "sns_advice": sns_advice,
                 "exif": exif_data,

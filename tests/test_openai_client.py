@@ -129,46 +129,65 @@ class OpenAIClientTests(unittest.TestCase):
         self.assertEqual(advice.shadows, 20)
         self.assertEqual(advice.retouching_guide, "얼굴 부분 암부를 살리고 채도를 보정합니다.")
 
-    def test_multi_llm_ensemble_averages_scores_and_synthesizes_reason(self) -> None:
+    def test_multi_llm_ensemble_attaches_cross_check_without_averaging(self) -> None:
+        from app.models.analysis import OpenAICrossCheck
         g_analysis = self._sample_analysis(7.0, "Gemini 평가: 노출 부족")
-        o_analysis = self._sample_analysis(9.0, "OpenAI 평가: 구도 우수")
+        o_cross = OpenAICrossCheck(
+            score=9.0,
+            reason="OpenAI 의견: 구도 우수",
+            strengths=["안정적인 구도"],
+            improvements=["조명 각도 개선"],
+            composition_critique="[장점] 3분할 안정적 [단점] 여백 약간 부족",
+            lighting_critique="[장점] 부드러운 빛 [단점] 암부 디테일 소실",
+        )
 
-        merged = _merge_analyses(g_analysis, o_analysis)
+        merged = _merge_analyses(g_analysis, o_cross)
 
-        # Average of 7.0 and 9.0 is 8.0
-        self.assertEqual(merged.final_score, 8.0)
-        self.assertIn("앙상블 종합: 평균 8.0점", merged.final_reason)
-        self.assertIn("Gemini: 7.0점", merged.final_reason)
-        self.assertIn("OpenAI: 9.0점", merged.final_reason)
+        # Gemini score (7.0) is authoritatively preserved without averaging
+        self.assertEqual(merged.final_score, 7.0)
+        self.assertIsNotNone(merged.cross_check_opinion)
+        self.assertEqual(merged.cross_check_opinion.score, 9.0)
+        self.assertEqual(merged.cross_check_opinion.reason, "OpenAI 의견: 구도 우수")
+        self.assertEqual(merged.cross_check_opinion.strengths, ["안정적인 구도"])
 
     def test_analyze_photo_router_provider_dispatch(self) -> None:
+        from app.models.analysis import OpenAICrossCheck
         g_res = self._sample_analysis(8.0, "Gemini")
-        o_res = self._sample_analysis(8.4, "OpenAI")
+        o_cross = OpenAICrossCheck(
+            score=8.4,
+            reason="OpenAI",
+            strengths=["디테일"],
+            improvements=["각도"],
+            composition_critique="[장점] 구도 좋음",
+            lighting_critique="[장점] 자연스러움",
+        )
 
         with patch("app.services.multi_llm.analyze_with_gemini", return_value=g_res) as mock_g, \
-             patch("app.services.multi_llm.analyze_with_openai", return_value=o_res) as mock_o:
+             patch("app.services.multi_llm.cross_check_with_openai", return_value=o_cross) as mock_cross:
 
             # Provider: gemini
             res1 = analyze_photo(self.sample_photo, provider="gemini")
             self.assertEqual(res1.final_reason, "Gemini")
             mock_g.assert_called_once()
-            mock_o.assert_not_called()
+            mock_cross.assert_not_called()
 
-            # Provider: openai
+            # Provider: openai -> routes to Gemini because solo OpenAI is removed
             mock_g.reset_mock()
-            mock_o.reset_mock()
+            mock_cross.reset_mock()
             res2 = analyze_photo(self.sample_photo, provider="openai")
-            self.assertEqual(res2.final_reason, "OpenAI")
-            mock_g.assert_not_called()
-            mock_o.assert_called_once()
-
-            # Provider: ensemble (8.0 + 8.4) / 2 = 8.2
-            mock_g.reset_mock()
-            mock_o.reset_mock()
-            res3 = analyze_photo(self.sample_photo, provider="ensemble")
-            self.assertEqual(res3.final_score, 8.2)
+            self.assertEqual(res2.final_reason, "Gemini")
             mock_g.assert_called_once()
-            mock_o.assert_called_once()
+            mock_cross.assert_not_called()
+
+            # Provider: ensemble -> preserves Gemini 8.0, attaches OpenAI 8.4 cross-check
+            mock_g.reset_mock()
+            mock_cross.reset_mock()
+            res3 = analyze_photo(self.sample_photo, provider="ensemble")
+            self.assertEqual(res3.final_score, 8.0)
+            self.assertIsNotNone(res3.cross_check_opinion)
+            self.assertEqual(res3.cross_check_opinion.score, 8.4)
+            mock_g.assert_called_once()
+            mock_cross.assert_called_once()
 
 
 if __name__ == "__main__":
