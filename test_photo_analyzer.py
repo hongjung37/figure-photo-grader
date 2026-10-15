@@ -917,6 +917,7 @@ class PhotoAnalyzerTests(unittest.TestCase):
         crop_data = {key: box for key in photo_analyzer.SNS_CROP_RATIO_CONFIGS}
         crop_data["best_ratio_key"] = "original"
         crop_data["best_ratio_reason"] = "원본 프레이밍이 피규어 공간감에 가장 이상적임"
+        crop_data["original_tip"] = "피규어의 좌우 여백과 시선 처리가 안정적임"
         payload = json.dumps(crop_data)
 
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -929,13 +930,15 @@ class PhotoAnalyzerTests(unittest.TestCase):
                 crops = photo_analyzer.generate_all_sns_crops(photo)
 
         self.assertEqual(call.call_count, 1)
-        self.assertEqual(set(crops.model_dump()), set(photo_analyzer.SNS_CROP_RATIO_CONFIGS) | {"best_ratio_key", "best_ratio_reason"})
+        self.assertEqual(set(crops.model_dump()), set(photo_analyzer.SNS_CROP_RATIO_CONFIGS) | {"best_ratio_key", "best_ratio_reason", "original_tip"})
         self.assertEqual(crops.best_ratio_key, "original")
         self.assertEqual(crops.best_ratio_reason, "원본 프레이밍이 피규어 공간감에 가장 이상적임")
+        self.assertEqual(crops.original_tip, "피규어의 좌우 여백과 시선 처리가 안정적임")
         prompt_text = call.call_args.kwargs["input_payload"][0]["text"]
         for key in photo_analyzer.SNS_CROP_RATIO_CONFIGS:
             self.assertIn(key, prompt_text)
         self.assertIn("best_ratio_key", prompt_text)
+        self.assertIn("original_tip", prompt_text)
         self.assertIn("original", prompt_text)
 
 

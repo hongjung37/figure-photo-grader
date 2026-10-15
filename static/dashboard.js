@@ -846,9 +846,34 @@ function renderCropRatioDetailArea(ratioKey, currentAdv, recordId) {
   const isBest = currentAdv && currentAdv.best_ratio_key === ratioKey;
 
   if (isOriginal) {
-    const originalReason = (isBest && currentAdv.best_ratio_reason)
-      ? currentAdv.best_ratio_reason
-      : '촬영 당시의 원본 프레이밍과 공간 여백이 안정적입니다. 별도의 크롭 없이 원본 그대로 게시하는 것을 권장합니다.';
+    const bestKey = currentAdv ? currentAdv.best_ratio_key : null;
+    const bestReason = currentAdv ? currentAdv.best_ratio_reason : null;
+    const originalTip = currentAdv ? currentAdv.original_tip : null;
+    const compositionNotes = (item && item.composition_notes) ? item.composition_notes : null;
+
+    let mainOpinionHtml = '';
+    if (isBest) {
+      // AI specifically selected original as the best ratio
+      const reasonText = bestReason || originalTip || compositionNotes || '촬영 당시의 피규어 구도와 여백이 가장 균형 잡혀 있습니다.';
+      mainOpinionHtml = `<div id="crop-tip-desc" style="color:var(--ink);line-height:1.5;">${reasonText}</div>`;
+    } else {
+      // User clicked 'original', but AI recommended a crop ratio as Best Pick
+      const originalText = originalTip || compositionNotes || '촬영 당시의 피규어 배치와 공간 여백이 온전히 담긴 원본 프레이밍입니다.';
+      const comparisonHtml = bestKey ? `
+        <div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);font-size:0.80rem;color:var(--muted);line-height:1.45;">
+          💡 <b>AI 제안과의 비교</b>: AI는 피사체 집중도를 높이기 위해 <b>${getCropRatioLabel(bestKey)}</b>을(를) 추천했습니다${bestReason ? ` (사유: ${bestReason})` : ''}. 하지만 피규어의 전신 실루엣이나 배경의 공간감을 온전히 살리고 싶을 때 원본 유지가 훌륭한 대안이 됩니다.
+        </div>
+      ` : '';
+
+      mainOpinionHtml = `
+        <div id="crop-tip-desc" style="color:var(--ink);line-height:1.5;">
+          <div style="font-weight:700;color:var(--blue);margin-bottom:3px;font-size:0.82rem;">📐 원본 구도에 대한 AI 분석:</div>
+          <div>${originalText}</div>
+          ${comparisonHtml}
+        </div>
+      `;
+    }
+
     return `
       <div id="crop-tip-box" class="sns-tip-box ${isBest ? 'is-best-tip-box' : ''}">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:6px;">
@@ -861,7 +886,7 @@ function renderCropRatioDetailArea(ratioKey, currentAdv, recordId) {
             <a class="upload-btn" style="padding:5px 12px;font-size:0.78rem;background:#0284c7;text-decoration:none;display:inline-flex;align-items:center;color:white;" href="/api/image/${recordId}?original=1" download target="_blank">📥 원본 고해상도 다운로드</a>
           </div>
         </div>
-        <div id="crop-tip-desc" style="color:var(--ink);line-height:1.45;">${originalReason}</div>
+        ${mainOpinionHtml}
       </div>
     `;
   }

@@ -215,6 +215,10 @@ class SNSAdvice(BaseModel):
         default=None,
         description="해당 비율(또는 원본 유지)을 최적의 구도로 선정한 구체적인 시각적/미학적 근거 1~2줄",
     )
+    original_tip: str | None = Field(
+        default=None,
+        description="원본 프레이밍(노크롭) 상태의 피규어 구도/여백/공간감에 대한 분석 및 연출 코멘트 1~2줄",
+    )
     social_caption: str | None = Field(default=None, description="인스타 및 X 피드용 감성적인 짧은 캡션 (2~3줄, 이모지 포함)")
     hashtags: list[str] | None = Field(default=None, description="피규어 특화 추천 해시태그 목록 (#피규어, #figurephotography 등 8~12개)")
 
@@ -913,6 +917,7 @@ def generate_sns_advice(photo: PreparedPhoto, model: str = DEFAULT_MODEL) -> SNS
   * 크롭을 하지 않고 원본 프레이밍(원래 종횡비) 그대로 두는 것이 여백의 미나 구도상 가장 완벽하다면 주저 없이 'original'을 선택하세요.
   * 인물/상반신 클로즈업이나 특정 플랫폼에 맞춘 시선 집중이 필요하다면 해당 크롭 비율을 선택하세요.
 - best_ratio_reason: 왜 그 비율(또는 원본 유지)이 이 사진에 가장 적합한지 미학적/구도적 근거를 1~2줄로 명확히 설명하세요.
+- original_tip: 원본 해상도 및 원래 프레이밍 상태에서 피규어의 배치, 주변 배경의 공간감, 여백의 미에 대한 전문적인 구도 분석 코멘트를 1~2줄로 작성하세요.
 """
 
     client = _get_client(api_key)
@@ -1045,6 +1050,10 @@ class CropSet(BaseModel):
         default="",
         description="해당 비율(또는 원본 유지)을 최적의 구도로 선정한 구체적인 시각적/미학적 근거 1~2줄",
     )
+    original_tip: str = Field(
+        default="",
+        description="원본 프레이밍(노크롭) 상태의 피규어 구도/여백/공간감에 대한 분석 및 연출 코멘트 1~2줄",
+    )
 
 
 def generate_all_sns_crops(photo: PreparedPhoto, model: str = DEFAULT_MODEL) -> CropSet:
@@ -1088,6 +1097,7 @@ def generate_all_sns_crops(photo: PreparedPhoto, model: str = DEFAULT_MODEL) -> 
   * 크롭을 하지 않고 원본 프레이밍(원래 종횡비) 그대로 두는 것이 여백의 미나 구도상 가장 완벽하다면 주저 없이 'original'을 선택하세요.
   * 인물/상반신 클로즈업이나 특정 플랫폼에 맞춘 시선 집중이 필요하다면 해당 크롭 비율을 선택하세요.
 - best_ratio_reason: 왜 그 비율(또는 원본 유지)이 이 사진에 가장 적합한지 미학적/구도적 근거를 1~2줄로 명확히 설명하세요.
+- original_tip: 원본 해상도 및 원래 프레이밍 상태에서 피규어의 배치, 주변 배경의 공간감, 여백의 미에 대한 전문적인 구도 분석 코멘트를 1~2줄로 작성하세요.
 """
 
     client = _get_client(api_key)

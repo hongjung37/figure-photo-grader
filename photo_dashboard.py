@@ -860,7 +860,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                         # so the other ratio buttons need no further API calls.
                         crop_set = generate_all_sns_crops(prepared, model=MODEL_PRESETS["lite"])
                         for key, box in crop_set.model_dump(mode="json").items():
-                            if key in ("best_ratio_key", "best_ratio_reason") or key == ratio_key or not cached_advice.get(key):
+                            if key in ("best_ratio_key", "best_ratio_reason", "original_tip") or key == ratio_key or not cached_advice.get(key):
                                 cached_advice[key] = box
                         crop_dict = cached_advice[ratio_key]
                     advice_json = json.dumps(cached_advice, ensure_ascii=False)
