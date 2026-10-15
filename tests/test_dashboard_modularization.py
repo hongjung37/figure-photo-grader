@@ -1,9 +1,14 @@
 import unittest
+import sys
 from pathlib import Path
 from http import HTTPStatus
 import socketserver
 import threading
 import urllib.request
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 import burst_clustering
 import photo_dashboard
@@ -23,9 +28,9 @@ class DashboardModularizationTests(unittest.TestCase):
         self.assertIs(photo_dashboard.parse_photo_time, burst_clustering.parse_photo_time)
 
     def test_darkroom_theme_and_static_files(self):
-        css_path = Path("static/dashboard.css")
-        js_path = Path("static/dashboard.js")
-        tmpl_path = Path("templates/index.html")
+        css_path = PROJECT_ROOT / "static/dashboard.css"
+        js_path = PROJECT_ROOT / "static/dashboard.js"
+        tmpl_path = PROJECT_ROOT / "templates/index.html"
 
         self.assertTrue(css_path.is_file(), "static/dashboard.css should exist")
         self.assertTrue(js_path.is_file(), "static/dashboard.js should exist")
@@ -101,8 +106,8 @@ class DashboardModularizationTests(unittest.TestCase):
         import json
         import subprocess
 
-        css_path = Path("static/dashboard.css")
-        js_path = Path("static/dashboard.js")
+        css_path = PROJECT_ROOT / "static/dashboard.css"
+        js_path = PROJECT_ROOT / "static/dashboard.js"
         css = css_path.read_text(encoding="utf-8")
         js = js_path.read_text(encoding="utf-8")
 

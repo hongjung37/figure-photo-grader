@@ -4,12 +4,17 @@ import base64
 import json
 import os
 import sqlite3
+import sys
 import tempfile
 import unittest
 from contextlib import closing
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from PIL import ExifTags, Image
 from PIL.TiffImagePlugin import IFDRational
@@ -791,8 +796,8 @@ class PhotoAnalyzerTests(unittest.TestCase):
         self.assertEqual(cfg["h"], 1)
 
         # 2. Test calculateExactCrop in node against tall portrait photo
-        js_file = Path("static/dashboard.js")
-        code = js_file.read_text(encoding="utf-8") if js_file.is_file() else Path("photo_dashboard.py").read_text(encoding="utf-8")
+        js_file = PROJECT_ROOT / "static/dashboard.js"
+        code = js_file.read_text(encoding="utf-8") if js_file.is_file() else (PROJECT_ROOT / "photo_dashboard.py").read_text(encoding="utf-8")
         func_body = "function calculateExactCrop" + code.split("function calculateExactCrop")[1].split("function selectCropRatio")[0]
         node_script = """
         const TARGET_CROP_RATIOS = {

@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from photo_xmp_manager import generate_xmp_xml, score_to_rating_and_label, write_xmp_sidecar
 

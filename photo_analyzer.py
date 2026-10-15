@@ -43,7 +43,20 @@ MODEL_PRESETS = {
 }
 DEFAULT_TIER = "lite"
 DEFAULT_MODEL = MODEL_PRESETS[DEFAULT_TIER]
-DEFAULT_DB_PATH = Path(__file__).resolve().with_name("photo_analysis.sqlite3")
+DATA_DIR = Path(__file__).resolve().parent / "data"
+_LEGACY_DB_PATH = Path(__file__).resolve().with_name("photo_analysis.sqlite3")
+
+
+def _get_default_db_path() -> Path:
+    if (DATA_DIR / "photo_analysis.sqlite3").exists():
+        return DATA_DIR / "photo_analysis.sqlite3"
+    if _LEGACY_DB_PATH.exists():
+        return _LEGACY_DB_PATH
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    return DATA_DIR / "photo_analysis.sqlite3"
+
+
+DEFAULT_DB_PATH = _get_default_db_path()
 ORIGINALS_DIR_NAME = "photo_originals"
 ENV_FILE_PATH = Path(__file__).resolve().with_name(".env")
 SUPPORTED_FORMATS = {
@@ -282,7 +295,12 @@ def get_original_photo_path(db_path: str | Path, sha256: str, mime_type: str) ->
     }.get(mime_type)
     if suffix is None:
         raise ValueError(f"지원하지 않는 업로드 MIME 형식입니다: {mime_type}")
-    return Path(db_path).expanduser().parent / ORIGINALS_DIR_NAME / f"{sha256}{suffix}"
+    target_path = Path(db_path).expanduser().parent / ORIGINALS_DIR_NAME / f"{sha256}{suffix}"
+    if not target_path.exists():
+        legacy_path = Path(__file__).resolve().parent / ORIGINALS_DIR_NAME / f"{sha256}{suffix}"
+        if legacy_path.exists():
+            return legacy_path
+    return target_path
 
 
 def save_original_photo(db_path: str | Path, photo: PreparedPhoto) -> Path:

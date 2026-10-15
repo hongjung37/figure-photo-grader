@@ -14,8 +14,12 @@ __pycache__/
 photo_analysis.sqlite3
 photo_analysis.sqlite3-shm
 photo_analysis.sqlite3-wal
+data/*.sqlite3*
+!data/.gitkeep
+
 # High-resolution managed images may contain private photo content.
 photo_originals/
+data/photo_originals/
 
 # Default Excel export may contain photo filenames, reviews, and camera settings.
 photo_analyses.xlsx
