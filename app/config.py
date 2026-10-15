@@ -16,6 +16,7 @@ STATIC_DIR = PROJECT_ROOT / "static"
 ENV_FILE_PATH = PROJECT_ROOT / ".env"
 
 PORT = 8080
+HOST = "127.0.0.1"
 
 # Gemini Models
 MODEL_PRESETS: dict[str, str] = {

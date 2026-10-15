@@ -99,6 +99,17 @@ DASHBOARD_HTML = (
     + "\n</script>\n"
 )
 
+
+def _find_local_photo_path(filename: str) -> Path | None:
+    """Find a project-local photo without depending on the process working directory."""
+    path = Path(filename)
+    candidates = [path] if path.is_absolute() else [
+        PROJECT_ROOT / "test_photo" / path,
+        PROJECT_ROOT / path,
+        PROJECT_ROOT / "outputs" / path,
+    ]
+    return next((candidate for candidate in candidates if candidate.is_file()), None)
+
 def _load_prepared_photo_for_record(db_path: Path, row: dict[str, Any] | Any) -> PreparedPhoto:
     """Load PreparedPhoto prioritizing high-res photo_originals, then local files, then DB thumbnail."""
     sha256 = row["sha256"]
@@ -113,12 +124,7 @@ def _load_prepared_photo_for_record(db_path: Path, row: dict[str, Any] | Any) ->
             return replace(prep, source_filename=fname, sha256=sha256)
 
     # 2. Local candidate paths
-    candidate_paths = [
-        Path("test_photo") / fname,
-        Path(fname),
-        Path("test_photo") / Path(fname).name,
-    ]
-    found_file = next((p for p in candidate_paths if p.is_file()), None)
+    found_file = _find_local_photo_path(fname)
     if found_file:
         prep = prepare_photo(found_file)
         from dataclasses import replace
@@ -239,18 +245,17 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                         return
 
                     # Fallback: search local files, generate thumbnail and cache into DB
-                    for search_dir in (Path("test_photo"), Path("."), Path("outputs")):
-                        cand = search_dir / fname
-                        if cand.is_file():
-                            thumb_bytes = make_thumbnail_bytes(cand)
-                            update_photo_thumbnail(self.db_path, record_id, thumb_bytes)
-                            self.send_response(HTTPStatus.OK)
-                            self.send_header("Content-Type", "image/webp")
-                            self.send_header("Content-Length", str(len(thumb_bytes)))
-                            self.send_header("Cache-Control", "public, max-age=86400")
-                            self.end_headers()
-                            self.wfile.write(thumb_bytes)
-                            return
+                    cand = _find_local_photo_path(fname)
+                    if cand:
+                        thumb_bytes = make_thumbnail_bytes(cand)
+                        update_photo_thumbnail(self.db_path, record_id, thumb_bytes)
+                        self.send_response(HTTPStatus.OK)
+                        self.send_header("Content-Type", "image/webp")
+                        self.send_header("Content-Length", str(len(thumb_bytes)))
+                        self.send_header("Cache-Control", "public, max-age=86400")
+                        self.end_headers()
+                        self.wfile.write(thumb_bytes)
+                        return
             except Exception:
                 pass
             # Placeholder SVG if image is not found
@@ -448,8 +453,9 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     fname = r["source_filename"]
                     analysis_data = json.loads(r["analysis_json"])
                     # Search candidate locations
-                    target_dir = Path("test_photo") if (Path("test_photo") / fname).is_file() else Path(".")
-                    target_file = target_dir / fname
+                    target_file = _find_local_photo_path(fname)
+                    if target_file is None:
+                        raise FileNotFoundError(f"사진 파일 '{fname}'을 찾을 수 없습니다.")
                     xmp_file = target_file.with_suffix(".xmp")
                     write_xmp_sidecar(
                         photo_path=target_file,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from app.config import (
     DEFAULT_DB_PATH,
+    HOST,
     MODEL_PRESETS,
     PORT,
     PROJECT_ROOT,
@@ -72,6 +73,7 @@ from app.web.server import (
 
 __all__ = [
     "DEFAULT_DB_PATH",
+    "HOST",
     "MODEL_PRESETS",
     "PORT",
     "PROJECT_ROOT",
