@@ -1,7 +1,13 @@
+"""app.prompts.grader_prompts - Figure photography grading prompt builder.
+
+Provides the comprehensive aesthetic evaluation prompt, including figure category
+specialized criteria, strict scoring benchmarks, pros/cons segregation, and aesthetic tagging.
+"""
+
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from typing import Any
 
 from app.models.analysis import (
     AESTHETIC_TAG_CATEGORIES,
@@ -9,18 +15,19 @@ from app.models.analysis import (
     FIGURE_CATEGORIES,
 )
 
-if TYPE_CHECKING:
-    from app.services.image_processor import PreparedPhoto
 
-
-def build_grader_prompt(photo: PreparedPhoto, category_hint: str | None = None) -> str:
-    camera_settings = json.dumps(photo.safe_exif, ensure_ascii=False, sort_keys=True)
-    if not photo.safe_exif:
+def build_grader_prompt(photo: Any, category_hint: str | None = None) -> str:
+    """Build the prompt for Gemini figure photo evaluation."""
+    safe_exif = getattr(photo, "safe_exif", {})
+    camera_settings = json.dumps(safe_exif, ensure_ascii=False, sort_keys=True)
+    if not safe_exif:
         camera_settings = "{} (사용 가능한 안전한 EXIF 촬영 설정 없음)"
+
     tag_taxonomy = "\n".join(
         f"- {category_key} ({AESTHETIC_TAG_CATEGORIES[category_key]}): {', '.join(options)}"
         for category_key, options in AESTHETIC_TAG_OPTIONS.items()
     )
+
     category_instruction = ""
     if category_hint and category_hint in FIGURE_CATEGORIES:
         cat_info = FIGURE_CATEGORIES[category_hint]
@@ -28,13 +35,12 @@ def build_grader_prompt(photo: PreparedPhoto, category_hint: str | None = None) 
 이 사진은 사용자가 '{cat_info['label']}'({cat_info['description']}) 유형으로 지정했습니다.
 figure_category 값에 반드시 '{cat_info['label']}'을 입력하고, 아래 특화 심사 기준을 최우선 잣대로 적용하세요:
 - 특화 심사 포인트: {cat_info['focus']}
-- 중점 디테일: 눈동자 데칼의 초점, 자연광 활용 여부
 """
     else:
         category_instruction = """[피규어 촬영 세부 유형 자동 판별 및 분기 심사]
 먼저 사진을 분석하여 다음 4가지 피규어 촬영 유형 중 가장 부합하는 하나를 판별하여 figure_category에 정확히 입력하고, 해당 유형의 특화 기준을 엄격하게 적용하여 심사하세요:
-1. '접사/디테일' (피규어 얼굴, 눈동자 데칼, 무기 등 세부 조형/도색 초근접 촬영)
-   → 중점 기준: 눈동자 데칼의 초정밀 칼초점, 코/귀/머리카락 등 주요 조형이 날아가지 않는 적절한 매크로 심도, 미세 먼지/마감 관리, 번들거리는 반사광(핫스팟) 억제
+1. '접사/디테일' (피규어 얼굴, 눈동자, 무기 등 세부 조형/도색 초근접 촬영)
+   → 중점 기준: 눈동자 데칼의 초정밀 칼초점, 코/귀/머리카락 등 주요 조형이 날아가지 않는 적절한 매크로 심도(너무 얕아서 조형이 뭉개지면 감점), 미세 먼지/마감 관리, 번들거리는 반사광(핫스팟) 억제
 2. '일상/야외 스냅' (자연광 야외 출사, 여행 동행, 카페 등 실제 일상 환경과 상호작용)
    → 중점 기준: 자연광(역광/측광)의 창의적 활용, 실제 환경과 피규어의 자연스러운 스케일 조화, 계절감 및 일상적 스토리텔링, 자연스러운 여백과 수평
 3. '스튜디오 연출/디오라마' (배경지, 다각도 조명 세팅, 디오라마 세트, 이펙트 파츠 활용)
@@ -69,31 +75,39 @@ figure_category 값에 반드시 '{cat_info['label']}'을 입력하고, 아래 �
 - lighting: 빛의 방향과 질, 노출, 하이라이트/그림자 디테일 ([장점]과 [단점] 구분)
 - color: 색조, 채도, 색 조화와 분위기 ([장점]과 [단점] 구분)
 - technique: 초점/선명도, 흔들림, 심도, 그리고 아래 EXIF 촬영 설정의 적절성 ([장점]과 [단점] 구분)
+- focus_status: 피규어 눈동자(아이 데칼) 및 안면 조형의 초점 정밀 상태 ('완벽 칼초점', '미세 앞핀', '미세 뒤핀', '초점 이탈', '판별 불가' 중 택1)
+  * 완벽 칼초점: 눈동자 데칼의 경계면과 반사광이 타협 없이 극도로 선명함
+  * 미세 앞핀: 눈동자보다 앞쪽(앞머리 끝, 코끝, 무기)에 초점이 맺힘
+  * 미세 뒤핀: 눈동자보다 뒤쪽(귀, 머리 뒤편, 어깨)에 초점이 맺힘
+  * 초점 이탈: 피규어 얼굴 전반에 핀이 맞지 않거나 흔들림
+- focus_notes: 초점이 맞은 위치와 심도 상태에 대한 1줄 직관적 판정 근거
 - final_score: 위 점수 기준 척도(7: 우수, 8: 매우 우수, 9: 프로/전문가급)를 엄격히 준수한 종합 점수
 - final_reason: 최종 점수의 객관적 근거 (장점과 단점을 균형 있게 종합하여 점수 이유 서술)
 - strengths: 사진의 주요 장점 목록 (실제 돋보이는 핵심 강점 2~3개)
 - improvements: 사진의 단점, 아쉬운 점 및 다음 촬영을 위한 개선점 목록 (2~3개)
 
-[피규어 초점 핀 정밀 판정 (focus_status, focus_notes)]
-- 피규어 사진의 생명은 '아이 데칼'(눈동자)에 칼초점이 맞았는지 여부입니다.
-- 다음 5가지 옵션 중 하나를 focus_status에 정확히 입력하세요:
-  1. '완벽 칼초점': 피규어의 양쪽 눈 또는 앞쪽 눈동자/아이 데칼과 표정에 핀이 완벽히 맞음.
-  2. '미세 앞핀': 초점이 눈보다 앞쪽(앞머리카락, 코끝 등)에 맞아 정작 눈동자가 미세하게 소프트함.
-  3. '미세 뒤핀': 초점이 눈보다 뒤쪽에 맞아 안면 디테일이 소프트함.
-  4. '초점 이탈': 피규어 본체 전체가 흐릿하거나 셔터 흔들림/완전 오초점 상태.
-  5. '판별 불가': 피규어의 얼굴이 보이지 않는 후면 샷이거나, 해상도 한계로 판단이 어려운 경우.
-- focus_notes: 실제 초점이 맺힌 정확한 위치와 피사계 심도에 대한 날카로운 1줄 분석을 작성하세요.
-
-[시각적 워터마크/하단 프레임 촬영 설정 감지 지침 (detected_camera_settings)]
-- 사진 하단 테두리, 흰색 프레임, 모퉁이 등에 카메라 기종(예: SONY A7M4), 렌즈, 조리개, 셔터스피드, ISO 등의 텍스트 워터마크/촬영 설정이 인쇄되어 있는지 감지하세요.
-- 시각적으로 확인되면 딕셔너리로 추출하고, 없거나 불확실하면 null로 설정하세요.
-
-[통제 어휘 미학 태그 분류 (aesthetic_tags)]
-아래 8개 범주별로 이미지에서 직접 확인되는 태그를 0~3개 선택하세요. 근거가 없거나 해당되지 않으면 빈 배열([])을 사용하세요.
-허용된 태그 문구를 그대로 사용하고, 문장이나 새 태그를 임의로 만들지 마세요.
+미학 태깅(aesthetic_tags):
+- 아래 8개 범주별로 이미지에서 직접 확인되는 태그를 0~3개 선택하세요.
+- ★미학적 분위기/온도감 필수 판별 규칙:
+  1) mood(분위기): 사진의 정서적 무드와 온도감을 면밀히 분석하여 '차가움', '따뜻함', '청량함', '화사함', '몽환적', '다크·누아르', '시네마틱' 등에서 반드시 1~3개를 필수로 선택하세요 (빈 배열 금지).
+  2) color_impression(색조 인상): 피규어 조명과 피부톤의 색온도를 판별하여 '따뜻한 톤', '차가운 톤', '쿨톤(차가움)', '웜톤(따뜻함)', '파스텔', '비비드 컬러' 등에서 반드시 1~3개를 필수로 선택하세요 (빈 배열 금지).
+  3) light_expression(빛 표현): '자연광', '스튜디오 조명', '확산광', '역광', '부드러운 그림자', '강한 명암' 등에서 반드시 1~3개를 필수로 선택하세요.
+- 허용된 태그 문구를 그대로 사용하고, 문장이나 새 태그를 임의로 만들지 마세요.
+- viewpoint(시점)는 촬영 방향을 판별할 수 있을 때 정면·측면·후면·사선 등을 선택하고, 높이/시점도 함께 표현할 수 있습니다.
+- pose_gaze(포즈·시선)는 인물이나 동물 등 해당 피사체가 보일 때만 적용하세요.
+- narrative_implication(이야기 암시)은 보이는 단서에 한정하고 인물의 신원·관계·사건을 단정하지 마세요.
+- 모든 키를 포함한 객체로 반환하세요. 키와 허용 어휘는 다음과 같습니다:
 {tag_taxonomy}
 
 모든 점수는 0.0~10.0 범위의 숫자로 작성하세요. 최종 점수는 네 항목을 기계적으로 단순 산술평균하지 말고 전체 인상과 완성도를 위 점수 기준에 맞춰 반영하세요. EXIF가 없거나 불완전하면 추정하지 말고 이미지에서 확인되는 내용만 평가하세요. 답변의 텍스트 값은 한국어로 작성하세요.
+
+[시각적 워터마크/하단 프레임 촬영 설정 감지 지침]
+- WebP 변환 등으로 인해 파일 자체의 EXIF가 비어있더라도, 사진 하단 테두리/여백/워터마크에 카메라 모델명 및 촬영 파라미터(조리개 F값, 셔터스피드, ISO, 초점거리, 렌즈명 등)가 시각적으로 인쇄되어 있는 경우가 있습니다.
+- 만약 해당 텍스트가 사진 내에 명백하게 시각적으로 존재한다면:
+  1. 이를 촬영 기술(technique_notes) 평가의 객관적 근거로 참고하세요.
+  2. detected_camera_settings 필드에 감지된 설정들을 키-값 객체(예: {{"Camera": "SONY A7M4", "Lens": "FE 50mm F1.2 GM", "FNumber": "F/1.4", "ExposureTime": "1/250s", "ISO": "100"}})로 추출하세요.
+  3. 주의: 작가 서명, SNS 아이디, 캐릭터명, 제작사 로고 등은 제외하고 순수 광학 촬영 정보만 추출하세요.
+- 만약 사진에 그러한 인쇄 텍스트가 전혀 없거나 불확실하면 절대로 지어내지 말고 detected_camera_settings를 반드시 null로 두세요.
 
 촬영 관련 안전 EXIF (GPS, 촬영 시각, 소유자/일련번호 등은 제외됨):
 {camera_settings}

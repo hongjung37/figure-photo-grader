@@ -79,6 +79,8 @@ def load_template_file(rel_path: str) -> str:
 
 _INDEX_HTML = load_template_file("templates/index.html")
 _DASHBOARD_CSS = load_template_file("static/dashboard.css")
+_API_JS = load_template_file("static/js/api.js")
+_TAG_FILTER_JS = load_template_file("static/js/tag_filter.js")
 _CROP_VIEWER_JS = load_template_file("static/js/crop_viewer.js")
 _DASHBOARD_JS = load_template_file("static/dashboard.js")
 DASHBOARD_HTML = (
@@ -87,6 +89,10 @@ DASHBOARD_HTML = (
     + _DASHBOARD_CSS
     + "\n</style>\n"
     + "\n<script>\n"
+    + _API_JS
+    + "\n"
+    + _TAG_FILTER_JS
+    + "\n"
     + _CROP_VIEWER_JS
     + "\n"
     + _DASHBOARD_JS

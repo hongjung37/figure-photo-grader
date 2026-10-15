@@ -38,10 +38,11 @@ const API = {
   },
 
   async deleteAnalyses(ids) {
+    const recordIds = Array.isArray(ids) ? ids : [ids];
     const res = await fetch('/api/delete-analysis', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids: Array.isArray(ids) ? ids : [ids] })
+      body: JSON.stringify({ ids: recordIds, id: recordIds[0] })
     });
     return await res.json();
   },

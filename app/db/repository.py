@@ -15,7 +15,6 @@ from app.db.connection import (
     sync_analysis_tags,
 )
 from app.models.analysis import AESTHETIC_TAG_CATEGORIES, PhotoAnalysis, get_score_grade
-from app.services.burst_detector import cluster_burst_groups
 from app.services.image_processor import (
     PreparedPhoto,
     compute_dhash_from_bytes,
@@ -216,6 +215,7 @@ def get_all_analyses(db_path: Path, max_hamming_dist: int = 15) -> list[dict]:
                 "dhash": dhash_val,
             }
         )
+    from app.services.burst_detector import cluster_burst_groups
     return cluster_burst_groups(results, max_hamming_dist=max_hamming_dist)
 
 

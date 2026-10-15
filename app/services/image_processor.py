@@ -16,39 +16,18 @@ from app.config import (
     DEFAULT_DB_PATH,
     EXIF_DATETIME_ORIGINAL_ID,
     EXIF_IFD_ID,
+    EXIF_IFD_TAG_NAMES,
     EXIF_OFFSET_TIME_ID,
     EXIF_OFFSET_TIME_ORIGINAL_ID,
+    MAX_BASE64_IMAGE_BYTES,
+    MAX_IMAGE_EDGE,
     ORIGINALS_DIR,
+    ORIGINALS_DIR_NAME,
     PROJECT_ROOT,
+    SAFE_EXIF_FIELDS,
+    SUPPORTED_FORMATS,
     UPLOAD_EXIF_FIELDS,
 )
-
-SUPPORTED_FORMATS = {"JPEG", "MPO", "PNG", "WEBP"}
-MAX_IMAGE_EDGE = 4096
-MAX_BASE64_IMAGE_BYTES = 20 * 1024 * 1024
-ORIGINALS_DIR_NAME = "photo_originals"
-
-SAFE_EXIF_FIELDS = {
-    "Make",
-    "Model",
-    "LensModel",
-    "FNumber",
-    "ExposureTime",
-    "ISOSpeedRatings",
-    "ExposureProgram",
-    "MeteringMode",
-    "Flash",
-    "FocalLength",
-    "FocalLengthIn35mmFilm",
-    "WhiteBalance",
-    "ExposureMode",
-    "SceneCaptureType",
-    "DigitalZoomRatio",
-    "LightSource",
-    "ColorSpace",
-    "Orientation",
-}
-EXIF_IFD_TAG_NAMES = SAFE_EXIF_FIELDS - {"Make", "Model", "Orientation"}
 
 
 def compute_dhash_from_bytes(image_bytes: bytes, hash_size: int = 8) -> int:

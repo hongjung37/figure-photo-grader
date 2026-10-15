@@ -7,11 +7,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
-from app.db.repository import save_analysis
-from app.exporters.html_exporter import render_batch_comparison_html, save_html_report
 from app.models.analysis import PhotoAnalysis, get_score_grade
 from app.services.gemini_client import analyze_with_gemini
-from app.services.image_processor import prepare_photo
+from app.services.image_processor import PreparedPhoto, prepare_photo
 from app.services.xmp_service import write_xmp_sidecar
 
 
@@ -35,6 +33,8 @@ def run_batch_pipeline(
     generate_xmp: bool = False,
 ) -> int:
     """Analyze multiple photos in parallel, save results to DB, generate reports and optional XMP sidecars."""
+    from app.db.repository import save_analysis
+    from app.exporters.html_exporter import render_batch_comparison_html, save_html_report
     print(f"=== 피규어 사진 일괄 분석 시작 ===", file=sys.stderr)
     print(f"대상 사진: {len(photo_paths)}장 | 모델: {model} | 동시 워커: {max_workers}", file=sys.stderr)
     print(f"SQLite DB: {db_path}", file=sys.stderr)

@@ -512,9 +512,7 @@ async function requestSingleSnsCrop(ratioKey, recordId, btn, force=false) {
   btn.disabled = true;
 
   try {
-    const url = `/api/sns-crop/${ratioKey}/${recordId}${force ? '?force=true' : ''}`;
-    const res = await fetch(url, { method: 'POST' });
-    const data = await res.json();
+    const data = await (window.API ? window.API.fetchSnsCrop(recordId, ratioKey, force) : (await fetch(`/api/sns-crop/${ratioKey}/${recordId}${force ? '?force=true' : ''}`, { method: 'POST' })).json());
     if (data.success && (data.crop_box || ratioKey === 'original' || data.advice)) {
       const item = (typeof allData !== 'undefined' && Array.isArray(allData))
         ? allData.find(d => d.id === recordId)
@@ -551,9 +549,7 @@ async function requestAllSnsCrops(recordId, btn) {
   btn.disabled = true;
 
   try {
-    const url = `/api/sns-crop/all/${recordId}?force=true`;
-    const res = await fetch(url, { method: 'POST' });
-    const data = await res.json();
+    const data = await (window.API ? window.API.fetchSnsCrop(recordId, 'all', true) : (await fetch(`/api/sns-crop/all/${recordId}?force=true`, { method: 'POST' })).json());
     if (data.success && data.advice) {
       const item = (typeof allData !== 'undefined' && Array.isArray(allData))
         ? allData.find(d => d.id === recordId)
@@ -587,9 +583,7 @@ async function requestSnsCaption(recordId, btn, force=false) {
   btn.disabled = true;
 
   try {
-    const url = `/api/sns-caption/${recordId}${force ? '?force=true' : ''}`;
-    const res = await fetch(url, { method: 'POST' });
-    const data = await res.json();
+    const data = await (window.API ? window.API.fetchSnsCaption(recordId, force) : (await fetch(`/api/sns-caption/${recordId}${force ? '?force=true' : ''}`, { method: 'POST' })).json());
     if (data.success && data.social_caption) {
       const item = (typeof allData !== 'undefined' && Array.isArray(allData))
         ? allData.find(d => d.id === recordId)

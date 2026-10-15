@@ -11,9 +11,13 @@ class FrontendIntegrityTests(unittest.TestCase):
     def setUp(self):
         self.html = (PROJECT_ROOT / "templates/index.html").read_text(encoding="utf-8")
         self.js = (
-            (PROJECT_ROOT / "static/dashboard.js").read_text(encoding="utf-8")
+            (PROJECT_ROOT / "static/js/api.js").read_text(encoding="utf-8")
+            + "\n"
+            + (PROJECT_ROOT / "static/js/tag_filter.js").read_text(encoding="utf-8")
             + "\n"
             + (PROJECT_ROOT / "static/js/crop_viewer.js").read_text(encoding="utf-8")
+            + "\n"
+            + (PROJECT_ROOT / "static/dashboard.js").read_text(encoding="utf-8")
         )
 
     def test_dom_ids_exist(self):

@@ -11,10 +11,6 @@ from app.models.analysis import (
     AESTHETIC_TAG_OPTIONS,
     AestheticTags,
 )
-from app.services.image_processor import (
-    compute_dhash_from_bytes,
-    dhash_to_sqlite,
-)
 
 
 def ensure_tag_tables(connection: sqlite3.Connection) -> None:
@@ -99,9 +95,11 @@ def ensure_db_columns(db_path: Path) -> None:
         missing = conn.execute(
             "SELECT id, thumbnail FROM photo_analyses WHERE dhash IS NULL AND thumbnail IS NOT NULL"
         ).fetchall()
-        for mid, mthumb in missing:
-            try:
-                dh = compute_dhash_from_bytes(mthumb)
-                conn.execute("UPDATE photo_analyses SET dhash = ? WHERE id = ?", (dhash_to_sqlite(dh), mid))
-            except Exception:
-                pass
+        if missing:
+            from app.services.image_processor import compute_dhash_from_bytes, dhash_to_sqlite
+            for mid, mthumb in missing:
+                try:
+                    dh = compute_dhash_from_bytes(mthumb)
+                    conn.execute("UPDATE photo_analyses SET dhash = ? WHERE id = ?", (dhash_to_sqlite(dh), mid))
+                except Exception:
+                    pass
