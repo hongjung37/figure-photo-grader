@@ -316,67 +316,72 @@ async function handleDrop(e) {
 
 async function processBatchUpload(files) {
   isBatchUploading = true;
-  const tier = document.getElementById('upload-tier').value;
-  const category = document.getElementById('upload-category').value;
-  const force = document.getElementById('upload-force').checked;
-  const progContainer = document.getElementById('progress-container');
-  const progText = document.getElementById('progress-text');
-  const progPercent = document.getElementById('progress-percent');
-  const progBar = document.getElementById('progress-bar');
-  const progFile = document.getElementById('progress-current-file');
-  const status = document.getElementById('upload-status');
+  try {
+    const tier = document.getElementById('upload-tier').value;
+    const category = document.getElementById('upload-category').value;
+    const force = document.getElementById('upload-force').checked;
+    const progContainer = document.getElementById('progress-container');
+    const progText = document.getElementById('progress-text');
+    const progPercent = document.getElementById('progress-percent');
+    const progBar = document.getElementById('progress-bar');
+    const progFile = document.getElementById('progress-current-file');
+    const status = document.getElementById('upload-status');
 
-  progContainer.style.display = 'block';
-  status.textContent = '';
-  
-  const total = files.length;
-  let successCount = 0;
-  let failCount = 0;
+    progContainer.style.display = 'block';
+    status.textContent = '';
+    
+    const total = files.length;
+    let successCount = 0;
+    let failCount = 0;
 
-  for (let i = 0; i < total; i++) {
-    const file = files[i];
-    const currentNum = i + 1;
-    const pct = Math.round(((i) / total) * 100);
-    progPercent.textContent = `${pct}%`;
-    progBar.style.width = `${pct}%`;
-    progText.textContent = `[${currentNum} / ${total}장] AI 모델 분석 진행 중...`;
-    progFile.textContent = `현재 분석 파일: ${file.name} (${(file.size / 1024 / 1024).toFixed(1)}MB)`;
+    for (let i = 0; i < total; i++) {
+      const file = files[i];
+      const currentNum = i + 1;
+      const pct = Math.round(((i) / total) * 100);
+      progPercent.textContent = `${pct}%`;
+      progBar.style.width = `${pct}%`;
+      progText.textContent = `[${currentNum} / ${total}장] AI 모델 분석 진행 중...`;
+      progFile.textContent = `현재 분석 파일: ${file.name} (${(file.size / 1024 / 1024).toFixed(1)}MB)`;
 
-    const formData = new FormData();
-    formData.append('image', file, file.name);
-    formData.append('tier', tier);
-    formData.append('category', category);
+      const formData = new FormData();
+      formData.append('image', file, file.name);
+      formData.append('tier', tier);
+      formData.append('category', category);
 
-    try {
-      const result = await API.uploadPhoto(formData, force);
-      if (result.success) {
-        successCount++;
-        const dupNote = result.duplicate ? ' (이미 분석된 사진 - API 호출 생략)' : '';
-        status.textContent = `✓ [${currentNum}/${total}] ${file.name} 완료${dupNote} (${result.analysis.final_score.toFixed(1)}점 - ${result.analysis.figure_category})`;
-        status.style.color = 'var(--teal)';
-      } else {
+      try {
+        const result = await API.uploadPhoto(formData, force);
+        if (result.success) {
+          successCount++;
+          const dupNote = result.duplicate ? ' (이미 분석된 사진 - API 호출 생략)' : '';
+          status.textContent = `✓ [${currentNum}/${total}] ${file.name} 완료${dupNote} (${result.analysis.final_score.toFixed(1)}점 - ${result.analysis.figure_category})`;
+          status.style.color = 'var(--teal)';
+        } else {
+          failCount++;
+          status.textContent = `✗ [${currentNum}/${total}] ${file.name} 실패: ${result.error || '오류'}`;
+          status.style.color = '#e11d48';
+        }
+      } catch (err) {
         failCount++;
-        status.textContent = `✗ [${currentNum}/${total}] ${file.name} 실패: ${result.error || '오류'}`;
+        status.textContent = `✗ [${currentNum}/${total}] ${file.name} 전송 오류: ${err.message}`;
         status.style.color = '#e11d48';
       }
-    } catch (err) {
-      failCount++;
-      status.textContent = `✗ [${currentNum}/${total}] ${file.name} 전송 오류: ${err.message}`;
-      status.style.color = '#e11d48';
     }
-  }
 
-  progPercent.textContent = '100%';
-  progBar.style.width = '100%';
-  progText.textContent = '모든 분석이 완료되었습니다!';
-  progFile.textContent = '';
-  
-  status.textContent = `🎉 총 ${total}장 중 ${successCount}장 분석 성공${failCount > 0 ? `, ${failCount}장 실패` : ''}`;
-  status.style.color = successCount > 0 ? 'var(--teal)' : '#e11d48';
+    progPercent.textContent = '100%';
+    progBar.style.width = '100%';
+    progText.textContent = '모든 분석이 완료되었습니다!';
+    progFile.textContent = '';
+    
+    status.textContent = `🎉 총 ${total}장 중 ${successCount}장 분석 성공${failCount > 0 ? `, ${failCount}장 실패` : ''}`;
+    status.style.color = successCount > 0 ? 'var(--teal)' : '#e11d48';
 
-  setTimeout(() => {
+    setTimeout(() => {
+      isBatchUploading = false;
+      closeUploadModal();
+      loadData();
+    }, 1500);
+  } catch (err) {
     isBatchUploading = false;
-    closeUploadModal();
-    loadData();
-  }, 1500);
+    alert(`업로드 처리 중 오류 발생: ${err.message}`);
+  }
 }

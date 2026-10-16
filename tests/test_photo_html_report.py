@@ -10,9 +10,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from photo_analyzer import PhotoAnalysis, PreparedPhoto
+from photo_analyzer import CrossCheckOpinion, PhotoAnalysis, PreparedPhoto
 from photo_tag_schema import AestheticTags
-from photo_html_report import render_html_report, save_html_report
+from photo_html_report import render_batch_comparison_html, render_html_report, save_html_report
 
 
 class PhotoHtmlReportTests(unittest.TestCase):
@@ -107,6 +107,58 @@ class PhotoHtmlReportTests(unittest.TestCase):
         self.assertIn("SONY A7M4", report)
         self.assertIn("F/1.4", report)
 
+    def test_report_renders_cross_check_opinion(self) -> None:
+        photo, analysis = self._sample()
+        analysis.cross_check_opinion = CrossCheckOpinion(
+            model="gpt-6-luna",
+            score=8.7,
+            reason="종합 총평: <안정적> 구도와 자연스러운 색감",
+            strengths=["<우수한> 칼초점", "안정된 3분할"],
+            improvements=["<배경> 단순화 필요"],
+            composition_critique="중앙 집중형으로 시선 유도가 좋음",
+            lighting_critique="림라이트 효과가 피규어 윤곽을 잘 살림",
+        )
+        report = render_html_report(photo, analysis, record_id=20, model="ensemble(flash-3.5+gpt-6-luna)")
+
+        self.assertIn("Gemini + OpenAI 앙상블 분석", report)
+        self.assertIn("🤝 앙상블 크로스체크", report)
+        self.assertIn("OpenAI 크로스 체크 의견", report)
+        self.assertIn("gpt-6-luna", report)
+        self.assertIn("8.7", report)
+        self.assertIn("매우 우수", report)
+        self.assertIn("종합 총평: &lt;안정적&gt; 구도와 자연스러운 색감", report)
+        self.assertIn("&lt;우수한&gt; 칼초점", report)
+        self.assertIn("&lt;배경&gt; 단순화 필요", report)
+        self.assertIn("중앙 집중형으로 시선 유도가 좋음", report)
+        self.assertIn("림라이트 효과가 피규어 윤곽을 잘 살림", report)
+
+    def test_report_without_cross_check_omits_section(self) -> None:
+        photo, analysis = self._sample()
+        analysis.cross_check_opinion = None
+        report = render_html_report(photo, analysis, record_id=21, model="gemini-3.5-flash-lite")
+
+        self.assertIn("Gemini 사진 분석", report)
+        self.assertNotIn("🤝 앙상블 크로스체크", report)
+        self.assertNotIn("OpenAI 크로스 체크 의견", report)
+
+    def test_batch_comparison_renders_cross_check_badge(self) -> None:
+        photo, analysis = self._sample()
+        analysis.cross_check_opinion = CrossCheckOpinion(
+            model="gpt-6-luna",
+            score=8.7,
+            reason="우수함",
+            strengths=[],
+            improvements=[],
+        )
+        results = [{
+            "filename": "fig1.jpg",
+            "analysis": analysis,
+            "relative_report": "reports/fig1.html",
+        }]
+        html = render_batch_comparison_html(results, model="ensemble", db_path=Path("dummy.sqlite3"))
+        self.assertIn("🤝 gpt-6-luna 8.7", html)
+
 
 if __name__ == "__main__":
     unittest.main()
+

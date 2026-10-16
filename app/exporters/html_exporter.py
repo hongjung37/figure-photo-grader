@@ -31,6 +31,99 @@ def _score_card(title: str, score: float, notes: str) -> str:
     </article>"""
 
 
+def _render_cross_check_section(cross_check: Any) -> str:
+    if cross_check is None:
+        return ""
+    cc_data = (
+        cross_check.model_dump(mode="python")
+        if hasattr(cross_check, "model_dump")
+        else (cross_check if isinstance(cross_check, dict) else {})
+    )
+    if not cc_data:
+        return ""
+
+    cc_model = escape(str(cc_data.get("model") or "GPT-6 Luna"))
+    raw_score = cc_data.get("score")
+    if raw_score is not None:
+        cc_score = float(raw_score)
+        score_str = f"{cc_score:.1f}"
+        score_grade = escape(get_score_grade(cc_score))
+        grade_badge = f'<span class="cross-check-grade-pill">{score_grade}</span>'
+    else:
+        score_str = "-"
+        grade_badge = ""
+
+    cc_reason = escape(str(cc_data.get("reason") or ""))
+    cc_comp = escape(str(cc_data.get("composition_critique") or ""))
+    cc_light = escape(str(cc_data.get("lighting_critique") or ""))
+
+    strengths = cc_data.get("strengths") or []
+    improvements = cc_data.get("improvements") or []
+
+    def render_list_items(items: list[Any]) -> str:
+        if not items:
+            return '<li class="empty">기록된 항목이 없습니다.</li>'
+        return "".join(f"<li>{escape(str(item))}</li>" for item in items)
+
+    reason_html = (
+        f'<div class="cross-check-reason-box"><strong>OpenAI 총평:</strong> <p>{cc_reason}</p></div>'
+        if cc_reason
+        else ""
+    )
+
+    critique_html = ""
+    if cc_comp or cc_light:
+        comp_card = (
+            f'<div class="cross-check-comp-box"><b class="cross-check-sub-title">📐 구도 비평</b><p>{cc_comp}</p></div>'
+            if cc_comp
+            else ""
+        )
+        light_card = (
+            f'<div class="cross-check-light-box"><b class="cross-check-sub-title">💡 조명 비평</b><p>{cc_light}</p></div>'
+            if cc_light
+            else ""
+        )
+        critique_html = f'<div class="cross-check-grid-2">{comp_card}{light_card}</div>'
+
+    list_html = ""
+    if strengths or improvements:
+        s_card = (
+            f'<div class="cross-check-strengths-box"><b class="cross-check-sub-title">✓ OpenAI 시각 강점</b><ul>{render_list_items(strengths)}</ul></div>'
+            if strengths
+            else ""
+        )
+        i_card = (
+            f'<div class="cross-check-improvements-box"><b class="cross-check-sub-title">✗ OpenAI 조언/개선점</b><ul>{render_list_items(improvements)}</ul></div>'
+            if improvements
+            else ""
+        )
+        margin_style = ' style="margin-top:12px;"' if (cc_comp or cc_light) else ""
+        list_html = f'<div class="cross-check-grid-2"{margin_style}>{s_card}{i_card}</div>'
+
+    return f"""
+  <section class="section" aria-label="OpenAI 크로스 체크 의견">
+    <div class="panel cross-check-opinion-card">
+      <div class="cross-check-header">
+        <div class="cross-check-title-group">
+          <span class="cross-check-icon">🤝</span>
+          <div>
+            <h2 class="cross-check-title">OpenAI 크로스 체크 의견 <small>교차 검증 소견 ({cc_model})</small></h2>
+            <p class="cross-check-subtitle">Gemini 본 평가와 별도로 제공되는 독립적인 보조 비평입니다. (점수 합산/평균 없음)</p>
+          </div>
+        </div>
+        <div class="cross-check-score-group">
+          {grade_badge}
+          <div class="cross-check-score-val"><strong>{score_str}</strong><small> / 10</small></div>
+        </div>
+      </div>
+      {reason_html}
+      {critique_html}
+      {list_html}
+    </div>
+  </section>"""
+
+
+
 def render_html_report(
     photo: PreparedPhoto,
     analysis: PhotoAnalysis,
@@ -81,25 +174,14 @@ def render_html_report(
     if focus_notes:
         watermark_badge += f'<div style="margin-top:6px;font-size:0.82rem;color:#0369a1;background:#f0f9ff;padding:4px 10px;border-radius:6px;display:inline-block"><b>🎯 초점 정밀 분석:</b> {focus_notes}</div>'
 
-    cross_check_section = ""
     cross_check = getattr(analysis, "cross_check_opinion", None)
-    if cross_check is not None:
-        cc_data = cross_check.model_dump(mode="python") if hasattr(cross_check, "model_dump") else (cross_check if isinstance(cross_check, dict) else {})
-        if cc_data:
-            cc_model = escape(str(cc_data.get("model", "OpenAI")))
-            cc_score = float(cc_data.get("score", 0.0))
-            cc_reason = escape(str(cc_data.get("reason", "")))
-            cc_comp = escape(str(cc_data.get("composition_critique", "")))
-            cc_light = escape(str(cc_data.get("lighting_critique", "")))
-            cross_check_section = f"""
-  <section class="section" aria-label="교차 검증 소견">
-    <div class="section-title"><h2>교차 검증 소견 ({cc_model})</h2><p>독립 평가 점수: <strong>{cc_score:.1f} / 10</strong></p></div>
-    <article class="panel reason" style="border-left-color:var(--blue)"><strong>세컨드 오피니언 요약</strong><p>{cc_reason}</p></article>
-    <div class="list-grid" style="margin-top:14px">
-      <article class="panel list-card"><h3>구도 비평</h3><p style="margin:0;color:#46556e">{cc_comp}</p><h4>강점</h4><ul>{render_list(cc_data.get("strengths", []))}</ul></article>
-      <article class="panel list-card"><h3>조명 비평</h3><p style="margin:0;color:#46556e">{cc_light}</p><h4>개선점</h4><ul>{render_list(cc_data.get("improvements", []))}</ul></article>
-    </div>
-  </section>"""
+    cross_check_section = _render_cross_check_section(cross_check)
+    topline_desc = "Gemini + OpenAI 앙상블 분석" if cross_check else "Gemini 사진 분석"
+    ensemble_badge = (
+        '<span style="background:#0284c7;border-color:#0284c7;font-weight:700;">🤝 앙상블 크로스체크</span>'
+        if cross_check
+        else ""
+    )
 
     return f"""<!doctype html>
 <html lang="ko">
@@ -164,21 +246,44 @@ h1 {{ margin:0; font-size:clamp(1.8rem,4vw,2.8rem); line-height:1.2; }}
 .tag-pill {{ display:inline-flex; align-items:center; padding:5px 10px; border-radius:999px; background:#eef2ff; color:#304bb8; font-size:.84rem; font-weight:650; }}
 .empty-tag {{ margin:0; color:var(--muted); font-size:.86rem; }}
 .empty-tags {{ margin-bottom:12px; padding:13px 16px; border-radius:12px; background:#f0f4fa; color:#53627a; font-size:.9rem; }}
+.cross-check-opinion-card {{ padding:24px 28px; background:#f8fbff; border:1px solid #bae6fd; border-left:5px solid #0284c7; border-radius:20px; box-shadow:0 8px 26px #2439570a; }}
+.cross-check-header {{ display:flex; justify-content:space-between; align-items:center; gap:16px; margin-bottom:16px; flex-wrap:wrap; }}
+.cross-check-title-group {{ display:flex; align-items:center; gap:12px; }}
+.cross-check-icon {{ font-size:1.8rem; line-height:1; }}
+.cross-check-title {{ margin:0; font-size:1.25rem; color:var(--navy); display:flex; align-items:baseline; gap:8px; }}
+.cross-check-title small {{ font-size:0.88rem; color:#0284c7; font-weight:700; }}
+.cross-check-subtitle {{ margin:3px 0 0; color:var(--muted); font-size:0.82rem; }}
+.cross-check-score-group {{ display:flex; align-items:center; gap:10px; }}
+.cross-check-grade-pill {{ display:inline-block; padding:4px 10px; border-radius:999px; background:#0284c7; color:white; font-size:0.8rem; font-weight:700; }}
+.cross-check-score-val strong {{ font-size:1.8rem; color:#0284c7; line-height:1; }}
+.cross-check-score-val small {{ color:var(--muted); font-size:0.85rem; font-weight:500; }}
+.cross-check-reason-box {{ background:white; border:1px solid #e2e8f0; border-radius:12px; padding:14px 18px; margin-bottom:14px; font-size:0.92rem; color:#334155; line-height:1.6; }}
+.cross-check-reason-box strong {{ color:var(--navy); display:block; margin-bottom:4px; font-size:0.95rem; }}
+.cross-check-reason-box p {{ margin:0; white-space:pre-wrap; overflow-wrap:anywhere; }}
+.cross-check-grid-2 {{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }}
+.cross-check-comp-box {{ background:#f0f9ff; border:1px solid #e0f2fe; border-radius:12px; padding:14px 16px; color:#0369a1; }}
+.cross-check-light-box {{ background:#fffbeb; border:1px solid #fef3c7; border-radius:12px; padding:14px 16px; color:#b45309; }}
+.cross-check-sub-title {{ display:block; margin-bottom:6px; font-size:0.92rem; font-weight:700; }}
+.cross-check-comp-box p, .cross-check-light-box p {{ margin:0; font-size:0.88rem; line-height:1.55; white-space:pre-wrap; color:#334155; }}
+.cross-check-strengths-box {{ background:#f0fdf4; border:1px solid #dcfce7; border-radius:12px; padding:14px 16px; color:#166534; }}
+.cross-check-improvements-box {{ background:#fef2f2; border:1px solid #fee2e2; border-radius:12px; padding:14px 16px; color:#991b1b; }}
+.cross-check-strengths-box ul, .cross-check-improvements-box ul {{ margin:0; padding-left:20px; font-size:0.88rem; color:#334155; }}
+.cross-check-strengths-box li, .cross-check-improvements-box li {{ padding:3px 0; }}
 footer {{ margin-top:24px; color:var(--muted); font-size:.8rem; text-align:center; }}
 @media (max-width:900px) {{ .tag-grid {{ grid-template-columns:repeat(2,minmax(0,1fr)); }} }}
-@media (max-width:760px) {{ .page {{ width:min(100% - 22px, 600px); margin:16px auto 36px; }} .hero {{ grid-template-columns:1fr; padding:25px; }} .final-score {{ width:148px; height:148px; }} .final-score strong {{ font-size:2.8rem; }} .content-grid,.list-grid {{ grid-template-columns:1fr; }} .score-grid {{ grid-template-columns:1fr; }} .tag-grid {{ grid-template-columns:1fr; }} .topline {{ align-items:flex-start; flex-direction:column; }} }}
-@media print {{ body {{ background:white; }} .page {{ width:100%; margin:0; }} .hero,.panel,.score-card {{ box-shadow:none; }} .hero {{ break-inside:avoid; }} }}
+@media (max-width:760px) {{ .page {{ width:min(100% - 22px, 600px); margin:16px auto 36px; }} .hero {{ grid-template-columns:1fr; padding:25px; }} .final-score {{ width:148px; height:148px; }} .final-score strong {{ font-size:2.8rem; }} .content-grid,.list-grid {{ grid-template-columns:1fr; }} .score-grid {{ grid-template-columns:1fr; }} .tag-grid {{ grid-template-columns:1fr; }} .topline {{ align-items:flex-start; flex-direction:column; }} .cross-check-grid-2 {{ grid-template-columns:1fr; }} .cross-check-header {{ flex-direction:column; align-items:flex-start; }} }}
+@media print {{ body {{ background:white; }} .page {{ width:100%; margin:0; }} .hero,.panel,.score-card,.cross-check-opinion-card {{ box-shadow:none; }} .hero {{ break-inside:avoid; }} }}
 </style>
 </head>
 <body>
 <main class="page">
-  <div class="topline"><span class="brand">PHOTO REVIEW</span><span>Gemini 사진 분석 · 레코드 #{record_id}</span></div>
+  <div class="topline"><span class="brand">PHOTO REVIEW</span><span>{topline_desc} · 레코드 #{record_id}</span></div>
   <header class="hero">
     <div>
       <p class="eyebrow">PHOTO ANALYSIS REPORT</p>
       <h1>사진 분석 결과</h1>
       <p class="filename">{filename}</p>
-      <div class="meta"><span style="background:#11a898;border-color:#11a898;font-weight:700;">{category_label}</span><span style="background:#4f46e5;border-color:#4f46e5;font-weight:700;">🎯 {focus_status}</span><span>{photo.width} × {photo.height}px</span><span>{escape(photo.image_format)}</span><span>{escape(model)}</span></div>
+      <div class="meta"><span style="background:#11a898;border-color:#11a898;font-weight:700;">{category_label}</span><span style="background:#4f46e5;border-color:#4f46e5;font-weight:700;">🎯 {focus_status}</span>{ensemble_badge}<span>{photo.width} × {photo.height}px</span><span>{escape(photo.image_format)}</span><span>{escape(model)}</span></div>
     </div>
     <div class="final-score" role="img" aria-label="최종 점수 {final_score:.1f}점 ({final_grade})">
       <div><strong>{final_score:.1f}</strong><span>최종 점수 / 10</span><div class="grade-pill">{final_grade}</div></div>
@@ -273,12 +378,19 @@ def render_batch_comparison_html(
         analysis = r["analysis"]
         grade = get_score_grade(analysis.final_score)
         report_link = f'<a href="{escape(r["relative_report"])}">개별 보고서</a>' if r.get("relative_report") else "-"
+        cross_check = getattr(analysis, "cross_check_opinion", None)
+        cross_check_badge = ""
+        if cross_check is not None:
+            op_score = getattr(cross_check, "score", None)
+            op_model = getattr(cross_check, "model", "OpenAI")
+            if op_score is not None:
+                cross_check_badge = f'<div style="font-size:0.75rem;color:#0284c7;font-weight:700;margin-top:2px;">🤝 {escape(str(op_model))} {float(op_score):.1f}</div>'
         rows_html.append(
             f"""<tr>
               <td><strong>{escape(r["filename"])}</strong></td>
               <td><span class="badge" style="background:#eef2ff;color:#4338ca;">{escape(getattr(analysis, 'figure_category', '일반'))}</span></td>
               <td><span class="badge">{escape(grade)}</span></td>
-              <td><strong class="score">{analysis.final_score:.1f}</strong></td>
+              <td><strong class="score">{analysis.final_score:.1f}</strong>{cross_check_badge}</td>
               <td>{analysis.composition_score:.1f}</td>
               <td>{analysis.lighting_score:.1f}</td>
               <td>{analysis.color_score:.1f}</td>

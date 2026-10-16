@@ -157,7 +157,9 @@ function startTournament() {
   tourState.champion = null;
   tourState.mode = 'battle';
 
-  tourState.roundMatches = makeMatchesFromList(candidates);
+  const { matches, byes } = makeMatchesFromList(candidates);
+  tourState.roundMatches = matches;
+  tourState.nextRound = [...byes];
   tourState.totalSteps = count - 1;
   tourState.completedSteps = 0;
 
@@ -169,14 +171,15 @@ function startTournament() {
 
 function makeMatchesFromList(list) {
   const matches = [];
+  const byes = [];
   for (let i = 0; i < list.length; i += 2) {
     if (i + 1 < list.length) {
       matches.push([list[i], list[i + 1]]);
     } else {
-      tourState.nextRound.push(list[i]);
+      byes.push(list[i]);
     }
   }
-  return matches;
+  return { matches, byes };
 }
 
 function getRoundTitle(remaining) {
@@ -276,8 +279,10 @@ function selectTournamentWinner(winnerSide) {
       tourState.champion = tourState.nextRound[0];
       renderTournamentChampion(tourState.champion);
     } else {
-      tourState.roundMatches = makeMatchesFromList(tourState.nextRound);
-      tourState.nextRound = [];
+      const nextPool = [...tourState.nextRound];
+      const { matches, byes } = makeMatchesFromList(nextPool);
+      tourState.roundMatches = matches;
+      tourState.nextRound = [...byes];
       tourState.currentMatchIdx = 0;
       renderTournamentMatch();
     }

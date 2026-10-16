@@ -434,14 +434,14 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 }
                 self.wfile.write(json.dumps(res, ensure_ascii=False).encode("utf-8"))
                 return
+            except ValueError as exc:
+                self._send_json_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
             except Exception as exc:
                 import traceback
                 print(f"[/api/analyze ERROR] {type(exc).__name__}: {exc}", file=sys.stderr)
                 traceback.print_exc(file=sys.stderr)
-                self.send_response(HTTPStatus.INTERNAL_SERVER_ERROR)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.end_headers()
-                self.wfile.write(json.dumps({"success": False, "error": str(exc)}, ensure_ascii=False).encode("utf-8"))
+                self._send_json_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
                 return
 
         if parsed.path == "/api/reanalyze":
@@ -607,6 +607,12 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                     sha256 = r.get("sha256")
                     analysis_data = json.loads(r["analysis_json"])
                     target_file = _find_local_photo_path(fname, expected_sha256=sha256)
+                    if target_file is None and sha256:
+                        for mime_type in ("image/jpeg", "image/png", "image/webp"):
+                            orig_path = get_original_photo_path(self.db_path, sha256, mime_type)
+                            if orig_path.is_file():
+                                target_file = orig_path
+                                break
                     if target_file is None:
                         skipped_files.append(fname)
                         continue
@@ -683,11 +689,12 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                     "cached": False,
                 }, ensure_ascii=False).encode("utf-8"))
                 return
+            except (ValueError, KeyError, TypeError) as exc:
+                status = HTTPStatus.NOT_FOUND if "찾을 수 없습니다" in str(exc) else HTTPStatus.BAD_REQUEST
+                self._send_json_error(status, str(exc))
+                return
             except Exception as exc:
-                self.send_response(HTTPStatus.INTERNAL_SERVER_ERROR)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.end_headers()
-                self.wfile.write(json.dumps({"success": False, "error": str(exc)}, ensure_ascii=False).encode("utf-8"))
+                self._send_json_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
                 return
 
         if parsed.path.startswith("/api/sns-crop/"):
@@ -769,11 +776,12 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                     "cached": False,
                 }, ensure_ascii=False).encode("utf-8"))
                 return
+            except (ValueError, KeyError, TypeError) as exc:
+                status = HTTPStatus.NOT_FOUND if "찾을 수 없습니다" in str(exc) else HTTPStatus.BAD_REQUEST
+                self._send_json_error(status, str(exc))
+                return
             except Exception as exc:
-                self.send_response(HTTPStatus.INTERNAL_SERVER_ERROR)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.end_headers()
-                self.wfile.write(json.dumps({"success": False, "error": str(exc)}, ensure_ascii=False).encode("utf-8"))
+                self._send_json_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
                 return
 
         if parsed.path.startswith("/api/sns-caption/"):
@@ -831,11 +839,12 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                     "cached": False,
                 }, ensure_ascii=False).encode("utf-8"))
                 return
+            except (ValueError, KeyError, TypeError) as exc:
+                status = HTTPStatus.NOT_FOUND if "찾을 수 없습니다" in str(exc) else HTTPStatus.BAD_REQUEST
+                self._send_json_error(status, str(exc))
+                return
             except Exception as exc:
-                self.send_response(HTTPStatus.INTERNAL_SERVER_ERROR)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.end_headers()
-                self.wfile.write(json.dumps({"success": False, "error": str(exc)}, ensure_ascii=False).encode("utf-8"))
+                self._send_json_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
                 return
 
         if parsed.path.startswith("/api/sns-advice/"):
@@ -874,11 +883,12 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(json.dumps({"success": True, "advice": advice_dict, "used_model": resolved_model, "cached": False}, ensure_ascii=False).encode("utf-8"))
                 return
+            except (ValueError, KeyError, TypeError) as exc:
+                status = HTTPStatus.NOT_FOUND if "찾을 수 없습니다" in str(exc) else HTTPStatus.BAD_REQUEST
+                self._send_json_error(status, str(exc))
+                return
             except Exception as exc:
-                self.send_response(HTTPStatus.INTERNAL_SERVER_ERROR)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.end_headers()
-                self.wfile.write(json.dumps({"success": False, "error": str(exc)}, ensure_ascii=False).encode("utf-8"))
+                self._send_json_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
                 return
 
         self.send_response(HTTPStatus.NOT_FOUND)

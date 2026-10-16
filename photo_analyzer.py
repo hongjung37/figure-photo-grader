@@ -50,6 +50,7 @@ from app.models.analysis import (
     FIGURE_CATEGORY_CHOICES,
     SCORE_GRADE_BENCHMARKS,
     AestheticTags,
+    CrossCheckOpinion,
     PhotoAnalysis,
     get_score_grade,
 )
