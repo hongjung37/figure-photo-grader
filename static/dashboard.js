@@ -676,10 +676,12 @@ function renderReanalyzePanel(item) {
             <div id="reanalyze-tier-wrap-${item.id}" class="reanalyze-tier-select-wrap" style="${hasLuna ? '' : 'display:none;'}">
               <label class="reanalyze-sublabel">분석 모델 선택:</label>
               <select id="reanalyze-tier-${item.id}" class="select-input reanalyze-select">
-                <option value="standard" selected>🔍 Flash-Lite 3.5 (균형 잡힌 표준 화질 평가 - 권장)</option>
-                <option value="pro">💎 Flash 3.8 (고화질 디테일 심층 비평)</option>
-                <option value="lite">⚡ Flash-Lite 3.1 (초고속 스크리닝)</option>
-                <option value="ensemble">🤝 Gemini 3.5 + GPT-6 Luna 크로스체크 앙상블</option>
+                <option value="standard" ${(window.ModelSettings && window.ModelSettings.get('photo_grading') === 'standard') ? 'selected' : ''}>🔍 Flash-Lite 3.5 (균형 잡힌 표준 화질 평가 - 권장)</option>
+                <option value="lite" ${(window.ModelSettings && window.ModelSettings.get('photo_grading') === 'lite') ? 'selected' : ''}>⚡ Flash-Lite 3.1 (초고속 스크리닝)</option>
+                <option value="flash-3.6" ${(window.ModelSettings && window.ModelSettings.get('photo_grading') === 'flash-3.6') ? 'selected' : ''}>🧪 Gemini Flash 3.6 (실험적 고성능)</option>
+                <option value="flash-3.7" ${(window.ModelSettings && window.ModelSettings.get('photo_grading') === 'flash-3.7') ? 'selected' : ''}>🚀 Gemini Flash 3.7 (차세대 고속 비평)</option>
+                <option value="pro" ${(window.ModelSettings && window.ModelSettings.get('photo_grading') === 'pro') ? 'selected' : ''}>💎 Flash 3.8 (고화질 디테일 심층 비평)</option>
+                <option value="ensemble" ${(window.ModelSettings && window.ModelSettings.get('photo_grading') === 'ensemble') ? 'selected' : ''}>🤝 Gemini 3.5 + GPT-6 Luna 크로스체크 앙상블</option>
               </select>
             </div>
           </div>

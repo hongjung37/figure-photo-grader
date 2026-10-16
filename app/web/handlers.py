@@ -383,8 +383,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                             active_provider = "ensemble"
                             model = f"ensemble({MODEL_PRESETS['standard']}+{DEFAULT_OPENAI_MODEL})"
                         else:
-                            active_provider = "gemini"
-                            model = MODEL_PRESETS.get(tier, MODEL_PRESETS["standard"])
+                            active_provider, model = resolve_task_model(tier, default_tier="standard")
 
                         category_hint = category_param if category_param != "auto" else None
                         analysis = analyze_photo(prepared, provider=active_provider, model=model, category_hint=category_hint)
@@ -461,8 +460,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                         active_provider = "ensemble"
                         model = f"ensemble({MODEL_PRESETS['standard']}+{DEFAULT_OPENAI_MODEL})"
                     else:
-                        active_provider = "gemini"
-                        model = MODEL_PRESETS.get(tier, MODEL_PRESETS["standard"])
+                        active_provider, model = resolve_task_model(tier, default_tier="standard")
 
                     new_analysis = analyze_photo(
                         prepared,
