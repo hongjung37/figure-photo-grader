@@ -10,15 +10,16 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 class FrontendIntegrityTests(unittest.TestCase):
     def setUp(self):
         self.html = (PROJECT_ROOT / "templates/index.html").read_text(encoding="utf-8")
-        self.js = (
-            (PROJECT_ROOT / "static/js/api.js").read_text(encoding="utf-8")
-            + "\n"
-            + (PROJECT_ROOT / "static/js/tag_filter.js").read_text(encoding="utf-8")
-            + "\n"
-            + (PROJECT_ROOT / "static/js/crop_viewer.js").read_text(encoding="utf-8")
-            + "\n"
-            + (PROJECT_ROOT / "static/dashboard.js").read_text(encoding="utf-8")
-        )
+        js_files = [
+            PROJECT_ROOT / "static/js/api.js",
+            PROJECT_ROOT / "static/js/tag_filter.js",
+            PROJECT_ROOT / "static/js/crop_viewer.js",
+            PROJECT_ROOT / "static/js/tournament.js",
+            PROJECT_ROOT / "static/js/tag_insights.js",
+            PROJECT_ROOT / "static/js/modals.js",
+            PROJECT_ROOT / "static/dashboard.js",
+        ]
+        self.js = "\n".join(p.read_text(encoding="utf-8") for p in js_files if p.is_file())
 
     def test_dom_ids_exist(self):
         ids = set(re.findall(r"document\.getElementById\(['\"]([a-zA-Z0-9_-]+)['\"]\)", self.js))
