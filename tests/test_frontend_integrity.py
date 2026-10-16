@@ -121,6 +121,14 @@ if (mockElements['gallery-grid'].style.display !== 'grid') {
   throw new Error('gallery-grid did not display grid');
 }
 
+// Verify tournament odd-bracket pairing does not lose bye candidate
+if (typeof ctx.makeMatchesFromList === 'function') {
+  const r3 = ctx.makeMatchesFromList([1, 2, 3]);
+  if (!r3.matches || r3.matches.length !== 1 || !r3.byes || r3.byes.length !== 1 || r3.byes[0] !== 3) {
+    throw new Error('makeMatchesFromList(3 items) failed to preserve bye candidate');
+  }
+}
+
 process.stdout.write('OK');
 """
         res = subprocess.run(
