@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -130,6 +130,12 @@ FIGURE_CATEGORIES = {
 }
 
 FIGURE_CATEGORY_CHOICES = tuple(cat["label"] for cat in FIGURE_CATEGORIES.values())
+FigureCategoryType = Literal[
+    "접사/디테일",
+    "일상/야외 스냅",
+    "스튜디오 연출/디오라마",
+    "일반 피규어 촬영",
+]
 
 FOCUS_STATUS_OPTIONS = (
     "완벽 칼초점",
@@ -138,6 +144,13 @@ FOCUS_STATUS_OPTIONS = (
     "초점 이탈",
     "판별 불가",
 )
+FocusStatusType = Literal[
+    "완벽 칼초점",
+    "미세 앞핀",
+    "미세 뒤핀",
+    "초점 이탈",
+    "판별 불가",
+]
 
 
 class CrossCheckOpinion(BaseModel):
@@ -196,7 +209,7 @@ class PhotoAnalysis(BaseModel):
     final_reason: str = Field(description="최종 점수 근거. 장점과 단점을 균형 있게 분석하고 해당 점수를 부여한 명확한 이유 제시")
     strengths: list[str] = Field(description="사진의 주요 장점 목록 (실제 돋보이는 핵심 강점)")
     improvements: list[str] = Field(description="사진의 단점, 아쉬운 점 및 다음 촬영을 위한 개선점 목록")
-    figure_category: str = Field(
+    figure_category: FigureCategoryType = Field(
         default="일반 피규어 촬영",
         description="피규어 사진 하위 유형: '접사/디테일', '일상/야외 스냅', '스튜디오 연출/디오라마', '일반 피규어 촬영' 중 택1",
     )
@@ -204,7 +217,7 @@ class PhotoAnalysis(BaseModel):
         default=None,
         description="사진 하단 프레임이나 워터마크에 인쇄된 시각적 촬영 설정(카메라, 조리개, 셔터, ISO, 렌즈 등) 추출 결과. 없거나 불확실하면 null",
     )
-    focus_status: str = Field(
+    focus_status: FocusStatusType = Field(
         default="완벽 칼초점",
         description="피규어 눈동자/페이스 초점 핀 정밀 판정: '완벽 칼초점', '미세 앞핀', '미세 뒤핀', '초점 이탈', '판별 불가' 중 택1",
     )
@@ -224,6 +237,11 @@ class PhotoAnalysis(BaseModel):
     @classmethod
     def model_json_schema(cls, *args: Any, **kwargs: Any) -> dict[str, Any]:
         schema = super().model_json_schema(*args, **kwargs)
+        properties = schema.get("properties", {})
+        if "focus_status" in properties:
+            properties["focus_status"]["enum"] = list(FOCUS_STATUS_OPTIONS)
+        if "figure_category" in properties:
+            properties["figure_category"]["enum"] = list(FIGURE_CATEGORY_CHOICES)
         tag_properties = schema.get("$defs", {}).get("AestheticTags", {}).get("properties", {})
         for category_key, allowed_tags in AESTHETIC_TAG_OPTIONS.items():
             field_schema = tag_properties.get(category_key)
