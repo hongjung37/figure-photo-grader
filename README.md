@@ -6,6 +6,10 @@
 
 사진 파일에서 촬영에 필요한 EXIF만 추출하고, Gemini 및 OpenAI(GPT-6 Luna)의 구조화 출력(JSON Schema)을 사용해 구도·조명·색감·촬영 기술·최종 점수(각 10점 만점)와 범주별 미학 태그를 평가한 뒤 SQLite에 저장하는 단일 이미지 CLI 및 웹 대시보드입니다.
 
+<p align="center">
+  <img width="98%" alt="Figure Photo Grader Main Dashboard Gallery" src="https://github.com/user-attachments/assets/4c5f86a5-6453-4362-b7c0-a15110407245" />
+</p>
+
 ## 개인정보 처리
 
 GPS 위치, 촬영 시각, 소유자/코멘트, MakerNote, 카메라·렌즈 일련번호는 업로드 이미지와 SQLite에 포함하지 않습니다. Gemini로 보내는 이미지는 새로 인코딩하며, 허용 목록의 카메라/렌즈 모델 및 조리개(F-number), 셔터(ExposureTime), ISO, 초점거리 등 촬영 설정만 EXIF에 다시 넣습니다. 같은 안전한 설정은 API 요청의 텍스트에도 함께 전달되어 촬영 기술 평가에 활용됩니다. Interactions API 요청은 `store=False`로 생성합니다. 다만 사진 픽셀 자체는 분석을 위해 Google Gemini API로 전송되며 Google의 API 데이터 처리 정책이 적용됩니다.
@@ -174,6 +178,10 @@ Excel 내보내기는 DB를 읽기 전용으로 열어 스키마나 데이터를
 ## Culling & Review Web 대시보드
 
 피규어 사진을 편리하게 선별(Culling)하고 A/B 컷을 1:1로 비교하며, 연사 묶음(Stack) 자동 선별, 블라인드 토너먼트, 태그 기반 통계/경향성 분석(인사이트), 사용자 직접 평가 및 라이트룸/SNS 연동까지 원스톱으로 처리할 수 있는 반응형 웹 대시보드입니다.
+
+<p align="center">
+  <img width="85%" alt="Figure Photo Grader Detail Review Modal with Lightroom & Luna Cross-Check" src="https://github.com/user-attachments/assets/ae21b25b-eb07-4ca7-aa00-ee5d90423936" />
+</p>
 
 ```powershell
 python .\photo_dashboard.py
