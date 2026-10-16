@@ -187,7 +187,23 @@ class OpenAIClientTests(unittest.TestCase):
             self.assertIsNotNone(res3.cross_check_opinion)
             self.assertEqual(res3.cross_check_opinion.score, 8.4)
             mock_g.assert_called_once()
+            self.assertEqual(mock_g.call_args.kwargs.get("model"), "gemini-3.5-flash-lite")
             mock_cross.assert_called_once()
+            self.assertEqual(mock_cross.call_args.kwargs.get("model"), "gpt-6-luna")
+
+            # Provider: ensemble with wrapper string
+            mock_g.reset_mock()
+            mock_cross.reset_mock()
+            res4 = analyze_photo(
+                self.sample_photo,
+                provider="ensemble",
+                model="ensemble(gemini-3.5-flash-lite+gpt-6-luna)",
+            )
+            self.assertEqual(res4.final_score, 8.0)
+            mock_g.assert_called_once()
+            self.assertEqual(mock_g.call_args.kwargs.get("model"), "gemini-3.5-flash-lite")
+            mock_cross.assert_called_once()
+            self.assertEqual(mock_cross.call_args.kwargs.get("model"), "gpt-6-luna")
 
 
 if __name__ == "__main__":

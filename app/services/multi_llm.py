@@ -72,11 +72,22 @@ def analyze_photo(
 
     if normalized_provider == "ensemble":
         target_openai_model = DEFAULT_OPENAI_MODEL
+        target_gemini_model = MODEL_PRESETS.get("standard", "gemini-3.5-flash-lite")
+        if model and not model.startswith("ensemble"):
+            target_gemini_model = model
+        elif model and model.startswith("ensemble(") and "+" in model:
+            inner = model[len("ensemble("):-1]
+            parts = inner.split("+", 1)
+            if parts[0] and parts[0] != "gemini":
+                target_gemini_model = parts[0]
+            if len(parts) > 1 and parts[1]:
+                target_openai_model = parts[1]
+
         with ThreadPoolExecutor(max_workers=2) as executor:
             gemini_fut = executor.submit(
                 analyze_with_gemini,
                 photo=photo,
-                model=model or DEFAULT_MODEL,
+                model=target_gemini_model,
                 category_hint=category_hint,
             )
             openai_fut = executor.submit(

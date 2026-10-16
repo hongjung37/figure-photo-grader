@@ -24,7 +24,7 @@ MODEL_PRESETS: dict[str, str] = {
     "standard": "gemini-3.5-flash-lite",   # 균형 잡힌 표준 화질 평가 모드
     "pro": "gemini-3.8-flash",            # 고화질 심층 비평 모드 (서버 과부하시 자동 폴백)
 }
-DEFAULT_TIER = "lite"
+DEFAULT_TIER = "standard"
 DEFAULT_MODEL = MODEL_PRESETS[DEFAULT_TIER]
 FALLBACK_MODEL = "gemini-3.5-flash-lite"
 

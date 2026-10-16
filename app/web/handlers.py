@@ -374,7 +374,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                         normalized_provider = provider.lower()
                         if tier == "ensemble" or normalized_provider == "ensemble":
                             active_provider = "ensemble"
-                            model = f"ensemble(gemini+{DEFAULT_OPENAI_MODEL})"
+                            model = f"ensemble({MODEL_PRESETS['standard']}+{DEFAULT_OPENAI_MODEL})"
                         else:
                             active_provider = "gemini"
                             model = MODEL_PRESETS.get(tier, MODEL_PRESETS["standard"])
@@ -452,7 +452,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 else:
                     if tier == "ensemble":
                         active_provider = "ensemble"
-                        model = f"ensemble(gemini+{DEFAULT_OPENAI_MODEL})"
+                        model = f"ensemble({MODEL_PRESETS['standard']}+{DEFAULT_OPENAI_MODEL})"
                     else:
                         active_provider = "gemini"
                         model = MODEL_PRESETS.get(tier, MODEL_PRESETS["standard"])

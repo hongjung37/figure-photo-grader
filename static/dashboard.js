@@ -673,7 +673,7 @@ function renderReanalyzePanel(item) {
                 <option value="standard" selected>🔍 Flash-Lite 3.5 (균형 잡힌 표준 화질 평가 - 권장)</option>
                 <option value="pro">💎 Flash 3.8 (고화질 디테일 심층 비평)</option>
                 <option value="lite">⚡ Flash-Lite 3.1 (초고속 스크리닝)</option>
-                <option value="ensemble">🤝 Gemini + GPT-6 Luna 크로스체크 앙상블</option>
+                <option value="ensemble">🤝 Gemini 3.5 + GPT-6 Luna 크로스체크 앙상블</option>
               </select>
             </div>
           </div>
