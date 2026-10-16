@@ -1277,6 +1277,62 @@ class PhotoAnalyzerTests(unittest.TestCase):
             self.assertFalse(resp_force["cached"])
             self.assertEqual(resp_force["advice"]["temp_tint_notes"], "5400K (Regenerated)")
 
+    def test_self_healing_from_llm_json_and_model_validate_json(self) -> None:
+        """Test defensive normalization on LLM JSON output with typos, markdown, out-of-range scores."""
+        raw_llm_output = """```json
+        {
+            "composition_score": 10.5,
+            "composition_notes": "[장점] 구도 좋음 [단점] 없음",
+            "lighting_score": 8.0,
+            "lighting_notes": "[장점] 조명 자연스러움 [단점] 없음",
+            "color_score": -1.0,
+            "color_notes": "[장점] 색감 좋음 [단점] 없음",
+            "technique_score": "8.5",
+            "technique_notes": "[장점] 선명함 [단점] 없음",
+            "final_score": 9.2,
+            "final_reason": "전체적으로 우수함",
+            "strengths": ["선명한 디테일"],
+            "improvements": ["배경 정리"],
+            "figure_category": "접사",
+            "focus_status": "완벽 칼초plet",
+            "focus_notes": "눈동자에 핀이 완벽히 맞음",
+            "aesthetic_tags": {
+                "viewpoint": ["정면", "정면"],
+                "composition_space": ["중앙구도", "클로즈업", "얕은 심도", "깊은 심도"],
+                "pose_gaze": ["정면 응시"],
+                "mood": ["존재하지않는이상한태그", "따뜻함"],
+                "subject_background": [],
+                "light_expression": [],
+                "color_impression": [],
+                "narrative_implication": []
+            }
+        }
+        ```"""
+        analysis = PhotoAnalysis.model_validate_json(raw_llm_output)
+
+        # 1. focus_status healed from '완벽 칼초plet' to '완벽 칼초점'
+        self.assertEqual(analysis.focus_status, "완벽 칼초점")
+
+        # 2. figure_category healed from '접사' to '접사/디테일'
+        self.assertEqual(analysis.figure_category, "접사/디테일")
+
+        # 3. scores clamped to 0.0 - 10.0
+        self.assertEqual(analysis.composition_score, 10.0)
+        self.assertEqual(analysis.color_score, 0.0)
+        self.assertEqual(analysis.technique_score, 8.5)
+
+        # 4. aesthetic_tags healed, deduplicated, and limited to 3
+        self.assertEqual(analysis.aesthetic_tags.viewpoint, ["정면"])
+        self.assertIn("중앙 구도", analysis.aesthetic_tags.composition_space)
+        self.assertLessEqual(len(analysis.aesthetic_tags.composition_space), 3)
+        self.assertEqual(analysis.aesthetic_tags.mood, ["따뜻함"])
+
+        # 5. Unknown focus_status falls back to '판별 불가'
+        unknown_output = raw_llm_output.replace("완벽 칼초plet", "완전알수없는말")
+        unknown_analysis = PhotoAnalysis.model_validate_json(unknown_output)
+        self.assertEqual(unknown_analysis.focus_status, "판별 불가")
+
 
 if __name__ == "__main__":
     unittest.main()
+

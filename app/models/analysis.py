@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import difflib
+import json
+import re
+import sys
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -153,6 +157,149 @@ FocusStatusType = Literal[
 ]
 
 
+def _heal_choice(
+    value: Any,
+    allowed_choices: tuple[str, ...],
+    fallback: str | None = None,
+    field_name: str = "field",
+    cutoff: float = 0.65,
+) -> str | None:
+    if not isinstance(value, str):
+        return fallback
+    cleaned = value.strip()
+    if cleaned in allowed_choices:
+        return cleaned
+
+    # 1. Direct or keyword substring match
+    for choice in allowed_choices:
+        if choice in cleaned or cleaned in choice:
+            print(f"[Self-Healing] {field_name} 포함일치 교정: {value!r} -> {choice!r}", file=sys.stderr)
+            return choice
+        parts = [p for p in choice.replace("/", " ").split() if len(p) >= 2]
+        if any(p in cleaned for p in parts):
+            print(f"[Self-Healing] {field_name} 키워드일치 교정: {value!r} -> {choice!r}", file=sys.stderr)
+            return choice
+
+    # 2. Difflib close matches with cutoff
+    matches = difflib.get_close_matches(cleaned, allowed_choices, n=1, cutoff=cutoff)
+    if matches:
+        print(f"[Self-Healing] {field_name} 유사도 교정: {value!r} -> {matches[0]!r}", file=sys.stderr)
+        return matches[0]
+
+    # 3. Fallback
+    if fallback is not None:
+        print(f"[Self-Healing] {field_name} 비정상 값 기본 대체: {value!r} -> {fallback!r}", file=sys.stderr)
+        return fallback
+    return None
+
+
+def heal_analysis_payload(data: dict[str, Any]) -> dict[str, Any]:
+    """Defensively sanitize and repair LLM output dict before strict Pydantic validation."""
+    if not isinstance(data, dict):
+        return {}
+
+    healed = dict(data)
+
+    # 1. Heal focus_status
+    raw_focus = healed.get("focus_status")
+    if raw_focus not in FOCUS_STATUS_OPTIONS:
+        healed["focus_status"] = _heal_choice(
+            raw_focus,
+            FOCUS_STATUS_OPTIONS,
+            fallback="판별 불가",
+            field_name="focus_status",
+            cutoff=0.6,
+        )
+
+    # 2. Heal figure_category
+    raw_cat = healed.get("figure_category")
+    if raw_cat not in FIGURE_CATEGORY_CHOICES:
+        healed["figure_category"] = _heal_choice(
+            raw_cat,
+            FIGURE_CATEGORY_CHOICES,
+            fallback="일반 피규어 촬영",
+            field_name="figure_category",
+            cutoff=0.6,
+        )
+
+    # 3. Clamp scores (0.0 to 10.0)
+    for score_field in (
+        "composition_score",
+        "lighting_score",
+        "color_score",
+        "technique_score",
+        "final_score",
+    ):
+        raw_val = healed.get(score_field)
+        try:
+            val = float(raw_val)
+        except (TypeError, ValueError):
+            print(f"[Self-Healing] {score_field} 비정상 점수 기본값(7.0) 대체: {raw_val!r}", file=sys.stderr)
+            val = 7.0
+        clamped = max(0.0, min(10.0, round(val, 1)))
+        if clamped != val:
+            print(f"[Self-Healing] {score_field} 점수 범위 조정: {val} -> {clamped}", file=sys.stderr)
+        healed[score_field] = clamped
+
+    # 4. Heal aesthetic_tags
+    raw_tags = healed.get("aesthetic_tags")
+    if isinstance(raw_tags, dict):
+        healed_tags: dict[str, list[str]] = {}
+        for cat_key, allowed_options in AESTHETIC_TAG_OPTIONS.items():
+            category_tags = raw_tags.get(cat_key, [])
+            if not isinstance(category_tags, (list, tuple)):
+                healed_tags[cat_key] = []
+                continue
+            cleaned_list: list[str] = []
+            seen: set[str] = set()
+            for t in category_tags:
+                if not isinstance(t, str) or not t.strip():
+                    continue
+                t_str = t.strip()
+                if t_str in allowed_options:
+                    choice = t_str
+                else:
+                    choice = _heal_choice(
+                        t_str,
+                        allowed_options,
+                        fallback=None,
+                        field_name=f"tag[{cat_key}]",
+                        cutoff=0.75,
+                    )
+                if choice and choice not in seen:
+                    seen.add(choice)
+                    cleaned_list.append(choice)
+                    if len(cleaned_list) >= 3:
+                        break
+            healed_tags[cat_key] = cleaned_list
+        healed["aesthetic_tags"] = healed_tags
+    elif raw_tags is None:
+        healed["aesthetic_tags"] = AestheticTags.empty().model_dump()
+
+    # 5. Ensure text fields are strings
+    for str_field in (
+        "composition_notes",
+        "lighting_notes",
+        "color_notes",
+        "technique_notes",
+        "final_reason",
+        "focus_notes",
+    ):
+        if str_field not in healed or healed[str_field] is None:
+            healed[str_field] = ""
+
+    # 6. Ensure list fields are lists
+    for list_field in ("strengths", "improvements"):
+        v = healed.get(list_field)
+        if isinstance(v, str):
+            healed[list_field] = [v]
+        elif not isinstance(v, (list, tuple)):
+            healed[list_field] = []
+
+    return healed
+
+
+
 class CrossCheckOpinion(BaseModel):
     """Independent second opinion / critique provided by a secondary LLM (e.g. OpenAI GPT-6 Luna)."""
 
@@ -279,4 +426,43 @@ class PhotoAnalysis(BaseModel):
         if value not in FOCUS_STATUS_OPTIONS:
             raise ValueError(f"허용되지 않은 초점 상태입니다: '{value}'. 허용: {FOCUS_STATUS_OPTIONS}")
         return value
+
+    @classmethod
+    def from_llm_json(cls, raw_text: str | bytes | bytearray) -> PhotoAnalysis:
+        """Parse raw LLM output text, extracting JSON and applying self-healing normalization."""
+        if isinstance(raw_text, (bytes, bytearray)):
+            text = raw_text.decode("utf-8", errors="replace")
+        else:
+            text = str(raw_text)
+
+        cleaned = text.strip()
+        if "```" in cleaned:
+            match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", cleaned)
+            if match:
+                cleaned = match.group(1).strip()
+
+        if not (cleaned.startswith("{") and cleaned.endswith("}")):
+            start = cleaned.find("{")
+            end = cleaned.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                cleaned = cleaned[start : end + 1]
+
+        data = json.loads(cleaned)
+        healed_data = heal_analysis_payload(data)
+        return cls.model_validate(healed_data)
+
+    @classmethod
+    def model_validate_json(
+        cls,
+        json_data: str | bytes | bytearray,
+        *,
+        strict: bool | None = None,
+        context: Any | None = None,
+    ) -> PhotoAnalysis:
+        """Override model_validate_json to use defensive self-healing when parsing JSON text."""
+        try:
+            return cls.from_llm_json(json_data)
+        except Exception:
+            return super().model_validate_json(json_data, strict=strict, context=context)
+
 
