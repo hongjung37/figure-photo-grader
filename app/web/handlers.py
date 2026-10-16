@@ -88,6 +88,7 @@ from app.services.image_processor import (
     hamming_distance,
     make_thumbnail_bytes,
     prepare_photo,
+    prepare_photo_from_bytes,
 )
 
 
@@ -354,44 +355,25 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 if not file_bytes:
                     raise ValueError("사진 파일이 전달되지 않았습니다.")
 
-                with tempfile.NamedTemporaryFile(suffix=Path(filename).suffix, delete=False) as tmp:
-                    tmp_path = Path(tmp.name)
-                    tmp.write(file_bytes)
-
-                try:
-                    photo_obj = prepare_photo(tmp_path)
-                    prepared = PreparedPhoto(
-                        source_filename=filename,
-                        sha256=photo_obj.sha256,
-                        width=photo_obj.width,
-                        height=photo_obj.height,
-                        image_format=photo_obj.image_format,
-                        safe_exif=photo_obj.safe_exif,
-                        upload_bytes=photo_obj.upload_bytes,
-                        upload_mime_type=photo_obj.upload_mime_type,
-                        thumbnail_bytes=photo_obj.thumbnail_bytes,
-                        dhash=photo_obj.dhash,
-                    )
-                    force_reanalyze = parse_qs(parsed.query).get("force", ["false"])[0].lower() in ("1", "true", "yes")
-                    existing = None if force_reanalyze else find_existing_analysis(self.db_path, prepared.sha256)
-                    if existing is not None:
-                        record_id, analysis_dict = existing
-                        duplicate = True
+                prepared = prepare_photo_from_bytes(file_bytes, filename=filename)
+                force_reanalyze = parse_qs(parsed.query).get("force", ["false"])[0].lower() in ("1", "true", "yes")
+                existing = None if force_reanalyze else find_existing_analysis(self.db_path, prepared.sha256)
+                if existing is not None:
+                    record_id, analysis_dict = existing
+                    duplicate = True
+                else:
+                    normalized_provider = provider.lower()
+                    if tier == "ensemble" or normalized_provider == "ensemble":
+                        active_provider = "ensemble"
+                        model = f"ensemble({MODEL_PRESETS['standard']}+{DEFAULT_OPENAI_MODEL})"
                     else:
-                        normalized_provider = provider.lower()
-                        if tier == "ensemble" or normalized_provider == "ensemble":
-                            active_provider = "ensemble"
-                            model = f"ensemble({MODEL_PRESETS['standard']}+{DEFAULT_OPENAI_MODEL})"
-                        else:
-                            active_provider, model = resolve_task_model(tier, default_tier="standard")
+                        active_provider, model = resolve_task_model(tier, default_tier="standard")
 
-                        category_hint = category_param if category_param != "auto" else None
-                        analysis = analyze_photo(prepared, provider=active_provider, model=model, category_hint=category_hint)
-                        record_id = save_analysis(self.db_path, prepared, model, analysis)
-                        analysis_dict = analysis.model_dump(mode="json")
-                        duplicate = False
-                finally:
-                    tmp_path.unlink(missing_ok=True)
+                    category_hint = category_param if category_param != "auto" else None
+                    analysis = analyze_photo(prepared, provider=active_provider, model=model, category_hint=category_hint)
+                    record_id = save_analysis(self.db_path, prepared, model, analysis)
+                    analysis_dict = analysis.model_dump(mode="json")
+                    duplicate = False
 
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", "application/json; charset=utf-8")

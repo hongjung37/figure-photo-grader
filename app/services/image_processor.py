@@ -80,19 +80,20 @@ class PreparedPhoto:
     dhash: int | None = None
 
 
-def make_thumbnail_bytes(image_path_or_bytes: Path | bytes, max_dim: int = 800, quality: int = 82) -> bytes:
-    """Generate lightweight WebP thumbnail from image file path or raw bytes."""
+def make_thumbnail_bytes(image_path_or_bytes: Path | bytes | str, max_dim: int = 800, quality: int = 82) -> bytes:
+    """Generate lightweight WebP thumbnail from image file path or raw bytes without leaking handles."""
     if isinstance(image_path_or_bytes, (str, Path)):
-        img = Image.open(image_path_or_bytes)
+        data = Path(image_path_or_bytes).read_bytes()
     else:
-        img = Image.open(io.BytesIO(image_path_or_bytes))
-    img = ImageOps.exif_transpose(img)
-    if img.mode not in ("RGB", "RGBA"):
-        img = img.convert("RGB")
-    img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
-    out = io.BytesIO()
-    img.save(out, format="WEBP", quality=quality)
-    return out.getvalue()
+        data = image_path_or_bytes
+    with Image.open(io.BytesIO(data)) as img:
+        img = ImageOps.exif_transpose(img)
+        if img.mode not in ("RGB", "RGBA"):
+            img = img.convert("RGB")
+        img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+        out = io.BytesIO()
+        img.save(out, format="WEBP", quality=quality)
+        return out.getvalue()
 
 
 def get_original_photo_path(db_path: str | Path, sha256: str, mime_type: str) -> Path:
@@ -113,12 +114,27 @@ def get_original_photo_path(db_path: str | Path, sha256: str, mime_type: str) ->
 
 
 def save_original_photo(db_path: str | Path, photo: PreparedPhoto) -> Path:
-    """Store the privacy-filtered high-resolution upload beside the SQLite database."""
+    """Store the privacy-filtered high-resolution upload beside the SQLite database safely on Windows."""
     target = get_original_photo_path(db_path, photo.sha256, photo.upload_mime_type)
     target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        return target
     temporary = target.with_name(f".{target.name}.tmp")
-    temporary.write_bytes(photo.upload_bytes)
-    temporary.replace(target)
+    try:
+        temporary.write_bytes(photo.upload_bytes)
+        temporary.replace(target)
+    except OSError:
+        if target.exists():
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+            return target
+        target.write_bytes(photo.upload_bytes)
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
     return target
 
 
@@ -268,13 +284,9 @@ def _encode_with_safe_exif(
     raise ValueError("이미지 용량이 너무 큽니다. 더 작은 JPEG/MPO/PNG/WEBP 파일을 사용해 주세요.")
 
 
-def prepare_photo(image_path: str | Path) -> PreparedPhoto:
-    """Read safe EXIF and keep only allowlisted fields in the upload image."""
-    path = Path(image_path).expanduser()
-    if not path.is_file():
-        raise FileNotFoundError(f"사진 파일을 찾을 수 없습니다: {path}")
-
-    with Image.open(path) as source:
+def prepare_photo_from_bytes(data: bytes, filename: str) -> PreparedPhoto:
+    """Read safe EXIF and keep only allowlisted fields in memory from raw image bytes."""
+    with Image.open(BytesIO(data)) as source:
         source_format = (source.format or "").upper()
         if source_format not in SUPPORTED_FORMATS:
             raise ValueError("지원하지 않는 이미지 형식입니다. JPEG, MPO, PNG, WEBP만 사용할 수 있습니다.")
@@ -300,8 +312,8 @@ def prepare_photo(image_path: str | Path) -> PreparedPhoto:
         dhash_val = compute_dhash_from_bytes(thumbnail_bytes)
 
     return PreparedPhoto(
-        source_filename=path.name,
-        sha256=_sha256_file(path),
+        source_filename=filename,
+        sha256=hashlib.sha256(data).hexdigest(),
         width=width,
         height=height,
         image_format=source_format,
@@ -311,3 +323,12 @@ def prepare_photo(image_path: str | Path) -> PreparedPhoto:
         thumbnail_bytes=thumbnail_bytes,
         dhash=dhash_val,
     )
+
+
+def prepare_photo(image_path: str | Path) -> PreparedPhoto:
+    """Read safe EXIF and keep only allowlisted fields in the upload image."""
+    path = Path(image_path).expanduser()
+    if not path.is_file():
+        raise FileNotFoundError(f"사진 파일을 찾을 수 없습니다: {path}")
+    data = path.read_bytes()
+    return prepare_photo_from_bytes(data, filename=path.name)
