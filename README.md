@@ -2,9 +2,9 @@
 
 피규어 사진을 Gemini로 평가하고, SQLite에 저장한 뒤 웹 대시보드·Excel·HTML·Lightroom XMP로 검토하는 Python 도구입니다.
 
-이 파일을 프로젝트의 공식 사용 설명서로 사용합니다.
+이 파일을 프로젝트의 공식 사용 설명서로 사용합니다. 시스템 아키텍처, 워크플로우 및 개발 방법론에 대한 심층 기술 문서는 **[WORKFLOW_AND_DEV_GUIDE.md](WORKFLOW_AND_DEV_GUIDE.md)**를 참조하세요.
 
-사진 파일에서 촬영에 필요한 EXIF만 추출하고, Gemini의 구조화 출력(JSON Schema)을 사용해 구도·조명·색감·촬영 기술·최종 점수(각 10점 만점)와 범주별 미학 태그를 평가한 뒤 SQLite에 저장하는 단일 이미지 CLI입니다.
+사진 파일에서 촬영에 필요한 EXIF만 추출하고, Gemini 및 OpenAI(GPT-6 Luna)의 구조화 출력(JSON Schema)을 사용해 구도·조명·색감·촬영 기술·최종 점수(각 10점 만점)와 범주별 미학 태그를 평가한 뒤 SQLite에 저장하는 단일 이미지 CLI 및 웹 대시보드입니다.
 
 ## 개인정보 처리
 
@@ -20,10 +20,11 @@ python -m pip install --upgrade -r .\requirements-photo-analyzer.txt
 notepad .env
 ```
 
-열리는 `.env` 파일에 발급받은 키를 입력하고 저장하세요.
+열리는 `.env` 파일에 발급받은 키를 입력하고 저장하세요. (OpenAI GPT-6 Luna 크로스체크를 함께 사용하려면 `OPENAI_API_KEY`도 입력합니다)
 
 ```dotenv
 GEMINI_API_KEY=발급받은_Gemini_API_키
+OPENAI_API_KEY=발급받은_OpenAI_API_키 (선택 사항: Luna 앙상블 및 크로스체크용)
 ```
 
 분석기는 프로젝트의 `.env`를 읽고, 같은 이름의 Windows 환경변수가 이미 설정되어 있으면 그 값을 우선 사용합니다. `.env`는 `.gitignore`에 포함되어 저장소에 커밋되지 않으므로 키를 코드에 직접 입력하지 마세요.
@@ -53,22 +54,28 @@ python .\photo_analyzer.py "sample.jpg" --category macro
 python .\photo_analyzer.py ".\photos\" --category snap --workers 4
 ```
 
-## 실행 모드 및 모델 티어 (Lite / Standard / Pro)
+## 실행 모드 및 모델 티어 (Lite / Standard / 3.6 / 3.7 / Pro / Ensemble)
 
-분석기는 피규어 및 캐릭터 모델 사진(Figure Photography)의 완성도를 전문적으로 비평하도록 최적화되어 있습니다. 작업 목적에 맞춰 세 가지 모델 티어 중 하나를 선택할 수 있습니다.
+분석기는 피규어 및 캐릭터 모델 사진(Figure Photography)의 완성도를 전문적으로 비평하도록 최적화되어 있습니다. 작업 목적에 맞춰 다양한 모델 티어 중 하나를 선택할 수 있습니다.
 
-- `--tier lite`: `gemini-3.1-flash-lite` (기본값) — 빠르고 가벼운 대량 분류 및 스크리닝용
-- `--tier standard`: `gemini-3.5-flash-lite` — 균형 잡힌 표준 화질 평가용
+- `--tier standard`: `gemini-3.5-flash-lite` (기본값) — 균형 잡힌 표준 화질 평가용
+- `--tier lite`: `gemini-3.1-flash-lite` — 빠르고 가벼운 대량 분류 및 초고속 스크리닝용
+- `--tier flash-3.6`: `gemini-3.6-flash` — 실험적 고성능 비평 모드
+- `--tier flash-3.7`: `gemini-3.7-flash` — 차세대 초고속 심사 모드
 - `--tier pro`: `gemini-3.8-flash` — 미세 디테일, 조명 질감, 심도 표현을 심층 분석하는 전문가급 모드
+- `--tier ensemble`: `Flash-Lite 3.5` + `GPT-6 Luna` — Gemini의 객관적 본평가에 Luna의 독립 크로스체크 비평을 덧붙이는 앙상블 모드
 
 ```powershell
-# 1. 단일 사진 기본 분석 (Lite)
+# 1. 단일 사진 표준 분석 (Standard - 기본값)
 python .\photo_analyzer.py "F:\photos\sample.jpg"
 
 # 2. 고화질 정밀 심층 비평 모드 (Pro)
 python .\photo_analyzer.py "F:\photos\sample.jpg" --tier pro
 
-# 3. 모델명을 직접 지정할 수도 있습니다.
+# 3. Gemini + GPT-6 Luna 앙상블 크로스체크 모드
+python .\photo_analyzer.py "F:\photos\sample.jpg" --tier ensemble
+
+# 4. 모델명을 직접 지정할 수도 있습니다.
 python .\photo_analyzer.py "F:\photos\sample.jpg" --model "gemini-3.8-flash"
 ```
 
@@ -230,21 +237,29 @@ python .\photo_dashboard.py --host 127.0.0.1 --port 8080
   - 사용자 평점이 부여된 사진은 카드에 `👤 내 점수 9.0` 뱃지 노출
   - 정렬 옵션에 `👤 내 점수 높은 순`, `👤 내 점수 낮은 순`, `⚖️ AI와 점수 차이 큰 순` 지원
 
-### 5. 보정 수치 & 소셜 미디어 크롭 제안
-- **Adobe Lightroom 추천 보정 슬라이더 수치 제안 (온디맨드 & 캐싱)**:
-  - 노출(EV), 대비, 하이라이트(번들거림 억제), 섀도우(암부 복원), 텍스처, 화이트밸런스/틴트 가이드 및 피규어 맞춤 리터칭 팁 제시
-  - 분석 결과는 SQLite(`lr_advice_json`)에 영구 캐싱
+### 5. 멀티 모델 토글(Multi-LLM), 보정 수치 & 소셜 미디어 크롭 제안
+- **⚙️ 작업별 AI 모델 설정 모달 (`ModelSettings`)**:
+  - 상단바 `⚙️ 모델 설정` 버튼으로 4대 작업(사진 평가, 라이트룸 보정, SNS 크롭, SNS 캡션)의 기본 모델을 개별 지정하거나 4대 원클릭 프리셋(`⚡ 가성비`, `⚖️ 표준`, `🌙 Luna 풀패키지`, `💎 최고 화질 Pro`)으로 한 번에 적용.
+  - 지원 모델: `Gemini Flash-Lite 3.1`, `Flash-Lite 3.5`, `Flash 3.6`, `Flash 3.7`, `Flash 3.8`, `OpenAI GPT-6 Luna`.
+  - 브라우저 `localStorage`에 영구 기억되며, 상세 모달 인라인 셀렉터와 실시간 동기화.
+- **Adobe Lightroom 추천 보정 슬라이더 수치 제안 (온디맨드 & 캐싱 & 모델 선택)**:
+  - 노출(EV), 대비, 하이라이트(번들거림 억제), 섀도우(암부 복원), 텍스처, 화이트밸런스/틴트 가이드 및 피규어 맞춤 리터칭 팁 제시.
+  - 인라인 드롭다운에서 원하는 모델(`Flash 3.8`, `GPT-6 Luna` 등)을 즉시 선택해 재제안받을 수 있으며, 어떤 모델이 생성했는지 배지로 표시.
+  - 분석 결과는 SQLite(`lr_advice_json`)에 모델 정보와 함께 영구 캐싱.
 - **소셜 미디어(Instagram · X) 4대 규격 맞춤 크롭 + 👑 AI Best Pick & 📷 원본 유지(No Crop) 제안**:
-  - 인스타그램(세로피드 `4:5`, 정방형 `1:1`) 및 X/트위터(가로 타임라인 `16:9`, 모바일 세로 `3:4`) + 원본 유지(`original`)
-  - **1회 Gemini API 호출로 4대 규격 크롭과 AI 최적 비율 추천을 일괄 생성 (추가 API 호출 0회)**
-  - 원본 구도와 공간감이 이미 안정적인 경우 무리한 크롭 대신 `📷 원본 유지 (No Crop)`를 1순위로 추천
-  - `👑 AI Best Pick` 배지 및 추천 근거 배너 제공, 사진 상세 모달 진입 시 추천 비율로 자동 포커스
-  - 대시보드 모달에서 비율 버튼 클릭 시 원본 사진 위에 **실시간 크롭 프레임(3분할 가이드 그리드) 오버레이** 표시
-  - 브라우저 Canvas 기반 **`[✂️ 이 비율로 잘라 다운로드]`** 및 **`[📥 원본 고해상도 다운로드]`** 원클릭 고화질 이미지 저장 지원
-  - 피규어 특화 감성 캡션 및 다국어 해시태그(#피규어, #figurephotography 등) 원클릭 복사
-- **📊 Gemini API 사용량 모니터링**:
-  - 대시보드 헤더의 `📊 API 사용량` 버튼 클릭 시 기능별 호출 횟수, 토큰 사용량, 소요시간, 폴백/오류 내역 실시간 대시보드 모달 제공
-- **Lightroom / Capture One XMP 원클릭 내보내기**: 상단 `📥 라이트룸 XMP 내보내기` 버튼으로 사진 옆에 `.xmp` 사이드카 파일 자동 생성 (1~5 별점 및 색상 라벨 즉시 동기화)
+  - 인스타그램(세로피드 `4:5`, 정방형 `1:1`) 및 X/트위터(가로 타임라인 `16:9`, 모바일 세로 `3:4`) + 원본 유지(`original`).
+  - **1회 API 호출로 4대 규격 크롭과 AI 최적 비율 추천을 일괄 생성 (추가 API 호출 0회)**.
+  - 원본 구도와 공간감이 이미 안정적인 경우 무리한 크롭 대신 `📷 원본 유지 (No Crop)`를 1순위로 추천.
+  - `👑 AI Best Pick` 배지 및 추천 근거 배너 제공, 사진 상세 모달 진입 시 추천 비율로 자동 포커스.
+  - 대시보드 모달에서 비율 버튼 클릭 시 원본 사진 위에 **실시간 크롭 프레임(3분할 가이드 그리드) 오버레이** 표시.
+  - 브라우저 Canvas 기반 **`[✂️ 이 비율로 잘라 다운로드]`** 및 **`[📥 원본 고해상도 다운로드]`** 원클릭 고화질 이미지 저장 지원.
+  - 피규어 특화 감성 캡션 및 다국어 해시태그(#피규어, #figurephotography 등) 원클릭 복사.
+- **📊 종합 API 사용량 모니터링**:
+  - 대시보드 헤더의 `📊 API 사용량` 버튼 클릭 시 실시간 사용량 대시보드 모달 제공.
+  - **🤖 모델별 사용량 (`by_model`)**: `GPT-6 Luna`, `Flash-Lite 3.1`, `Flash-Lite 3.5`, `Flash 3.8` 등 모델별 호출 수, 실패율, 입력/출력 토큰, 평균 소요시간 집계.
+  - **🛠️ 기능별 사용량 (`by_task`)**: 사진 분석, 라이트룸 보정, SNS 크롭, SNS 캡션별 사용 통계.
+  - **🕒 최근 호출 (30건)**: 컬러 모델 배지 및 폴백(`requested_model -> used_model`) 상세 추적.
+- **Lightroom / Capture One XMP 원클릭 내보내기**: 상단 `📥 라이트룸 XMP 내보내기` 버튼으로 사진 옆에 `.xmp` 사이드카 파일 자동 생성 (1~5 별점 및 색상 라벨 즉시 동기화).
 
 
 ## Lightroom / Capture One XMP 사이드카 연동 (`--xmp`)
