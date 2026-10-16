@@ -147,9 +147,9 @@ def _log_api_usage(
 
 
 def get_usage_stats(db_path: str | Path) -> dict[str, Any]:
-    """Aggregate api_usage_log by task for the dashboard."""
+    """Aggregate api_usage_log by task and by model for the dashboard."""
     path = Path(db_path)
-    empty: dict[str, Any] = {"total_calls": 0, "by_task": [], "recent": []}
+    empty: dict[str, Any] = {"total_calls": 0, "by_task": [], "by_model": [], "recent": []}
     if not path.is_file():
         return empty
     with closing(sqlite3.connect(path)) as connection:
@@ -173,15 +173,34 @@ def get_usage_stats(db_path: str | Path) -> dict[str, Any]:
                    FROM api_usage_log GROUP BY task ORDER BY calls DESC"""
             ).fetchall()
         ]
+        by_model = [
+            dict(r)
+            for r in connection.execute(
+                """SELECT used_model,
+                          COUNT(*) AS calls,
+                          SUM(success) AS successes,
+                          SUM(fallback) AS fallbacks,
+                          SUM(attempts - 1) AS retries,
+                          COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                          COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                          CAST(AVG(duration_ms) AS INTEGER) AS avg_ms
+                   FROM api_usage_log GROUP BY used_model ORDER BY calls DESC"""
+            ).fetchall()
+        ]
         recent = [
             dict(r)
             for r in connection.execute(
-                """SELECT created_at, task, used_model, fallback, attempts, duration_ms,
+                """SELECT created_at, task, requested_model, used_model, fallback, attempts, duration_ms,
                           input_tokens, output_tokens, success, error
                    FROM api_usage_log ORDER BY id DESC LIMIT 30"""
             ).fetchall()
         ]
-        return {"total_calls": sum(t["calls"] for t in by_task), "by_task": by_task, "recent": recent}
+        return {
+            "total_calls": sum(t["calls"] for t in by_task),
+            "by_task": by_task,
+            "by_model": by_model,
+            "recent": recent,
+        }
 
 
 def _extract_usage(interaction: Any) -> tuple[int | None, int | None]:

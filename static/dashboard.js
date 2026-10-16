@@ -1979,6 +1979,22 @@ async function refreshUsageStats() {
     const card = (label, value) => `<div style="background:rgba(148,163,184,0.12);border-radius:10px;padding:10px 14px;min-width:110px;"><div style="font-size:0.72rem;color:var(--muted);">${label}</div><div style="font-size:1.25rem;font-weight:800;">${value}</div></div>`;
     const th = 'text-align:left;padding:6px 8px;border-bottom:1px solid rgba(148,163,184,0.3);font-size:0.78rem;color:var(--muted);';
     const td = 'padding:6px 8px;border-bottom:1px solid rgba(148,163,184,0.15);font-size:0.82rem;';
+    const fmtModelBadge = (m) => {
+      const label = (window.ModelSettings && m) ? window.ModelSettings.formatBadge(m) : (m || '-');
+      const isLuna = String(m || '').toLowerCase().includes('luna') || String(m || '').toLowerCase().includes('gpt');
+      const bg = isLuna ? 'rgba(99,102,241,0.15)' : 'rgba(2,132,199,0.12)';
+      const color = isLuna ? '#4f46e5' : '#0284c7';
+      return `<span style="background:${bg};color:${color};padding:2px 7px;border-radius:999px;font-weight:700;font-size:0.75rem;">${escapeUsageHtml(label)}</span> <small style="color:var(--muted);font-size:0.72rem;">(${escapeUsageHtml(m)})</small>`;
+    };
+    const modelRows = (d.by_model || []).map(m => `<tr>
+      <td style="${td}">${fmtModelBadge(m.used_model)}</td>
+      <td style="${td}">${m.calls}</td>
+      <td style="${td}">${m.calls - (m.successes || 0)}</td>
+      <td style="${td}">${m.fallbacks || 0}</td>
+      <td style="${td}">${(m.input_tokens || 0).toLocaleString()}</td>
+      <td style="${td}">${(m.output_tokens || 0).toLocaleString()}</td>
+      <td style="${td}">${((m.avg_ms || 0) / 1000).toFixed(1)}s</td>
+    </tr>`).join('');
     const taskRows = d.by_task.map(t => `<tr>
       <td style="${td}">${escapeUsageHtml(t.task)}</td>
       <td style="${td}">${t.calls}</td>
@@ -1992,7 +2008,7 @@ async function refreshUsageStats() {
     const recentRows = d.recent.map(r => `<tr>
       <td style="${td}">${escapeUsageHtml((r.created_at || '').replace('T', ' ').slice(5, 19))}</td>
       <td style="${td}">${escapeUsageHtml(r.task)}</td>
-      <td style="${td}">${escapeUsageHtml(r.used_model)}${r.fallback ? ' (폴백)' : ''}</td>
+      <td style="${td}">${fmtModelBadge(r.used_model)}${r.fallback ? ` <span style="color:#d97706;font-size:0.73rem;">(폴백: ${escapeUsageHtml(r.requested_model || '')}→)</span>` : ''}</td>
       <td style="${td}">${((r.duration_ms || 0) / 1000).toFixed(1)}s</td>
       <td style="${td}">${r.input_tokens == null ? '-' : r.input_tokens.toLocaleString()} / ${r.output_tokens == null ? '-' : r.output_tokens.toLocaleString()}</td>
       <td style="${td}color:${r.success ? 'var(--teal)' : '#e11d48'};" title="${escapeUsageHtml(r.error || '')}">${r.success ? '성공' : '실패'}</td>
@@ -2001,12 +2017,19 @@ async function refreshUsageStats() {
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;">
         ${card('총 호출', d.total_calls)}${card('실패', failures)}${card('입력 토큰', totalIn.toLocaleString())}${card('출력 토큰', totalOut.toLocaleString())}
       </div>
-      <h3 style="margin:0 0 6px;font-size:0.95rem;">기능별 사용량</h3>
+      ${modelRows ? `
+        <h3 style="margin:0 0 6px;font-size:0.95rem;">🤖 모델별 사용량</h3>
+        <table style="width:100%;border-collapse:collapse;margin-bottom:18px;">
+          <thead><tr><th style="${th}">사용 모델</th><th style="${th}">호출</th><th style="${th}">실패</th><th style="${th}">폴백</th><th style="${th}">입력 tok</th><th style="${th}">출력 tok</th><th style="${th}">평균 시간</th></tr></thead>
+          <tbody>${modelRows}</tbody>
+        </table>
+      ` : ''}
+      <h3 style="margin:0 0 6px;font-size:0.95rem;">🛠️ 기능별 사용량</h3>
       <table style="width:100%;border-collapse:collapse;margin-bottom:18px;">
         <thead><tr><th style="${th}">작업</th><th style="${th}">호출</th><th style="${th}">실패</th><th style="${th}">폴백</th><th style="${th}">재시도</th><th style="${th}">입력 tok</th><th style="${th}">출력 tok</th><th style="${th}">평균 시간</th></tr></thead>
         <tbody>${taskRows}</tbody>
       </table>
-      <h3 style="margin:0 0 6px;font-size:0.95rem;">최근 호출 (30건)</h3>
+      <h3 style="margin:0 0 6px;font-size:0.95rem;">🕒 최근 호출 (30건)</h3>
       <table style="width:100%;border-collapse:collapse;">
         <thead><tr><th style="${th}">시각(UTC)</th><th style="${th}">작업</th><th style="${th}">모델</th><th style="${th}">소요</th><th style="${th}">입력/출력 tok</th><th style="${th}">결과</th></tr></thead>
         <tbody>${recentRows}</tbody>
