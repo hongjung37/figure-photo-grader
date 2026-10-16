@@ -142,8 +142,8 @@ def analyze_photo(
             openai_res = openai_fut.result()
             return _merge_analyses(gemini_res, openai_res, model_name=target_openai_model)
 
-    # Standalone evaluation is exclusively handled by Gemini
-    target_model = model or DEFAULT_MODEL
+    # Standalone evaluation is exclusively handled by Gemini (fallback to DEFAULT_MODEL if non-Gemini model name passed)
+    target_model = model if (model and model.lower().startswith("gemini")) else DEFAULT_MODEL
     return analyze_with_gemini(
         photo=photo,
         model=target_model,

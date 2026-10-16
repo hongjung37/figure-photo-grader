@@ -375,12 +375,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     record_id, analysis_dict = existing
                     duplicate = True
                 else:
-                    normalized_provider = provider.lower()
-                    if tier == "ensemble" or normalized_provider == "ensemble":
-                        active_provider = "ensemble"
-                        model = f"ensemble({MODEL_PRESETS['standard']}+{DEFAULT_OPENAI_MODEL})"
-                    else:
-                        active_provider, model = resolve_task_model(tier, default_tier="standard")
+                    active_spec = "ensemble" if (tier == "ensemble" or provider.lower() == "ensemble") else tier
+                    active_provider, model = resolve_task_model(active_spec, default_tier="standard")
 
                     category_hint = category_param if category_param != "auto" else None
                     analysis = analyze_photo(prepared, provider=active_provider, model=model, category_hint=category_hint)
@@ -451,11 +447,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
                     updated_record = update_cross_check_opinion(self.db_path, record_id, opinion)
                 else:
-                    if tier == "ensemble":
-                        active_provider = "ensemble"
-                        model = f"ensemble({MODEL_PRESETS['standard']}+{DEFAULT_OPENAI_MODEL})"
-                    else:
-                        active_provider, model = resolve_task_model(tier, default_tier="standard")
+                    active_provider, model = resolve_task_model(tier, default_tier="standard")
 
                     new_analysis = analyze_photo(
                         prepared,

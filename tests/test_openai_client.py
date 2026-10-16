@@ -435,6 +435,33 @@ class OpenAIClientTests(unittest.TestCase):
             batch_dispatch_analyze(self.sample_photo, model="ensemble")
             mock_batch_analyze.assert_called_once_with(self.sample_photo, provider="ensemble", model=ALL_MODEL_PRESETS["ensemble"], category_hint=None)
 
+    def test_multi_llm_analyze_photo_non_gemini_model_fallback(self) -> None:
+        """Verify that when a non-Gemini model is passed for standalone photo grading, it safely falls back to DEFAULT_MODEL."""
+        from app.config import DEFAULT_MODEL
+        from app.services.multi_llm import analyze_photo
+
+        sample_res = self._sample_analysis(8.0, "Good")
+
+        # Non-gemini model string (e.g. gpt-6-luna from --tier luna): safely falls back to DEFAULT_MODEL avoiding 404
+        with patch("app.services.multi_llm.analyze_with_gemini", return_value=sample_res) as mock_gemini:
+            res = analyze_photo(self.sample_photo, provider="gemini", model="gpt-6-luna")
+            self.assertEqual(res.final_score, 8.0)
+            mock_gemini.assert_called_once_with(
+                photo=self.sample_photo,
+                model=DEFAULT_MODEL,
+                category_hint=None,
+            )
+
+        # Provider: openai without ensemble: also routes safely to Gemini DEFAULT_MODEL
+        with patch("app.services.multi_llm.analyze_with_gemini", return_value=sample_res) as mock_gemini:
+            res2 = analyze_photo(self.sample_photo, provider="openai", model="gpt-6-luna")
+            self.assertEqual(res2.final_score, 8.0)
+            mock_gemini.assert_called_once_with(
+                photo=self.sample_photo,
+                model=DEFAULT_MODEL,
+                category_hint=None,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
