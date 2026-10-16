@@ -80,6 +80,27 @@ def render_html_report(
             watermark_badge = f'<div style="margin-top:8px;font-size:0.82rem;color:#4338ca;background:#eef2ff;padding:4px 10px;border-radius:6px;display:inline-block"><b>🔍 사진 내 워터마크 감지:</b> {escape(sp_text)}</div>'
     if focus_notes:
         watermark_badge += f'<div style="margin-top:6px;font-size:0.82rem;color:#0369a1;background:#f0f9ff;padding:4px 10px;border-radius:6px;display:inline-block"><b>🎯 초점 정밀 분석:</b> {focus_notes}</div>'
+
+    cross_check_section = ""
+    cross_check = getattr(analysis, "cross_check_opinion", None)
+    if cross_check is not None:
+        cc_data = cross_check.model_dump(mode="python") if hasattr(cross_check, "model_dump") else (cross_check if isinstance(cross_check, dict) else {})
+        if cc_data:
+            cc_model = escape(str(cc_data.get("model", "OpenAI")))
+            cc_score = float(cc_data.get("score", 0.0))
+            cc_reason = escape(str(cc_data.get("reason", "")))
+            cc_comp = escape(str(cc_data.get("composition_critique", "")))
+            cc_light = escape(str(cc_data.get("lighting_critique", "")))
+            cross_check_section = f"""
+  <section class="section" aria-label="교차 검증 소견">
+    <div class="section-title"><h2>교차 검증 소견 ({cc_model})</h2><p>독립 평가 점수: <strong>{cc_score:.1f} / 10</strong></p></div>
+    <article class="panel reason" style="border-left-color:var(--blue)"><strong>세컨드 오피니언 요약</strong><p>{cc_reason}</p></article>
+    <div class="list-grid" style="margin-top:14px">
+      <article class="panel list-card"><h3>구도 비평</h3><p style="margin:0;color:#46556e">{cc_comp}</p><h4>강점</h4><ul>{render_list(cc_data.get("strengths", []))}</ul></article>
+      <article class="panel list-card"><h3>조명 비평</h3><p style="margin:0;color:#46556e">{cc_light}</p><h4>개선점</h4><ul>{render_list(cc_data.get("improvements", []))}</ul></article>
+    </div>
+  </section>"""
+
     return f"""<!doctype html>
 <html lang="ko">
 <head>
@@ -183,7 +204,7 @@ footer {{ margin-top:24px; color:var(--muted); font-size:.8rem; text-align:cente
   <section class="section list-grid" aria-label="강점과 개선점">
     <article class="panel list-card"><h3>주요 장점</h3><ul>{render_list(analysis.strengths)}</ul></article>
     <article class="panel list-card"><h3>단점 및 개선점</h3><ul>{render_list(analysis.improvements)}</ul></article>
-  </section>
+  </section>{cross_check_section}
   <aside class="grade-guide" aria-label="점수 평가 기준 안내">
     <strong>점수 평가 기준:</strong>
     <span><b>9.0~10</b> 프로사진작가 및 전문가급</span> ·

@@ -159,11 +159,16 @@ def get_all_analyses(db_path: Path, max_hamming_dist: int = 15) -> list[dict]:
         missing_dhash_ids = [int(r["id"]) for r in rows if r["dhash"] is None]
         dhash_overrides: dict[int, int] = {}
         if missing_dhash_ids:
-            placeholders = ",".join("?" for _ in missing_dhash_ids)
-            thumb_rows = conn.execute(
-                f"SELECT id, thumbnail FROM photo_analyses WHERE id IN ({placeholders}) AND thumbnail IS NOT NULL",
-                missing_dhash_ids,
-            ).fetchall()
+            thumb_rows = []
+            for idx in range(0, len(missing_dhash_ids), 500):
+                chunk = missing_dhash_ids[idx : idx + 500]
+                placeholders = ",".join("?" for _ in chunk)
+                thumb_rows.extend(
+                    conn.execute(
+                        f"SELECT id, thumbnail FROM photo_analyses WHERE id IN ({placeholders}) AND thumbnail IS NOT NULL",
+                        chunk,
+                    ).fetchall()
+                )
             with conn:
                 for tr in thumb_rows:
                     tid = int(tr[0])
@@ -484,13 +489,18 @@ def delete_analyses(db_path: Path, record_ids: list[int]) -> list[int]:
     ensure_db_columns(db_path)
     with closing(get_db_connection(db_path)) as conn, conn:
         conn.execute("PRAGMA foreign_keys = ON")
-        placeholders = ",".join("?" for _ in record_ids)
-        rows = conn.execute(
-            f"SELECT id, sha256 FROM photo_analyses WHERE id IN ({placeholders})",
-            record_ids,
-        ).fetchall()
-        conn.execute(f"DELETE FROM photo_analysis_tags WHERE analysis_id IN ({placeholders})", record_ids)
-        conn.execute(f"DELETE FROM photo_analyses WHERE id IN ({placeholders})", record_ids)
+        rows = []
+        for idx in range(0, len(record_ids), 500):
+            chunk = record_ids[idx : idx + 500]
+            placeholders = ",".join("?" for _ in chunk)
+            rows.extend(
+                conn.execute(
+                    f"SELECT id, sha256 FROM photo_analyses WHERE id IN ({placeholders})",
+                    chunk,
+                ).fetchall()
+            )
+            conn.execute(f"DELETE FROM photo_analysis_tags WHERE analysis_id IN ({placeholders})", chunk)
+            conn.execute(f"DELETE FROM photo_analyses WHERE id IN ({placeholders})", chunk)
         remaining_hashes = {
             row[0]
             for row in conn.execute("SELECT sha256 FROM photo_analyses").fetchall()

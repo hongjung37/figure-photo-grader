@@ -1489,7 +1489,91 @@ class PhotoAnalyzerTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             PhotoAnalysis.model_validate_json('{"composition_score": 15.0}')
 
+    def test_do_get_blocks_arbitrary_file_exposure_p0(self) -> None:
+        from app.web.handlers import DashboardRequestHandler
+
+        for forbidden_path in ("/.env", "/photo_analyses.sqlite3", "/app/config.py", "/static/../.env"):
+            handler = DashboardRequestHandler.__new__(DashboardRequestHandler)
+            handler.path = forbidden_path
+            handler.wfile = BytesIO()
+            handler.send_error = MagicMock()
+            handler.do_GET()
+            handler.send_error.assert_called_once()
+            self.assertEqual(handler.send_error.call_args.args[0], HTTPStatus.NOT_FOUND)
+            self.assertEqual(handler.wfile.getvalue(), b"")
+
+    def test_are_burst_pair_excludes_same_sha256_multi_model_records(self) -> None:
+        from app.services.burst_detector import are_burst_pair, cluster_burst_groups
+
+        rec_lite = {
+            "id": 10,
+            "sha256": "same_photo_hash_123",
+            "filename": "figure.jpg",
+            "model": "gemini-3.1-flash-lite-preview",
+            "final_score": 8.2,
+            "focus_status": "완벽 칼초점",
+            "dhash": 0x1122334455667788,
+        }
+        rec_pro = {
+            "id": 11,
+            "sha256": "same_photo_hash_123",
+            "filename": "figure.jpg",
+            "model": "gemini-3.1-pro-preview",
+            "final_score": 9.1,
+            "focus_status": "완벽 칼초점",
+            "dhash": 0x1122334455667788,
+        }
+        self.assertFalse(are_burst_pair(rec_lite, rec_pro))
+        clustered = cluster_burst_groups([rec_lite, rec_pro])
+        for item in clustered:
+            self.assertFalse(item["is_burst"])
+            self.assertIsNone(item["burst_group_id"])
+
+    def test_json_post_endpoints_reject_missing_or_oversized_content_length(self) -> None:
+        from app.web.handlers import DashboardRequestHandler
+
+        for endpoint in ("/api/reanalyze", "/api/update-status", "/api/rate", "/api/delete-analysis"):
+            # Oversized Content-Length (> 1MB) must be rejected without reading rfile
+            handler = DashboardRequestHandler.__new__(DashboardRequestHandler)
+            handler.path = endpoint
+            handler.headers = {"Content-Length": str(2 * 1024 * 1024)}
+            handler.rfile = BytesIO(b'{"id": 1}')
+            handler.wfile = BytesIO()
+            handler.send_response = MagicMock()
+            handler.send_header = MagicMock()
+            handler.end_headers = MagicMock()
+            handler.do_POST()
+            handler.send_response.assert_called_once_with(HTTPStatus.BAD_REQUEST)
+            self.assertEqual(handler.rfile.tell(), 0)
+
+    def test_render_html_report_includes_cross_check_opinion(self) -> None:
+        from app.exporters.html_exporter import render_html_report
+        from app.models.analysis import CrossCheckOpinion
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            image_path = Path(temporary_directory) / "cc.jpg"
+            self._make_jpeg(image_path)
+            photo = prepare_photo(image_path)
+            analysis = self._valid_analysis().model_copy(
+                update={
+                    "cross_check_opinion": CrossCheckOpinion(
+                        model="gpt-5.4-mini",
+                        score=8.7,
+                        reason="세컨드 오피니언 테스트 총평",
+                        strengths=["독립 강점 1"],
+                        improvements=["독립 개선점 1"],
+                        composition_critique="구도 비평 내용",
+                        lighting_critique="조명 비평 내용",
+                    )
+                }
+            )
+            html = render_html_report(photo, analysis, record_id=7, model="ensemble")
+            self.assertIn("교차 검증 소견 (gpt-5.4-mini)", html)
+            self.assertIn("세컨드 오피니언 테스트 총평", html)
+            self.assertIn("구도 비평 내용", html)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

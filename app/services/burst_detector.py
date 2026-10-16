@@ -76,6 +76,11 @@ def are_burst_pair(
     """Determine if two photos belong to the same burst sequence using a hybrid
     perceptual hash, filename sequentiality, and timestamp proximity model.
     """
+    sha1 = item1.get("sha256")
+    sha2 = item2.get("sha256")
+    if sha1 and sha2 and sha1 == sha2:
+        return False
+
     h1 = item1.get("dhash")
     h2 = item2.get("dhash")
     if h1 is None or h2 is None:

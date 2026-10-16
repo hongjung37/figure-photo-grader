@@ -39,8 +39,10 @@ def run_batch_pipeline(
     generate_xmp: bool = False,
 ) -> int:
     """Analyze multiple photos in parallel, save results to DB, generate reports and optional XMP sidecars."""
+    from app.config import ALL_MODEL_PRESETS
     from app.db.repository import find_existing_analysis, save_analysis
     from app.exporters.html_exporter import render_batch_comparison_html, save_html_report
+    model = ALL_MODEL_PRESETS.get(model.strip().lower(), model)
     print(f"=== 피규어 사진 일괄 분석 시작 ===", file=sys.stderr)
     print(f"대상 사진: {len(photo_paths)}장 | 모델: {model} | 동시 워커: {max_workers}", file=sys.stderr)
     print(f"SQLite DB: {db_path}", file=sys.stderr)

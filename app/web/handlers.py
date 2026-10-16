@@ -10,7 +10,7 @@ import sys
 import tempfile
 from datetime import datetime
 from http import HTTPStatus
-from http.server import SimpleHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
@@ -193,7 +193,7 @@ def _load_prepared_photo_for_record(db_path: Path, row: dict[str, Any] | Any) ->
     raise ValueError(f"사진 파일 '{fname}'을 찾을 수 없으며 DB 썸네일도 없습니다.")
 
 
-class DashboardRequestHandler(SimpleHTTPRequestHandler):
+class DashboardRequestHandler(BaseHTTPRequestHandler):
     db_path: Path = DEFAULT_DB_PATH
 
     def do_GET(self):
@@ -216,8 +216,9 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
         if path.startswith("/static/"):
             rel_file = path[len("/static/"):]
-            target_file = (STATIC_DIR / rel_file).resolve()
-            if target_file.is_file() and STATIC_DIR in target_file.parents:
+            static_root = STATIC_DIR.resolve()
+            target_file = (static_root / rel_file).resolve()
+            if target_file.is_relative_to(static_root) and target_file.is_file():
                 content = target_file.read_bytes()
                 mime = "text/css; charset=utf-8" if target_file.suffix == ".css" else "application/javascript; charset=utf-8"
                 self.send_response(HTTPStatus.OK)
@@ -320,13 +321,29 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             self.wfile.write(svg)
             return
 
-        super().do_GET()
+        self.send_error(HTTPStatus.NOT_FOUND, "Not Found")
 
     def _send_json_error(self, status: HTTPStatus, message: str) -> None:
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.end_headers()
         self.wfile.write(json.dumps({"success": False, "error": message}, ensure_ascii=False).encode("utf-8"))
+
+    def _read_json_body(self, max_bytes: int = 1024 * 1024) -> dict[str, Any]:
+        raw_len = self.headers.get("Content-Length")
+        if raw_len is None:
+            raise ValueError("Content-Length 헤더가 필요합니다.")
+        try:
+            content_length = int(raw_len)
+        except ValueError as exc:
+            raise ValueError("유효하지 않은 Content-Length입니다.") from exc
+        if content_length <= 0 or content_length > max_bytes:
+            raise ValueError(f"허용된 요청 본문 크기(1~{max_bytes} bytes)를 벗어났습니다.")
+        body = self.rfile.read(content_length)
+        data = json.loads(body.decode("utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("JSON 객체 형식의 요청 본문이 필요합니다.")
+        return data
 
     def do_POST(self):
         parsed = urlparse(self.path)
@@ -429,9 +446,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
         if parsed.path == "/api/reanalyze":
             try:
-                content_length = int(self.headers.get("Content-Length", 0))
-                body = self.rfile.read(content_length)
-                data = json.loads(body.decode("utf-8"))
+                data = self._read_json_body()
                 record_id = int(data.get("id"))
                 mode = str(data.get("mode", "cross_check_only"))
                 tier = str(data.get("tier", "standard"))
@@ -492,7 +507,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     ).encode("utf-8")
                 )
                 return
-            except ValueError as exc:
+            except (ValueError, KeyError, TypeError) as exc:
                 status = HTTPStatus.NOT_FOUND if "찾을 수 없습니다" in str(exc) else HTTPStatus.BAD_REQUEST
                 self._send_json_error(status, str(exc))
                 return
@@ -505,9 +520,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
         if parsed.path == "/api/update-status":
             try:
-                content_length = int(self.headers.get("Content-Length", 0))
-                body = self.rfile.read(content_length)
-                data = json.loads(body.decode("utf-8"))
+                data = self._read_json_body()
                 record_id = int(data.get("id"))
                 new_status = str(data.get("status", "토너먼트 1위"))
                 from app.exporters.excel_exporter import REVIEW_STATUSES
@@ -522,7 +535,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(json.dumps({"success": True}).encode("utf-8"))
                 return
-            except (ValueError, KeyError) as exc:
+            except (ValueError, KeyError, TypeError) as exc:
                 self._send_json_error(HTTPStatus.BAD_REQUEST, str(exc))
                 return
             except Exception as exc:
@@ -531,9 +544,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
         if parsed.path == "/api/rate":
             try:
-                content_length = int(self.headers.get("Content-Length", 0))
-                body = self.rfile.read(content_length)
-                data = json.loads(body.decode("utf-8"))
+                data = self._read_json_body()
                 record_id = int(data.get("id"))
                 raw_score = data.get("user_score")
                 user_score = None
@@ -547,7 +558,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(json.dumps({"success": True, "id": record_id, "user_score": user_score}, ensure_ascii=False).encode("utf-8"))
                 return
-            except (ValueError, KeyError) as exc:
+            except (ValueError, KeyError, TypeError) as exc:
                 self._send_json_error(HTTPStatus.BAD_REQUEST, str(exc))
                 return
             except Exception as exc:
@@ -556,9 +567,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
         if parsed.path == "/api/delete-analysis":
             try:
-                content_length = int(self.headers.get("Content-Length", 0))
-                body = self.rfile.read(content_length)
-                data = json.loads(body.decode("utf-8"))
+                data = self._read_json_body()
                 record_ids = []
                 if "ids" in data:
                     record_ids = [int(i) for i in data["ids"]]
@@ -578,7 +587,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(json.dumps({"success": True, "deleted_ids": deleted_ids, "count": len(deleted_ids)}).encode("utf-8"))
                 return
-            except (ValueError, KeyError) as exc:
+            except (ValueError, KeyError, TypeError) as exc:
                 self._send_json_error(HTTPStatus.BAD_REQUEST, str(exc))
                 return
             except Exception as exc:
