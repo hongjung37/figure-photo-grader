@@ -53,6 +53,8 @@ const ModelSettings = {
     const s = String(modelStr).toLowerCase();
     if (s.includes('luna')) return '🌙 GPT-6 Luna';
     if (s.includes('3.8') || s === 'pro') return '💎 Flash 3.8';
+    if (s.includes('3.7') || s === 'flash-3.7') return '🚀 Flash 3.7';
+    if (s.includes('3.6') || s === 'flash-3.6') return '🧪 Flash 3.6';
     if (s.includes('3.5') || s === 'standard') return '🔍 Flash-Lite 3.5';
     if (s.includes('3.1') || s === 'lite') return '⚡ Flash-Lite 3.1';
     if (s.includes('gpt-4o-mini') || s === 'mini') return '🤖 GPT-4o mini';
@@ -62,9 +64,13 @@ const ModelSettings = {
 
   renderOptionsHtml(selectedValue) {
     const sel = selectedValue || 'lite';
-    return TASK_MODEL_OPTIONS.map(opt =>
+    let html = TASK_MODEL_OPTIONS.map(opt =>
       `<option value="${opt.value}" ${opt.value === sel ? 'selected' : ''}>${opt.label}</option>`
     ).join('');
+    if (sel && !TASK_MODEL_OPTIONS.some(opt => opt.value === sel)) {
+      html += `<option value="${sel}" selected>${this.formatBadge(sel)}</option>`;
+    }
+    return html;
   }
 };
 

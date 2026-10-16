@@ -23,6 +23,10 @@ MODEL_PRESETS: dict[str, str] = {
     "lite": "gemini-3.1-flash-lite",      # 빠르고 가벼운 대량 분류/스크리닝 모드 (과부하시 자동 폴백)
     "standard": "gemini-3.5-flash-lite",   # 균형 잡힌 표준 화질 평가 모드
     "pro": "gemini-3.8-flash",            # 고화질 심층 비평 모드 (서버 과부하시 자동 폴백)
+    "flash-3.6": "gemini-3.6-flash",      # 모델 설정 전용 3.6 Flash
+    "3.6": "gemini-3.6-flash",
+    "flash-3.7": "gemini-3.7-flash",      # 모델 설정 전용 3.7 Flash
+    "3.7": "gemini-3.7-flash",
 }
 DEFAULT_TIER = "standard"
 DEFAULT_MODEL = MODEL_PRESETS[DEFAULT_TIER]

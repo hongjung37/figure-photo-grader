@@ -210,6 +210,8 @@ class OpenAIClientTests(unittest.TestCase):
 
         self.assertEqual(resolve_task_model("lite"), ("gemini", "gemini-3.1-flash-lite"))
         self.assertEqual(resolve_task_model("standard"), ("gemini", "gemini-3.5-flash-lite"))
+        self.assertEqual(resolve_task_model("flash-3.6"), ("gemini", "gemini-3.6-flash"))
+        self.assertEqual(resolve_task_model("flash-3.7"), ("gemini", "gemini-3.7-flash"))
         self.assertEqual(resolve_task_model("pro"), ("gemini", "gemini-3.8-flash"))
         self.assertEqual(resolve_task_model("luna"), ("openai", "gpt-6-luna"))
         self.assertEqual(resolve_task_model("gpt-6-luna"), ("openai", "gpt-6-luna"))
