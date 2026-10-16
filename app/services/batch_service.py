@@ -58,7 +58,7 @@ def run_batch_pipeline(
 
     def _process_one(photo_path: Path) -> dict[str, Any]:
         photo = prepare_photo(photo_path)
-        existing = find_existing_analysis(db_path, photo.sha256)
+        existing = find_existing_analysis(db_path, photo.sha256, model=model)
         if existing is not None:
             record_id, analysis_dict = existing
             analysis = PhotoAnalysis.model_validate(analysis_dict)
