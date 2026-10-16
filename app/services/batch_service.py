@@ -13,13 +13,18 @@ from app.services.image_processor import PreparedPhoto, prepare_photo
 from app.services.xmp_service import write_xmp_sidecar
 
 
-def _dispatch_analyze_with_gemini(photo: PreparedPhoto, model: str, category_hint: str | None = None) -> PhotoAnalysis:
+def _dispatch_analyze(photo: PreparedPhoto, model: str, category_hint: str | None = None) -> PhotoAnalysis:
     mod = sys.modules.get("photo_analyzer")
     if mod is not None and hasattr(mod, "analyze_with_gemini"):
         fn = getattr(mod, "analyze_with_gemini")
         if fn is not analyze_with_gemini:
             return fn(photo, model=model, category_hint=category_hint)
-    return analyze_with_gemini(photo, model=model, category_hint=category_hint)
+    from app.services.multi_llm import analyze_photo, resolve_task_model
+    provider, resolved_model = resolve_task_model(model)
+    return analyze_photo(photo, provider=provider, model=resolved_model, category_hint=category_hint)
+
+
+_dispatch_analyze_with_gemini = _dispatch_analyze
 
 
 def run_batch_pipeline(

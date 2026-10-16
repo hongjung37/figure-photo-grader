@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from app.config import (
+    ALL_MODEL_PRESETS,
     DEFAULT_DB_PATH,
     DEFAULT_TIER,
     ENV_FILE_PATH,
@@ -18,6 +19,7 @@ from app.exporters.html_exporter import save_html_report
 from app.services.batch_service import run_batch_pipeline
 from app.services.gemini_client import analyze_with_gemini, set_usage_log_db
 from app.services.image_processor import prepare_photo
+from app.services.multi_llm import analyze_photo, resolve_task_model
 from app.services.xmp_service import write_xmp_sidecar
 
 
@@ -27,12 +29,13 @@ def _dispatch_analyze(photo, model: str, category: str | None):
         fn = getattr(mod, "analyze_with_gemini")
         if fn is not analyze_with_gemini:
             return fn(photo, model=model, category_hint=category)
-    return analyze_with_gemini(photo, model=model, category_hint=category)
+    provider, resolved_model = resolve_task_model(model)
+    return analyze_photo(photo, provider=provider, model=resolved_model, category_hint=category)
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="피규어 사진의 안전한 EXIF와 Gemini JSON 평가를 SQLite에 저장하고 보고서를 생성합니다."
+        description="피규어 사진의 안전한 EXIF와 AI JSON 평가를 SQLite에 저장하고 보고서를 생성합니다."
     )
     parser.add_argument(
         "target",
@@ -48,14 +51,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--tier",
-        choices=list(MODEL_PRESETS.keys()),
+        choices=list(ALL_MODEL_PRESETS.keys()),
         default=DEFAULT_TIER,
-        help="Gemini 성능/비용 티어 선택 (lite: flash-lite, standard: flash, pro: pro) (기본값: standard)",
+        help="AI 성능/비용 티어 선택 (lite, standard, pro, flash-3.6, flash-3.7, luna, ensemble) (기본값: standard)",
     )
     parser.add_argument(
         "--model",
         default=None,
-        help="사용할 Gemini 모델명 직접 지정 (지정 시 --tier 옵션보다 우선)",
+        help="사용할 AI 모델명 직접 지정 (지정 시 --tier 옵션보다 우선)",
     )
     parser.add_argument(
         "--db",
@@ -105,7 +108,7 @@ def build_parser() -> argparse.ArgumentParser:
 def cli_main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     target_path = args.target.expanduser().resolve()
-    model = args.model if args.model else MODEL_PRESETS[args.tier]
+    model = args.model if args.model else ALL_MODEL_PRESETS[args.tier]
     db_path = args.db.expanduser().resolve()
     ensure_db_columns(db_path)
     set_usage_log_db(db_path)

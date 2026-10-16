@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from app.config import (
+    ALL_MODEL_PRESETS,
     DEFAULT_MODEL,
     DEFAULT_OPENAI_MODEL,
     MODEL_PRESETS,
@@ -55,6 +56,9 @@ def resolve_task_model(model_spec: str | None = None, default_tier: str = "lite"
     if not lower:
         return ("gemini", MODEL_PRESETS.get(default_tier, DEFAULT_MODEL))
 
+    if lower == "ensemble" or lower.startswith("ensemble(") or lower.startswith("ensemble:"):
+        resolved_ensemble = ALL_MODEL_PRESETS.get(lower, raw)
+        return ("ensemble", resolved_ensemble)
     if lower in OPENAI_MODEL_PRESETS and lower not in MODEL_PRESETS:
         return ("openai", OPENAI_MODEL_PRESETS[lower])
     if lower.startswith(("gpt-", "o1", "o3", "o4", "openai:")):

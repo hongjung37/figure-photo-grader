@@ -45,6 +45,12 @@ DEFAULT_OPENAI_MODEL = os.environ.get("OPENAI_DEFAULT_MODEL", OPENAI_MODEL_PRESE
 OPENAI_IMAGE_MAX_EDGE = 1536
 OPENAI_IMAGE_QUALITY = 88
 
+ALL_MODEL_PRESETS: dict[str, str] = {
+    **MODEL_PRESETS,
+    "luna": OPENAI_MODEL_PRESETS["luna"],
+    "ensemble": f"ensemble({MODEL_PRESETS['standard']}+{DEFAULT_OPENAI_MODEL})",
+}
+
 ORIGINALS_DIR_NAME = "photo_originals"
 SUPPORTED_FORMATS = {
     "JPEG": "image/jpeg",

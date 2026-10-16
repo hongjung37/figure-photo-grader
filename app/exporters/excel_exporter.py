@@ -22,6 +22,7 @@ from app.db import ensure_tag_tables, sync_analysis_tags
 from app.models.analysis import (
     AESTHETIC_TAG_CATEGORIES,
     AESTHETIC_TAG_OPTIONS,
+    CrossCheckOpinion,
     PhotoAnalysis,
 )
 
@@ -481,15 +482,24 @@ def import_from_excel(db_path: str | Path, input_path: str | Path) -> int:
     try:
         connection.execute("BEGIN IMMEDIATE")
         _ensure_schema(connection)
-        existing_ids = {
-            row["id"]
-            for row in connection.execute("SELECT id FROM photo_analyses")
+        existing_rows = {
+            row["id"]: row["analysis_json"]
+            for row in connection.execute("SELECT id, analysis_json FROM photo_analyses")
         }
-        unknown_ids = seen_ids - existing_ids
+        unknown_ids = seen_ids - set(existing_rows.keys())
         if unknown_ids:
             raise ExcelManagerError(f"DB에 없는 ID는 가져올 수 없습니다: {', '.join(map(str, sorted(unknown_ids)))}")
 
         for record_id, analysis, status, user_notes in parsed_rows:
+            old_raw = existing_rows.get(record_id)
+            if old_raw:
+                try:
+                    old_data = json.loads(old_raw)
+                    if old_data.get("cross_check_opinion") and analysis.cross_check_opinion is None:
+                        analysis.cross_check_opinion = CrossCheckOpinion.model_validate(old_data["cross_check_opinion"])
+                except Exception:
+                    pass
+
             connection.execute(
                 "UPDATE photo_analyses SET analysis_json = ?, review_status = ?, user_notes = ? WHERE id = ?",
                 (analysis.model_dump_json(), status, user_notes, record_id),

@@ -331,7 +331,7 @@ def analyze_with_gemini(
         schema=PhotoAnalysis.model_json_schema(),
         task_desc="사진 분석",
     )
-    return PhotoAnalysis.model_validate_json(output_text)
+    return PhotoAnalysis.from_llm_json(output_text)
 
 
 def generate_lightroom_advice(photo: PreparedPhoto, model: str = DEFAULT_MODEL) -> LightroomAdvice:

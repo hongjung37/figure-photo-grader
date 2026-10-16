@@ -184,7 +184,10 @@ def _call_openai_structured(
                     )
                     choice = completion.choices[0]
                     raw_content = choice.message.content or ""
-                    parsed = response_model.model_validate_json(raw_content)
+                    if hasattr(response_model, "from_llm_json"):
+                        parsed = response_model.from_llm_json(raw_content)
+                    else:
+                        parsed = response_model.model_validate_json(raw_content)
 
             if parsed is None:
                 raise RuntimeError(f"OpenAI가 {task_desc} 정형 결과를 생성하지 못했습니다.")

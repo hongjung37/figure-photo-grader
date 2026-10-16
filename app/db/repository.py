@@ -471,12 +471,13 @@ def delete_analyses(db_path: Path, record_ids: list[int]) -> list[int]:
     return record_ids
 
 
-def get_analysis_row_by_id(db_path: Path, record_id: int) -> dict[str, Any] | None:
+def get_analysis_row_by_id(db_path: Path | str, record_id: int) -> dict[str, Any] | None:
     """Retrieve raw analysis database row by record ID."""
-    if not db_path.is_file():
+    database = Path(db_path)
+    if not database.is_file():
         return None
-    ensure_db_columns(db_path)
-    with closing(get_db_connection(db_path)) as conn:
+    ensure_db_columns(database)
+    with closing(get_db_connection(database)) as conn:
         conn.row_factory = sqlite3.Row
         row = conn.execute("SELECT * FROM photo_analyses WHERE id = ?", (record_id,)).fetchone()
         return dict(row) if row else None

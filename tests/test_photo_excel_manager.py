@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import sys
 from contextlib import closing
@@ -245,6 +246,51 @@ class PhotoExcelManagerTests(unittest.TestCase):
                     "SELECT review_status FROM photo_analyses WHERE id = ?", (record_id,)
                 ).fetchone()[0]
             self.assertEqual(status, "토너먼트 1위")
+
+    def test_import_preserves_cross_check_opinion(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            database, record_id = self._create_database(directory)
+
+            # Store an analysis record with cross_check_opinion in SQLite
+            with closing(sqlite3.connect(database)) as connection:
+                connection.row_factory = sqlite3.Row
+                row = connection.execute("SELECT analysis_json FROM photo_analyses WHERE id = ?", (record_id,)).fetchone()
+                data = json.loads(row["analysis_json"])
+                data["cross_check_opinion"] = {
+                    "model": "gpt-6-luna",
+                    "score": 8.5,
+                    "reason": "우수한 디테일",
+                    "strengths": ["초점 우수"],
+                    "improvements": ["배경 단순화"],
+                }
+                connection.execute(
+                    "UPDATE photo_analyses SET analysis_json = ? WHERE id = ?",
+                    (json.dumps(data), record_id),
+                )
+                connection.commit()
+
+            workbook_path = directory / "export.xlsx"
+            export_to_excel(database, workbook_path)
+
+            # Modify user notes in Excel and re-import
+            workbook = load_workbook(workbook_path)
+            sheet = workbook[SHEET_NAME]
+            headers = {cell.value: cell.column for cell in sheet[1]}
+            sheet.cell(2, headers[USER_NOTES_HEADER]).value = "수정된 메모"
+            workbook.save(workbook_path)
+
+            import_from_excel(database, workbook_path)
+
+            # Verify cross_check_opinion is preserved
+            with closing(sqlite3.connect(database)) as connection:
+                connection.row_factory = sqlite3.Row
+                row = connection.execute("SELECT analysis_json, user_notes FROM photo_analyses WHERE id = ?", (record_id,)).fetchone()
+                restored_data = json.loads(row["analysis_json"])
+                self.assertEqual(row["user_notes"], "수정된 메모")
+                self.assertIsNotNone(restored_data.get("cross_check_opinion"))
+                self.assertEqual(restored_data["cross_check_opinion"]["score"], 8.5)
+                self.assertEqual(restored_data["cross_check_opinion"]["model"], "gpt-6-luna")
 
 
 if __name__ == "__main__":

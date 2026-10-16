@@ -284,6 +284,158 @@ class OpenAIClientTests(unittest.TestCase):
             mock_o_cap.assert_called_once_with(photo=self.sample_photo, model="gpt-6-luna", api_key=None)
             mock_g_cap.assert_not_called()
 
+    def test_cross_check_score_scaling(self) -> None:
+        from app.models.analysis import CrossCheckOpinion, OpenAICrossCheck
+
+        # 100-point scale should automatically rescale by dividing by 10
+        critique = OpenAICrossCheck(
+            score=78.0,
+            reason="Good",
+            strengths=["A"],
+            improvements=["B"],
+            composition_critique="Good",
+            lighting_critique="Good",
+        )
+        self.assertEqual(critique.score, 7.8)
+
+        # Clamping above 100 or below 0
+        opinion = CrossCheckOpinion(
+            score=105.0,
+            reason="Great",
+        )
+        self.assertEqual(opinion.score, 10.0)
+
+        opinion_low = CrossCheckOpinion(
+            score=-5.0,
+            reason="Poor",
+        )
+        self.assertEqual(opinion_low.score, 0.0)
+
+    def test_heal_choice_keyword_mapping(self) -> None:
+        from app.models.analysis import FOCUS_STATUS_OPTIONS, FIGURE_CATEGORY_CHOICES, _heal_choice
+
+        # '초점 완벽' should map to '완벽 칼초점' and not mistakenly misclassify
+        healed_focus = _heal_choice("초점 완벽", FOCUS_STATUS_OPTIONS, field_name="focus_status")
+        self.assertEqual(healed_focus, "완벽 칼초점")
+
+        # '매크로 접사 사진' should map to '접사/디테일'
+        healed_cat = _heal_choice("매크로 접사 사진", FIGURE_CATEGORY_CHOICES, field_name="figure_category")
+        self.assertEqual(healed_cat, "접사/디테일")
+
+    def test_single_sns_crop_endpoint_patch_preserves_other_ratios(self) -> None:
+        """Verify that ?force=true on a specific ratio key only patches that ratio and does not overwrite all crops."""
+        from io import BytesIO
+        import json
+        import tempfile
+        from PIL import Image
+        from unittest.mock import MagicMock, patch
+        from app.db import ensure_db_columns, save_analysis, update_sns_advice
+        from app.models.analysis import PhotoAnalysis
+        from app.models.crop import CropBox
+        from app.services.image_processor import prepare_photo_from_bytes
+        from app.web.handlers import DashboardRequestHandler
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = Path(tmp_dir) / "test_crop.sqlite3"
+            img = Image.new("RGB", (32, 24), (100, 150, 200))
+            bio = BytesIO()
+            img.save(bio, format="JPEG")
+            valid_photo = prepare_photo_from_bytes(bio.getvalue(), filename="crop_test.jpg")
+
+            sample_analysis = PhotoAnalysis(
+                composition_score=8.0,
+                composition_notes="좋음",
+                lighting_score=8.0,
+                lighting_notes="좋음",
+                color_score=8.0,
+                color_notes="좋음",
+                technique_score=8.0,
+                technique_notes="좋음",
+                final_score=8.0,
+                final_reason="전체적으로 균형 잡힘",
+                strengths=["장점"],
+                improvements=["단점"],
+                focus_status="완벽 칼초점",
+                figure_category="일반 피규어 촬영",
+            )
+            rec_id = save_analysis(db_path, valid_photo, "test-model", sample_analysis)
+            ensure_db_columns(db_path)
+
+            initial_advice = {
+                "best_ratio_key": "instagram_crop_4_5",
+                "best_ratio_reason": "피규어의 전신이 가장 균형 있게 들어옴",
+                "original_tip": "배경 여백을 살려보세요",
+                "instagram_crop_4_5": {"ymin": 0.05, "xmin": 0.1, "ymax": 0.95, "xmax": 0.9, "ratio_label": "4:5", "composition_tip": "세로 전신"},
+                "instagram_crop_1_1": {"ymin": 0.1, "xmin": 0.1, "ymax": 0.9, "xmax": 0.9, "ratio_label": "1:1", "composition_tip": "구버전 정사각형"},
+                "x_crop_16_9": {"ymin": 0.2, "xmin": 0.05, "ymax": 0.8, "xmax": 0.95, "ratio_label": "16:9", "composition_tip": "와이드"},
+                "x_crop_3_4": {"ymin": 0.1, "xmin": 0.15, "ymax": 0.9, "xmax": 0.85, "ratio_label": "3:4", "composition_tip": "피드"},
+            }
+            update_sns_advice(db_path, rec_id, json.dumps(initial_advice))
+
+            handler = DashboardRequestHandler.__new__(DashboardRequestHandler)
+            handler.db_path = db_path
+            handler.wfile = BytesIO()
+            handler.send_response = MagicMock()
+            handler.send_header = MagicMock()
+            handler.end_headers = MagicMock()
+
+            # Mock single crop returned by LLM
+            patched_box = CropBox(
+                ymin=0.15,
+                xmin=0.15,
+                ymax=0.85,
+                xmax=0.85,
+                ratio_label="1:1",
+                composition_tip="새로 제안된 1:1 크롭",
+            )
+
+            handler.path = f"/api/sns-crop/instagram_crop_1_1/{rec_id}?force=true&model=luna"
+
+            with patch("app.web.handlers.suggest_single_sns_crop", return_value=patched_box) as mock_single, \
+                 patch("app.web.handlers.suggest_all_sns_crops") as mock_all:
+                handler.do_POST()
+
+                mock_single.assert_called_once()
+                self.assertEqual(mock_single.call_args.kwargs.get("ratio_key"), "instagram_crop_1_1")
+                # suggest_all_sns_crops must NOT be called, saving tokens and preserving other crops!
+                mock_all.assert_not_called()
+
+            resp = json.loads(handler.wfile.getvalue().decode("utf-8"))
+            self.assertTrue(resp["success"])
+            self.assertFalse(resp["cached"])
+            # instagram_crop_1_1 should be updated
+            self.assertEqual(resp["crop_box"]["composition_tip"], "새로 제안된 1:1 크롭")
+            # Other ratios must remain completely intact!
+            self.assertEqual(resp["advice"]["instagram_crop_4_5"]["composition_tip"], "세로 전신")
+            self.assertEqual(resp["advice"]["x_crop_16_9"]["composition_tip"], "와이드")
+            self.assertEqual(resp["advice"]["best_ratio_key"], "instagram_crop_4_5")
+
+    def test_cli_and_batch_pipeline_multi_llm_connection(self) -> None:
+        """Verify that CLI parser and batch_service accept luna and ensemble and route to multi_llm."""
+        from app.cli import build_parser, _dispatch_analyze
+        from app.config import ALL_MODEL_PRESETS
+        from app.services.batch_service import _dispatch_analyze as batch_dispatch_analyze
+
+        # 1. CLI parser choices include all multi-LLM models
+        parser = build_parser()
+        tier_action = next(a for a in parser._actions if "--tier" in a.option_strings)
+        self.assertIn("luna", tier_action.choices)
+        self.assertIn("ensemble", tier_action.choices)
+        self.assertEqual(set(tier_action.choices), set(ALL_MODEL_PRESETS.keys()))
+
+        # 2. CLI dispatch calls multi_llm.analyze_photo
+        with patch("app.cli.analyze_photo") as mock_analyze:
+            mock_analyze.return_value = MagicMock()
+            _dispatch_analyze(self.sample_photo, model="luna", category=None)
+            mock_analyze.assert_called_once_with(self.sample_photo, provider="openai", model="gpt-6-luna", category_hint=None)
+
+        # 3. Batch dispatch calls multi_llm.analyze_photo
+        with patch("app.services.multi_llm.analyze_photo") as mock_batch_analyze:
+            mock_batch_analyze.return_value = MagicMock()
+            batch_dispatch_analyze(self.sample_photo, model="ensemble")
+            mock_batch_analyze.assert_called_once_with(self.sample_photo, provider="ensemble", model=ALL_MODEL_PRESETS["ensemble"], category_hint=None)
+
 
 if __name__ == "__main__":
     unittest.main()
+

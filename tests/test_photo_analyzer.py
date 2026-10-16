@@ -1308,7 +1308,7 @@ class PhotoAnalyzerTests(unittest.TestCase):
             }
         }
         ```"""
-        analysis = PhotoAnalysis.model_validate_json(raw_llm_output)
+        analysis = PhotoAnalysis.from_llm_json(raw_llm_output)
 
         # 1. focus_status healed from '완벽 칼초plet' to '완벽 칼초점'
         self.assertEqual(analysis.focus_status, "완벽 칼초점")
@@ -1329,8 +1329,13 @@ class PhotoAnalyzerTests(unittest.TestCase):
 
         # 5. Unknown focus_status falls back to '판별 불가'
         unknown_output = raw_llm_output.replace("완벽 칼초plet", "완전알수없는말")
-        unknown_analysis = PhotoAnalysis.model_validate_json(unknown_output)
+        unknown_analysis = PhotoAnalysis.from_llm_json(unknown_output)
         self.assertEqual(unknown_analysis.focus_status, "판별 불가")
+
+        # 6. Strict model_validate_json raises ValidationError on invalid scores
+        from pydantic import ValidationError
+        with self.assertRaises(ValidationError):
+            PhotoAnalysis.model_validate_json('{"composition_score": 15.0}')
 
 
 if __name__ == "__main__":

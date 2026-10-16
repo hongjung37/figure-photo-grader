@@ -63,22 +63,26 @@ from app.services.burst_detector import (
     parse_photo_time,
 )
 from app.services.gemini_client import (
-    analyze_with_gemini,
-    generate_all_sns_crops,
-    generate_lightroom_advice,
-    generate_single_sns_crop,
-    generate_sns_advice,
-    generate_sns_caption_and_tags,
     get_usage_stats,
     set_usage_log_db,
 )
-from app.services.multi_llm import analyze_photo, resolve_task_model
-from app.services.openai_client import (
-    generate_all_sns_crops_with_openai,
-    generate_sns_advice_with_openai,
-    generate_sns_caption_and_tags_with_openai,
-    suggest_lightroom_advice_with_openai,
+from app.services.multi_llm import (
+    analyze_photo,
+    resolve_task_model,
+    suggest_all_sns_crops,
+    suggest_lightroom_advice as _multi_llm_suggest_lightroom_advice,
+    suggest_single_sns_crop,
+    suggest_sns_advice,
+    suggest_sns_caption_and_tags,
 )
+
+# Backward-compatibility alias for tests patching app.web.handlers.generate_lightroom_advice
+generate_lightroom_advice = _multi_llm_suggest_lightroom_advice
+
+
+def suggest_lightroom_advice(*args, **kwargs):
+    return generate_lightroom_advice(*args, **kwargs)
+
 from app.services.image_processor import (
     PreparedPhoto,
     compute_dhash_from_bytes,
@@ -627,10 +631,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
                 prepared = _load_prepared_photo_for_record(self.db_path, row)
 
-                if provider_type == "openai":
-                    advice = suggest_lightroom_advice_with_openai(prepared, model=resolved_model)
-                else:
-                    advice = generate_lightroom_advice(prepared, model=resolved_model)
+                advice = suggest_lightroom_advice(prepared, model=resolved_model)
                 advice_dict = advice.model_dump(mode="json")
                 advice_dict["used_model"] = resolved_model
                 advice_json = json.dumps(advice_dict, ensure_ascii=False)
@@ -699,34 +700,23 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     }, ensure_ascii=False).encode("utf-8"))
                     return
 
+                if ratio_key not in SNS_CROP_RATIO_CONFIGS and ratio_key not in ("all", "original"):
+                    raise ValueError(f"지원하지 않는 SNS 크롭 비율 키입니다: {ratio_key}")
+
                 prepared = _load_prepared_photo_for_record(self.db_path, row)
 
-                def _fetch_crops():
-                    if provider_type == "openai":
-                        return generate_all_sns_crops_with_openai(prepared, model=resolved_model)
-                    return generate_all_sns_crops(prepared, model=resolved_model)
-
-                if ratio_key in ("all", "original"):
-                    crop_set = _fetch_crops()
+                if force and ratio_key not in ("all", "original") and cached_advice:
+                    # Single ratio regeneration: update ONLY this ratio to avoid overwriting other 3 ratios
+                    single_box = suggest_single_sns_crop(prepared, ratio_key=ratio_key, model=resolved_model)
+                    cached_advice[ratio_key] = single_box.model_dump(mode="json")
+                    crop_dict = cached_advice[ratio_key]
+                else:
+                    # All ratios (or first-time fetch)
+                    crop_set = suggest_all_sns_crops(prepared, model=resolved_model)
                     for key, box in crop_set.model_dump(mode="json").items():
                         cached_advice[key] = box
                     crop_dict = cached_advice.get(ratio_key) if ratio_key != "all" else cached_advice.get("instagram_crop_4_5", {})
-                elif ratio_key not in SNS_CROP_RATIO_CONFIGS:
-                    raise ValueError(f"지원하지 않는 SNS 크롭 비율 키입니다: {ratio_key}")
-                elif force:
-                    # Explicit regenerate: refresh all crops and recommendations together in ONE call
-                    # so that crop boxes, best_ratio_key, best_ratio_reason, and original_tip remain 100% consistent.
-                    crop_set = _fetch_crops()
-                    for key, box in crop_set.model_dump(mode="json").items():
-                        cached_advice[key] = box
-                    crop_dict = cached_advice[ratio_key]
-                else:
-                    # First crop request for this photo: get all 4 ratios + best pick in ONE call and cache them,
-                    # so the other ratio buttons need no further API calls.
-                    crop_set = _fetch_crops()
-                    for key, box in crop_set.model_dump(mode="json").items():
-                        cached_advice[key] = box
-                    crop_dict = cached_advice[ratio_key]
+
                 cached_advice["crop_model"] = resolved_model
                 advice_json = json.dumps(cached_advice, ensure_ascii=False)
 
@@ -786,10 +776,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
                 prepared = _load_prepared_photo_for_record(self.db_path, row)
 
-                if provider_type == "openai":
-                    cap = generate_sns_caption_and_tags_with_openai(prepared, model=resolved_model)
-                else:
-                    cap = generate_sns_caption_and_tags(prepared, model=resolved_model)
+                cap = suggest_sns_caption_and_tags(prepared, model=resolved_model)
                 cached_advice["social_caption"] = cap.social_caption
                 cached_advice["hashtags"] = cap.hashtags
                 cached_advice["caption_model"] = resolved_model
@@ -839,10 +826,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
                 prepared = _load_prepared_photo_for_record(self.db_path, row)
 
-                if provider_type == "openai":
-                    advice = generate_sns_advice_with_openai(prepared, model=resolved_model)
-                else:
-                    advice = generate_sns_advice(prepared, model=resolved_model)
+                advice = suggest_sns_advice(prepared, model=resolved_model)
                 advice_dict = advice.model_dump(mode="json")
                 advice_dict["crop_model"] = resolved_model
                 advice_dict["caption_model"] = resolved_model

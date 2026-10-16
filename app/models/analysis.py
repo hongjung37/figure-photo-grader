@@ -157,6 +157,41 @@ FocusStatusType = Literal[
 ]
 
 
+FOCUS_KEYWORD_MAP: dict[str, str] = {
+    "칼초점": "완벽 칼초점",
+    "완벽": "완벽 칼초점",
+    "앞핀": "미세 앞핀",
+    "전핀": "미세 앞핀",
+    "뒤핀": "미세 뒤핀",
+    "후핀": "미세 뒤핀",
+    "이탈": "초점 이탈",
+    "나감": "초점 이탈",
+    "블러": "초점 이탈",
+    "불가": "판별 불가",
+    "판별불가": "판별 불가",
+    "판별 불가": "판별 불가",
+}
+
+FIGURE_CATEGORY_KEYWORD_MAP: dict[str, str] = {
+    "접사": "접사/디테일",
+    "디테일": "접사/디테일",
+    "매크로": "접사/디테일",
+    "야외": "일상/야외 스냅",
+    "스냅": "일상/야외 스냅",
+    "일상": "일상/야외 스냅",
+    "디오라마": "스튜디오 연출/디오라마",
+    "스튜디오": "스튜디오 연출/디오라마",
+    "연출": "스튜디오 연출/디오라마",
+    "일반": "일반 피규어 촬영",
+    "스탠다드": "일반 피규어 촬영",
+}
+
+KEYWORD_MAPS: dict[str, dict[str, str]] = {
+    "focus_status": FOCUS_KEYWORD_MAP,
+    "figure_category": FIGURE_CATEGORY_KEYWORD_MAP,
+}
+
+
 def _heal_choice(
     value: Any,
     allowed_choices: tuple[str, ...],
@@ -170,23 +205,26 @@ def _heal_choice(
     if cleaned in allowed_choices:
         return cleaned
 
-    # 1. Direct or keyword substring match
+    # 1. Exact choice substring match (choice contained within cleaned)
     for choice in allowed_choices:
-        if choice in cleaned or cleaned in choice:
+        if choice in cleaned:
             print(f"[Self-Healing] {field_name} 포함일치 교정: {value!r} -> {choice!r}", file=sys.stderr)
             return choice
-        parts = [p for p in choice.replace("/", " ").split() if len(p) >= 2]
-        if any(p in cleaned for p in parts):
-            print(f"[Self-Healing] {field_name} 키워드일치 교정: {value!r} -> {choice!r}", file=sys.stderr)
-            return choice
 
-    # 2. Difflib close matches with cutoff
+    # 2. Distinct keyword mapping dictionary
+    mapping = KEYWORD_MAPS.get(field_name, {})
+    for kw, target_choice in mapping.items():
+        if kw in cleaned and target_choice in allowed_choices:
+            print(f"[Self-Healing] {field_name} 키워드매핑 교정: {value!r} -> {target_choice!r}", file=sys.stderr)
+            return target_choice
+
+    # 3. Difflib close matches with cutoff
     matches = difflib.get_close_matches(cleaned, allowed_choices, n=1, cutoff=cutoff)
     if matches:
         print(f"[Self-Healing] {field_name} 유사도 교정: {value!r} -> {matches[0]!r}", file=sys.stderr)
         return matches[0]
 
-    # 3. Fallback
+    # 4. Fallback
     if fallback is not None:
         print(f"[Self-Healing] {field_name} 비정상 값 기본 대체: {value!r} -> {fallback!r}", file=sys.stderr)
         return fallback
@@ -313,6 +351,18 @@ class CrossCheckOpinion(BaseModel):
     composition_critique: str = Field(default="", description="구도 및 프레이밍 비평")
     lighting_critique: str = Field(default="", description="조명 및 명암 비평")
 
+    @field_validator("score", mode="before")
+    @classmethod
+    def validate_and_scale_score(cls, value: Any) -> float:
+        try:
+            val = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"점수는 숫자여야 합니다: {value!r}") from exc
+        if 10.0 < val <= 100.0:
+            val = round(val / 10.0, 1)
+        clamped = max(0.0, min(10.0, round(val, 1)))
+        return clamped
+
 
 class OpenAICrossCheck(BaseModel):
     """Lightweight structured output model for OpenAI second-opinion critique (no aesthetic tags)."""
@@ -337,6 +387,18 @@ class OpenAICrossCheck(BaseModel):
     lighting_critique: str = Field(
         description="빛의 방향과 질, 조형 입체감, 노출, 반사광(핫스팟) 및 그림자 디테일에 대한 객관적 평가"
     )
+
+    @field_validator("score", mode="before")
+    @classmethod
+    def validate_and_scale_score(cls, value: Any) -> float:
+        try:
+            val = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"점수는 숫자여야 합니다: {value!r}") from exc
+        if 10.0 < val <= 100.0:
+            val = round(val / 10.0, 1)
+        clamped = max(0.0, min(10.0, round(val, 1)))
+        return clamped
 
 
 class PhotoAnalysis(BaseModel):
@@ -450,19 +512,5 @@ class PhotoAnalysis(BaseModel):
         data = json.loads(cleaned)
         healed_data = heal_analysis_payload(data)
         return cls.model_validate(healed_data)
-
-    @classmethod
-    def model_validate_json(
-        cls,
-        json_data: str | bytes | bytearray,
-        *,
-        strict: bool | None = None,
-        context: Any | None = None,
-    ) -> PhotoAnalysis:
-        """Override model_validate_json to use defensive self-healing when parsing JSON text."""
-        try:
-            return cls.from_llm_json(json_data)
-        except Exception:
-            return super().model_validate_json(json_data, strict=strict, context=context)
 
 
