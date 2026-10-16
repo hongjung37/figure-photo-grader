@@ -29,7 +29,7 @@ flowchart TD
     end
 
     subgraph Storage ["Storage & Persistence Layer"]
-        DB[("SQLite: photo_analysis.sqlite3")]
+        DB[("SQLite: photo_analysis.sqlite3<br/>(WAL 모드 / busy_timeout 30s)")]
         Originals["photo_originals/ (고해상도 프라이버시 클린 이미지)"]
         XMP["Sidecar .xmp (Lightroom / Capture One 호환)"]
     end
@@ -52,16 +52,21 @@ flowchart TD
 ## 2. 핵심 워크플로우 (Core Workflows)
 
 ### 2.1 사진 분석 & 앙상블 크로스체크 워크플로우
-1. **개인정보 제거 및 이미지 준비 (`app/services/image_processor.py`)**
+1. **개인정보 제거 및 인메모리 이미지 준비 (`app/services/image_processor.py`, `app/image_utils.py`)**
    - GPS, 기기 일련번호, 개인정보 EXIF를 철저히 제거하고 안전한 광학 촬영 메타데이터(조리개, 셔터, ISO, 렌즈 등)만 보존.
+   - **인메모리 바이트 파이프라인 (`prepare_photo_from_bytes`)**: 디스크에 불필요한 임시 파일을 쓰지 않고 메모리 상에서 이미지를 안전하게 정제/인코딩하여, 윈도우 환경 파일 핸들 잠금(`PermissionError [WinError 32]`)을 원천 차단.
    - 고해상도 이미지는 `data/photo_originals/`에 보관하고, 갤러리용 초경량 WebP 썸네일 동시 생성.
    - dHash(지각적 해시 64비트)를 계산하여 연사(Burst) 그룹 자동 감지 준비.
 2. **모델 라우팅 및 평가 실행 (`app/services/multi_llm.py`)**
    - **단독 Gemini 평가**: `Flash-Lite 3.1`(초고속), `Flash-Lite 3.5`(표준 권장), `Flash 3.6`, `Flash 3.7`, `Flash 3.8`(심층) 중 선택된 모델로 1회 호출.
    - **Gemini + Luna 크로스체크 앙상블**: Gemini(Flash-Lite 3.5)의 광학적 본평가와 OpenAI(GPT-6 Luna)의 독립적 보조 비평을 병렬(`ThreadPoolExecutor`)로 수행.
    - **점수 왜곡 방지 원칙**: Gemini의 종합 점수를 인위적으로 평균내지 않고 보존하며, Luna의 비평을 독립된 `CrossCheckOpinion` 카드로 카드/모달에 병렬 표시.
-3. **Pydantic 구조화 출력 & 스키마 제약 (`app/models/analysis.py`)**
-   - `model_json_schema()`에 `focus_status`(`'완벽 칼초점'`, `'미세 앞핀'` 등)와 `figure_category`의 `enum` 제약을 강제하여 다국어 토큰 오타나 환각을 원천 차단.
+3. **Pydantic 구조화 출력 & 자가치유 파서 (`app/models/analysis.py`)**
+   - `model_json_schema()`에 `focus_status`(`'완벽 칼초점'`, `'미세 앞핀'` 등)와 `figure_category`의 `enum` 제약을 강제.
+   - **방어적 자가치유 파서 (`_heal_choice`, `from_llm_json`)**: 다국어 토큰 분할 오탈자(예: `'완벽 칼초plet'` -> `'완벽 칼초점'`)나 비정형 응답 발생 시 표준 상수로 자동 정규화하고 점수 범위를 클램핑(0~10)하여 파싱 에러(500) 원천 방어.
+4. **SQLite WAL 모드 & 쿼리 I/O 최적화 (`app/db/`)**
+   - `PRAGMA journal_mode = WAL;` 및 `busy_timeout = 30000`으로 멀티스레드 동시 읽기/쓰기 락을 완전 해소.
+   - 갤러리 대량 조회 시 거대한 `thumbnail` BLOB을 쿼리에서 분리 제외하여 대시보드 로딩 I/O를 90% 이상 절감.
 
 ### 2.2 온디맨드 라이트룸 보정 수치 제안 워크플로우
 1. 상세 모달 내 **라이트룸 보정 수치** 영역에서 원하는 모델(`Luna 6`, `Flash 3.8`, `Flash 3.5` 등)을 선택하고 요청.
@@ -93,24 +98,30 @@ flowchart TD
 ## 4. 개발 방법론 & 코드 무결성 검증 체계
 
 ### 4.1 모듈형 아키텍처 원칙
-- **UI 모듈 분리**:
-  - `static/js/api.js`: API 통신 및 모델 전역 설정 관리 (`ModelSettings`)
+- **UI 서브시스템 분리**:
+  - `static/js/api.js`: REST API 통신 및 모델 전역 설정 관리 (`ModelSettings`)
   - `static/js/crop_viewer.js`: SNS 크롭 연산, 캔버스 다운로드, 캡션 클립보드 복사
-  - `static/js/tag_filter.js`: 미학 태그 필터링 및 인사이트 연산
-  - `static/dashboard.js`: 갤러리 렌더링, 모달 제어, 토너먼트, 재평가
+  - `static/js/tag_filter.js`: 미학 태그 필터링 및 8대 어휘 카탈로그
+  - `static/js/tournament.js`: 블라인드 1:1 토너먼트 매치, 브래킷 관리, 우승작 선정
+  - `static/js/tag_insights.js`: 미학 태그 통계 차트 및 1:1 사진 비교 뷰
+  - `static/js/modals.js`: 일괄 사진 업로드(드롭존), API 사용량 통계 모달, 모델 설정 모달
+  - `static/dashboard.js`: 갤러리 40장 단위 프로그레시브 청크 렌더러(`IntersectionObserver`), 테마 토글, 사진 상세 검사기(EXIF, 줌, 재평가)
 - **백엔드 서비스 분리**:
   - `app/services/image_processor.py`: 무손실 리사이즈, EXIF 정제, dHash 연산
   - `app/services/multi_llm.py`: 다중 공급자(Gemini, OpenAI) 모델 라우팅
   - `app/services/gemini_client.py`: Gemini 클라이언트, 세마포어(동시성 제어), 지수 백오프
   - `app/services/openai_client.py`: OpenAI 구조화 출력(Structured Outputs), JSON 폴백
+  - `app/db/connection.py` & `repository.py`: WAL 모드 SQLite 영속성 레이어
 
 ### 4.2 테스트 주도 무결성 검증 (Test-Driven Integrity)
 - **프론트엔드 정적 무결성 검증 (`tests/test_frontend_integrity.py`)**:
-  - JS 코드 내 `document.getElementById('...')` 호출 대상이 `templates/index.html`에 실제로 존재하는지 자동 검사.
+  - 전체 분리된 JS 모듈 내 `document.getElementById('...')` 호출 대상이 `templates/index.html`에 실제로 존재하는지 자동 검사.
   - HTML 태그의 모든 `onclick="fn(...)"` 핸들러가 JS 파일에 정의되어 있는지 문법 파싱 검증.
 - **다중 LLM 라우터 및 모델 파싱 검증 (`tests/test_openai_client.py`)**:
   - `resolve_task_model`의 티어 및 모델 식별자 매핑 검증.
   - Gemini / OpenAI 분기 호출 및 구조화 출력 모델 호환성 모킹 테스트.
+- **LLM 자가치유 파서 검증 (`tests/test_analysis_models.py`)**:
+  - 불완전한 JSON 및 오탈자 Enum 입력 시 `from_llm_json`의 정상 복원 여부 검증.
 - **Node.js 헤드리스 렌더링 검증 (`tests/test_dashboard_modularization.py`)**:
   - Node.js 환경에서 크롭 좌표 연산(`calculateExactCrop`)과 HTML 이스케이프가 브라우저 없이도 오류 없이 실행되는지 자동 검증.
 
@@ -122,12 +133,13 @@ flowchart TD
 # 가상환경 활성화
 .\.work\venv\Scripts\Activate.ps1
 
-# 전체 유닛 테스트 실행 (81개 전 항목 검증)
+# 전체 유닛 테스트 실행 (82개 전 항목 검증)
 $env:PYTHONPATH="c:\Users\gkwjd\photo-recovery"
 python -m unittest discover -s tests
 
 # 특정 테스트 단독 실행
 python -m unittest tests/test_frontend_integrity.py
+python -m unittest tests/test_analysis_models.py
 python -m unittest tests/test_openai_client.py
 
 # 웹 대시보드 개발 서버 실행
