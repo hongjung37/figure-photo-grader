@@ -104,16 +104,22 @@ def save_analysis(
         return record_id
 
 
-def find_existing_analysis(db_path: Path, sha256: str) -> tuple[int, dict] | None:
-    """Return (record_id, analysis dict) of the latest stored analysis with the same file hash."""
+def find_existing_analysis(db_path: Path, sha256: str, model: str | None = None) -> tuple[int, dict] | None:
+    """Return (record_id, analysis dict) of the latest stored analysis with the same file hash and optional model."""
     if not db_path.is_file():
         return None
     with closing(get_db_connection(db_path)) as conn:
         try:
-            row = conn.execute(
-                "SELECT id, analysis_json FROM photo_analyses WHERE sha256 = ? ORDER BY id DESC LIMIT 1",
-                (sha256,),
-            ).fetchone()
+            if model:
+                row = conn.execute(
+                    "SELECT id, analysis_json FROM photo_analyses WHERE sha256 = ? AND model = ? ORDER BY id DESC LIMIT 1",
+                    (sha256, model),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT id, analysis_json FROM photo_analyses WHERE sha256 = ? ORDER BY id DESC LIMIT 1",
+                    (sha256,),
+                ).fetchone()
         except sqlite3.OperationalError:
             return None
     if not row:

@@ -392,14 +392,14 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
                 prepared = prepare_photo_from_bytes(file_bytes, filename=filename)
                 force_reanalyze = parse_qs(parsed.query).get("force", ["false"])[0].lower() in ("1", "true", "yes")
-                existing = None if force_reanalyze else find_existing_analysis(self.db_path, prepared.sha256)
+                active_spec = "ensemble" if (tier == "ensemble" or provider.lower() == "ensemble") else tier
+                active_provider, model = resolve_task_model(active_spec, default_tier="standard")
+
+                existing = None if force_reanalyze else find_existing_analysis(self.db_path, prepared.sha256, model=model)
                 if existing is not None:
                     record_id, analysis_dict = existing
                     duplicate = True
                 else:
-                    active_spec = "ensemble" if (tier == "ensemble" or provider.lower() == "ensemble") else tier
-                    active_provider, model = resolve_task_model(active_spec, default_tier="standard")
-
                     category_hint = category_param if category_param != "auto" else None
                     analysis = analyze_photo(prepared, provider=active_provider, model=model, category_hint=category_hint)
                     record_id = save_analysis(self.db_path, prepared, model, analysis)

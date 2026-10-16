@@ -292,6 +292,24 @@ class PhotoExcelManagerTests(unittest.TestCase):
                 self.assertEqual(restored_data["cross_check_opinion"]["score"], 8.5)
                 self.assertEqual(restored_data["cross_check_opinion"]["model"], "gpt-6-luna")
 
+    def test_import_rejects_malformed_camera_settings_json(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            database, record_id = self._create_database(directory)
+            workbook_path = directory / "malformed_json.xlsx"
+            export_to_excel(database, workbook_path)
+
+            # Corrupt camera settings JSON in Excel
+            workbook = load_workbook(workbook_path)
+            sheet = workbook[SHEET_NAME]
+            headers = {cell.value: cell.column for cell in sheet[1]}
+            sheet.cell(2, headers["워터마크 촬영 정보(JSON)"]).value = "{malformed json:"
+            workbook.save(workbook_path)
+
+            with self.assertRaises(ExcelManagerError) as ctx:
+                import_from_excel(database, workbook_path)
+            self.assertIn("JSON 형식", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

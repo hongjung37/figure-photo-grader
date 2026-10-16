@@ -423,9 +423,15 @@ def _parse_analysis_record(record: pd.Series, row_number: int) -> PhotoAnalysis:
             else:
                 try:
                     parsed_json = json.loads(str(value).strip())
-                    payload[field] = parsed_json if isinstance(parsed_json, dict) else None
-                except Exception:
-                    payload[field] = None
+                    if parsed_json is not None and not isinstance(parsed_json, dict):
+                        raise ExcelManagerError(f"엑셀 {row_number}행의 '{header}'는 JSON 객체(dict) 형태여야 합니다.")
+                    payload[field] = parsed_json
+                except json.JSONDecodeError as exc:
+                    raise ExcelManagerError(f"엑셀 {row_number}행의 '{header}' JSON 형식이 올바르지 않습니다: {exc}") from exc
+                except ExcelManagerError:
+                    raise
+                except Exception as exc:
+                    raise ExcelManagerError(f"엑셀 {row_number}행의 '{header}' 처리 중 오류가 발생했습니다: {exc}") from exc
         else:
             payload[field] = _required_text(value, header, row_number)
 

@@ -559,6 +559,30 @@ class PhotoAnalyzerTests(unittest.TestCase):
             analyses = photo_dashboard.get_all_analyses(db_path)
             self.assertEqual(len(analyses), 1)
 
+    def test_find_existing_analysis_by_model(self) -> None:
+        from app.db.repository import find_existing_analysis
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            db_path = Path(temporary_directory) / "model_check.sqlite3"
+            image_path = Path(temporary_directory) / "sample.jpg"
+            self._make_jpeg(image_path)
+            photo = prepare_photo(image_path)
+
+            record_id = save_analysis(db_path, photo, "gemini-2.5-flash-lite", self._valid_analysis())
+
+            # Query with same model -> returns existing record
+            match_same = find_existing_analysis(db_path, photo.sha256, model="gemini-2.5-flash-lite")
+            self.assertIsNotNone(match_same)
+            self.assertEqual(match_same[0], record_id)
+
+            # Query with different model -> returns None so new analysis runs
+            match_diff = find_existing_analysis(db_path, photo.sha256, model="gemini-3.1-pro")
+            self.assertIsNone(match_diff)
+
+            # Query without model -> backwards-compatible match by hash
+            match_any = find_existing_analysis(db_path, photo.sha256)
+            self.assertIsNotNone(match_any)
+            self.assertEqual(match_any[0], record_id)
+
 
     def test_figure_categories_defined(self) -> None:
         from photo_tag_schema import FIGURE_CATEGORIES
