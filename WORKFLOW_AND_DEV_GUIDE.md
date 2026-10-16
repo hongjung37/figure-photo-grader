@@ -29,18 +29,19 @@ flowchart TD
     end
 
     subgraph Storage ["Storage & Persistence Layer"]
-        DB[(SQLite: photo_analysis.sqlite3)]
+        DB[("SQLite: photo_analysis.sqlite3")]
         Originals["photo_originals/ (고해상도 프라이버시 클린 이미지)"]
         XMP["Sidecar .xmp (Lightroom / Capture One 호환)"]
     end
 
-    UI_Settings -.->|localStorage 동기화| UI_Detail
-    UI_Detail -->|API 요청 (?model=...)| Router
-    UI_Gallery -->|이미지 업로드 / 재평가| Router
+    UI_Settings -.->|"localStorage 동기화"| UI_Detail
+    UI_Detail -->|"API 요청 (?model=...)"| Router
+    UI_Gallery -->|"이미지 업로드 / 재평가"| Router
     Router --> Resolver
     Resolver --> Gemini
     Resolver --> OpenAI
-    Gemini & OpenAI --> DB
+    Gemini --> DB
+    OpenAI --> DB
     DB --> UI_Usage
     DB --> Originals
     DB --> XMP
