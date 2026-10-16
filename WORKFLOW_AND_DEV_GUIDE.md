@@ -52,7 +52,7 @@ flowchart TD
 ## 2. 핵심 워크플로우 (Core Workflows)
 
 ### 2.1 사진 분석 & 앙상블 크로스체크 워크플로우
-1. **개인정보 제거 및 인메모리 이미지 준비 (`app/services/image_processor.py`, `app/image_utils.py`)**
+1. **개인정보 제거 및 인메모리 이미지 준비 (`app/services/image_processor.py`)**
    - GPS, 기기 일련번호, 개인정보 EXIF를 철저히 제거하고 안전한 광학 촬영 메타데이터(조리개, 셔터, ISO, 렌즈 등)만 보존.
    - **인메모리 바이트 파이프라인 (`prepare_photo_from_bytes`)**: 디스크에 불필요한 임시 파일을 쓰지 않고 메모리 상에서 이미지를 안전하게 정제/인코딩하여, 윈도우 환경 파일 핸들 잠금(`PermissionError [WinError 32]`)을 원천 차단.
    - 고해상도 이미지는 `data/photo_originals/`에 보관하고, 갤러리용 초경량 WebP 썸네일 동시 생성.
@@ -120,8 +120,10 @@ flowchart TD
 - **다중 LLM 라우터 및 모델 파싱 검증 (`tests/test_openai_client.py`)**:
   - `resolve_task_model`의 티어 및 모델 식별자 매핑 검증.
   - Gemini / OpenAI 분기 호출 및 구조화 출력 모델 호환성 모킹 테스트.
-- **LLM 자가치유 파서 검증 (`tests/test_analysis_models.py`)**:
+- **LLM 자가치유 파서 검증 (`tests/test_photo_analyzer.py`, `tests/test_openai_client.py`)**:
   - 불완전한 JSON 및 오탈자 Enum 입력 시 `from_llm_json`의 정상 복원 여부 검증.
+- **재평가 및 크로스체크 엔드포인트 검증 (`tests/test_reanalyze.py`)**:
+  - 웹 대시보드 내 전체 재평가 및 OpenAI 단독 크로스체크 API 통합 검증.
 - **Node.js 헤드리스 렌더링 검증 (`tests/test_dashboard_modularization.py`)**:
   - Node.js 환경에서 크롭 좌표 연산(`calculateExactCrop`)과 HTML 이스케이프가 브라우저 없이도 오류 없이 실행되는지 자동 검증.
 
@@ -133,14 +135,15 @@ flowchart TD
 # 가상환경 활성화
 .\.work\venv\Scripts\Activate.ps1
 
-# 전체 유닛 테스트 실행 (82개 전 항목 검증)
+# 전체 유닛 테스트 실행 (87개 전 항목 검증)
 $env:PYTHONPATH="c:\Users\gkwjd\photo-recovery"
 python -m unittest discover -s tests
 
 # 특정 테스트 단독 실행
 python -m unittest tests/test_frontend_integrity.py
-python -m unittest tests/test_analysis_models.py
+python -m unittest tests/test_photo_analyzer.py
 python -m unittest tests/test_openai_client.py
+python -m unittest tests/test_reanalyze.py
 
 # 웹 대시보드 개발 서버 실행
 python photo_dashboard.py --port 8080 --host 127.0.0.1
