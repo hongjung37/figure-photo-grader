@@ -1,11 +1,29 @@
 // static/js/tag_insights.js - Visual Tag Analytics & 1:1 Photo Comparison View
 
+if (typeof window.escapeHtml !== 'function') {
+  window.escapeHtml = function(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  };
+}
+var escapeHtml = window.escapeHtml;
+
 let currentView = 'gallery'; // 'gallery', 'compare', 'insights'
 let insightsRatingMode = 'ai'; // 'ai', 'user', 'diff'
 let insightsMinCount = 2;
 
+window.currentView = currentView;
+window.insightsRatingMode = insightsRatingMode;
+window.insightsMinCount = insightsMinCount;
+
 function switchView(mode) {
   currentView = mode;
+  window.currentView = mode;
   const galleryGrid = document.getElementById('gallery-grid');
   const compareView = document.getElementById('compare-view');
   const insightsView = document.getElementById('insights-view');
@@ -25,6 +43,7 @@ function switchView(mode) {
     if (galleryGrid) galleryGrid.style.display = 'none';
     if (compareView) compareView.style.display = 'block';
     if (insightsView) insightsView.style.display = 'none';
+    populateCompareSelects();
     updateComparison();
   } else if (mode === 'insights') {
     if (galleryGrid) galleryGrid.style.display = 'none';
@@ -36,20 +55,24 @@ function switchView(mode) {
 
 function setInsightsMinCount(val) {
   insightsMinCount = parseInt(val) || 2;
+  window.insightsMinCount = insightsMinCount;
   renderTagInsights();
 }
 
 function setInsightsRatingMode(mode) {
   insightsRatingMode = mode;
+  window.insightsRatingMode = insightsRatingMode;
   renderTagInsights();
 }
 
 function computeClientTagStats(minCount) {
-  const totalPhotos = allData.length;
-  const userRatedPhotos = allData.filter(d => d.user_score !== null && d.user_score !== undefined).length;
+  const dataList = (typeof allData !== 'undefined' && Array.isArray(allData)) ? allData : [];
+  const totalPhotos = dataList.length;
+  const userRatedPhotos = dataList.filter(d => d.user_score !== null && d.user_score !== undefined).length;
   const tagData = {};
+  const categoriesMap = (typeof TAG_CATEGORIES !== 'undefined' ? TAG_CATEGORIES : (window.TAG_CATEGORIES || {}));
 
-  allData.forEach(d => {
+  dataList.forEach(d => {
     const tags = d.aesthetic_tags || {};
     const aiScore = d.final_score || 0;
     const uScore = (d.user_score !== null && d.user_score !== undefined) ? d.user_score : null;
@@ -60,7 +83,7 @@ function computeClientTagStats(minCount) {
 
     for (const [ckey, list] of Object.entries(tags)) {
       if (Array.isArray(list)) {
-        const cname = TAG_CATEGORIES[ckey] || ckey;
+        const cname = categoriesMap[ckey] || ckey;
         list.forEach(t => {
           const key = ckey + '::' + t;
           if (!tagData[key]) {
@@ -171,15 +194,17 @@ function renderTagInsights() {
   const container = document.getElementById('insights-view');
   if (!container) return;
 
-  const stats = computeClientTagStats(insightsMinCount);
-
-  if (!allData.length) {
+  const dataList = (typeof allData !== 'undefined' && Array.isArray(allData)) ? allData : [];
+  if (!dataList.length) {
     container.innerHTML = '<div style="text-align:center;padding:60px;color:var(--muted)">분석된 사진 데이터가 없습니다. 먼저 사진을 업로드해 분석해주세요.</div>';
     return;
   }
 
+  const stats = computeClientTagStats(insightsMinCount);
+
   const topAi = stats.allTags.length ? [...stats.allTags].sort((a, b) => b.avg_ai_score - a.avg_ai_score)[0] : null;
   const userRatePct = stats.totalPhotos ? Math.round((stats.userRatedPhotos / stats.totalPhotos) * 100) : 0;
+  const categoriesMap = (typeof TAG_CATEGORIES !== 'undefined' ? TAG_CATEGORIES : (window.TAG_CATEGORIES || {}));
 
   container.innerHTML = `
     <!-- Insights Toolbar -->
@@ -286,7 +311,7 @@ function renderTagInsights() {
       </div>
 
       <div class="insights-categories-grid">
-        ${Object.entries(TAG_CATEGORIES).map(([ckey, cname]) => {
+        ${Object.entries(categoriesMap).map(([ckey, cname]) => {
           const catTags = stats.categories[ckey] || [];
           return `
             <div class="category-insight-card">
@@ -311,7 +336,7 @@ function renderTagStatRow(t, rank, type) {
   const score = (insightsRatingMode === 'user' && t.avg_user_score !== null) ? t.avg_user_score : t.avg_ai_score;
   const scoreColor = getScoreColor(score);
   const rankColor = type === 'top' ? (rank === 1 ? '#eab308' : (rank === 2 ? '#94a3b8' : '#b45309')) : '#ef4444';
-  const style = getTagColorStyle(t.tag);
+  const style = (typeof getTagColorStyle === 'function') ? getTagColorStyle(t.tag) : (window.getTagColorStyle ? window.getTagColorStyle(t.tag) : '');
   const escapedTag = escapeHtml(t.tag);
 
   return `
@@ -345,7 +370,7 @@ function renderTagStatRow(t, rank, type) {
 function renderCategoryTagRow(t) {
   const score = (insightsRatingMode === 'user' && t.avg_user_score !== null) ? t.avg_user_score : t.avg_ai_score;
   const scoreColor = getScoreColor(score);
-  const style = getTagColorStyle(t.tag);
+  const style = (typeof getTagColorStyle === 'function') ? getTagColorStyle(t.tag) : (window.getTagColorStyle ? window.getTagColorStyle(t.tag) : '');
   const escapedTag = escapeHtml(t.tag);
 
   return `
@@ -371,51 +396,63 @@ function populateCompareSelects() {
   const selA = document.getElementById('comp-a-select');
   const selB = document.getElementById('comp-b-select');
   if (!selA || !selB) return;
-  const options = allData.map(d => `<option value="${d.id}">${escapeHtml(d.filename)} (${d.final_score.toFixed(1)}점 - ${escapeHtml(d.grade)})</option>`).join('');
+  const dataList = (typeof allData !== 'undefined' && Array.isArray(allData)) ? allData : [];
+  if (!dataList.length) return;
+  const options = dataList.map(d => `<option value="${d.id}">${escapeHtml(d.filename)} (${(d.final_score || 0).toFixed(1)}점 - ${escapeHtml(d.grade || '-')})</option>`).join('');
   selA.innerHTML = options;
   selB.innerHTML = options;
-  if (allData.length > 1) selB.selectedIndex = 1;
+  if (dataList.length > 1) selB.selectedIndex = 1;
 }
 
 function updateComparison() {
   const selA = document.getElementById('comp-a-select');
   const selB = document.getElementById('comp-b-select');
-  if (!selA || !selB) return;
-  const idA = parseInt(selA.value);
-  const idB = parseInt(selB.value);
-  const a = allData.find(d => d.id === idA);
-  const b = allData.find(d => d.id === idB);
-  if (!a || !b) return;
-
   const content = document.getElementById('compare-content');
   if (!content) return;
+
+  const dataList = (typeof allData !== 'undefined' && Array.isArray(allData)) ? allData : [];
+  if (!dataList.length) {
+    content.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:60px;color:var(--muted)">비교할 사진 데이터가 없습니다. 먼저 사진을 업로드해 분석해주세요.</div>';
+    return;
+  }
+
+  if (selA && selB && (!selA.options || selA.options.length === 0)) {
+    populateCompareSelects();
+  }
+
+  const idA = selA ? parseInt(selA.value) : NaN;
+  const idB = selB ? parseInt(selB.value) : NaN;
+  const a = dataList.find(d => d.id === idA) || dataList[0];
+  const b = dataList.find(d => d.id === idB) || (dataList.length > 1 ? dataList[1] : dataList[0]);
+  if (!a || !b) return;
+
   content.innerHTML = [a, b].map((item, idx) => `
     <div class="compare-col">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
         <h3 style="margin:0;">사진 ${idx === 0 ? 'A' : 'B'}: ${escapeHtml(item.filename)}</h3>
-        <span class="score-grade">${escapeHtml(item.grade)}</span>
+        <span class="score-grade">${escapeHtml(item.grade || '-')}</span>
       </div>
       <img class="compare-img" src="/api/image/${item.id}">
       <div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0;">
         <span style="font-weight:700;font-size:1.1rem">종합 점수</span>
-        <strong style="font-size:2.2rem;color:var(--blue)">${item.final_score.toFixed(1)}<small style="font-size:0.9rem;color:var(--muted)"> / 10</small></strong>
+        <strong style="font-size:2.2rem;color:var(--blue)">${(item.final_score || 0).toFixed(1)}<small style="font-size:0.9rem;color:var(--muted)"> / 10</small></strong>
       </div>
       <div class="mini-scores" style="font-size:0.84rem;padding:12px;">
-        <div><span>구도</span><strong>${item.composition_score.toFixed(1)}</strong></div>
-        <div><span>조명</span><strong>${item.lighting_score.toFixed(1)}</strong></div>
-        <div><span>색감</span><strong>${item.color_score.toFixed(1)}</strong></div>
-        <div><span>기술</span><strong>${item.technique_score.toFixed(1)}</strong></div>
+        <div><span>구도</span><strong>${(item.composition_score || 0).toFixed(1)}</strong></div>
+        <div><span>조명</span><strong>${(item.lighting_score || 0).toFixed(1)}</strong></div>
+        <div><span>색감</span><strong>${(item.color_score || 0).toFixed(1)}</strong></div>
+        <div><span>기술</span><strong>${(item.technique_score || 0).toFixed(1)}</strong></div>
       </div>
       <div class="final-reason-box" style="margin-bottom:12px;">
-        <b>한줄 총평:</b> ${escapeHtml(item.final_reason)}
+        <b>한줄 총평:</b> ${escapeHtml(item.final_reason || '')}
       </div>
       <div class="strengths-box">
         <h4>✓ 주요 장점</h4>
-        <ul>${item.strengths.map(s => `<li>${escapeHtml(s)}</li>`).join('')}</ul>
+        <ul>${(item.strengths || []).map(s => `<li>${escapeHtml(s)}</li>`).join('')}</ul>
       </div>
       <div class="improvements-box" style="margin-top:8px;">
         <h4>✗ 단점 및 아쉬운 점</h4>
-        <ul>${item.improvements.map(i => `<li>${escapeHtml(i)}</li>`).join('')}</ul>
+        <ul>${(item.improvements || []).map(i => `<li>${escapeHtml(i)}</li>`).join('')}</ul>
       </div>
       ${item.cross_check_opinion ? `
         <div class="cross-check-compare-box">
@@ -423,9 +460,21 @@ function updateComparison() {
             <b class="cross-check-comp-title">🤝 OpenAI 크로스 체크 (${escapeHtml(item.cross_check_opinion.model || 'GPT-6 Luna')})</b>
             <strong class="cross-check-comp-score">${item.cross_check_opinion.score !== undefined && item.cross_check_opinion.score !== null ? Number(item.cross_check_opinion.score).toFixed(1) : '-'}점</strong>
           </div>
-          <div class="cross-check-comp-reason">${escapeHtml(item.cross_check_opinion.reason)}</div>
+          <div class="cross-check-comp-reason">${escapeHtml(item.cross_check_opinion.reason || '')}</div>
         </div>
       ` : ''}
     </div>
   `).join('');
 }
+
+// Global exports
+window.switchView = switchView;
+window.setInsightsMinCount = setInsightsMinCount;
+window.setInsightsRatingMode = setInsightsRatingMode;
+window.computeClientTagStats = computeClientTagStats;
+window.getScoreColor = getScoreColor;
+window.renderTagInsights = renderTagInsights;
+window.renderTagStatRow = renderTagStatRow;
+window.renderCategoryTagRow = renderCategoryTagRow;
+window.populateCompareSelects = populateCompareSelects;
+window.updateComparison = updateComparison;

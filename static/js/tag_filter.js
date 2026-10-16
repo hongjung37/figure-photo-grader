@@ -1,7 +1,7 @@
 // --- Tag Filter & Insights Module (static/js/tag_filter.js) ---
 
-if (typeof escapeHtml !== 'function') {
-  function escapeHtml(str) {
+if (typeof window.escapeHtml !== 'function') {
+  window.escapeHtml = function(str) {
     if (str === null || str === undefined) return '';
     return String(str)
       .replace(/&/g, '&amp;')
@@ -9,8 +9,9 @@ if (typeof escapeHtml !== 'function') {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;');
-  }
+  };
 }
+var escapeHtml = window.escapeHtml;
 
 const TAG_CATEGORIES = {
   "viewpoint": "시점",
@@ -25,8 +26,6 @@ const TAG_CATEGORIES = {
 
 let selectedTags = new Set();
 let tagLogic = 'AND'; // 'AND' or 'OR'
-let insightsMinCount = 2;
-let insightsRatingMode = 'ai'; // 'ai', 'user', 'diff'
 
 function setTagLogic(mode) {
   tagLogic = mode;
@@ -216,8 +215,6 @@ function populateTagSelectorAndQuickTags() {
 window.TAG_CATEGORIES = TAG_CATEGORIES;
 window.selectedTags = selectedTags;
 window.tagLogic = tagLogic;
-window.insightsMinCount = insightsMinCount;
-window.insightsRatingMode = insightsRatingMode;
 window.setTagLogic = setTagLogic;
 window.toggleTagFilter = toggleTagFilter;
 window.clearAllSelectedTags = clearAllSelectedTags;

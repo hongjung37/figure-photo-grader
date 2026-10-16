@@ -46,6 +46,94 @@ class FrontendIntegrityTests(unittest.TestCase):
                 missing.append(h)
         self.assertEqual(missing, [], f"HTML event handlers missing in JS: {missing}")
 
+    def test_scripts_syntax_and_runtime_integrity(self):
+        """Verify that all scripts load and evaluate in sequential order without SyntaxError (e.g., redeclared let/const)."""
+        import shutil
+        import subprocess
+
+        node_bin = shutil.which("node")
+        if not node_bin:
+            self.skipTest("node binary not found on system")
+
+        eval_script = r"""
+const vm = require('vm');
+const fs = require('fs');
+
+const files = [
+  'static/js/api.js',
+  'static/js/tag_filter.js',
+  'static/js/crop_viewer.js',
+  'static/js/tournament.js',
+  'static/js/tag_insights.js',
+  'static/js/modals.js',
+  'static/dashboard.js'
+];
+
+const mockElements = {
+  'gallery-grid': { style: {} },
+  'compare-view': { style: {} },
+  'insights-view': { style: {}, innerHTML: '' },
+  'tab-gallery': { classList: { toggle: () => {} } },
+  'tab-compare': { classList: { toggle: () => {} } },
+  'tab-insights': { classList: { toggle: () => {} } },
+  'comp-a-select': { options: [], innerHTML: '', value: '1' },
+  'comp-b-select': { options: [], innerHTML: '', value: '2' },
+  'compare-content': { innerHTML: '' }
+};
+
+const windowObj = { addEventListener: () => {} };
+const ctx = vm.createContext({
+  window: windowObj,
+  document: {
+    getElementById: (id) => mockElements[id] || null,
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    addEventListener: () => {}
+  },
+  navigator: {},
+  fetch: () => Promise.resolve({ json: () => Promise.resolve([]) }),
+  console: console
+});
+
+for (const file of files) {
+  const code = fs.readFileSync(file, 'utf8');
+  vm.runInContext(code, ctx);
+}
+
+// Verify switchView works for all view modes
+if (typeof ctx.switchView !== 'function' && typeof windowObj.switchView !== 'function') {
+  throw new Error('switchView is not a function');
+}
+
+const switchFn = ctx.switchView || windowObj.switchView;
+switchFn('compare');
+if (mockElements['compare-view'].style.display !== 'block') {
+  throw new Error('compare-view did not display block');
+}
+
+switchFn('insights');
+if (mockElements['insights-view'].style.display !== 'block') {
+  throw new Error('insights-view did not display block');
+}
+
+switchFn('gallery');
+if (mockElements['gallery-grid'].style.display !== 'grid') {
+  throw new Error('gallery-grid did not display grid');
+}
+
+process.stdout.write('OK');
+"""
+        res = subprocess.run(
+            [node_bin, "-e", eval_script],
+            cwd=str(PROJECT_ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8"
+        )
+        self.assertEqual(res.returncode, 0, f"Script evaluation failed: {res.stderr}\n{res.stdout}")
+        self.assertIn("OK", res.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
+
