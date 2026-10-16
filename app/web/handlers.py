@@ -135,11 +135,13 @@ DASHBOARD_HTML = (
 
 def _find_local_photo_path(filename: str) -> Path | None:
     """Find a project-local photo without depending on the process working directory."""
-    path = Path(filename)
-    candidates = [path] if path.is_absolute() else [
-        PROJECT_ROOT / "test_photo" / path,
-        PROJECT_ROOT / path,
-        PROJECT_ROOT / "outputs" / path,
+    safe_name = Path(str(filename).replace("\\", "/")).name
+    if not safe_name or safe_name in {".", ".."}:
+        return None
+    candidates = [
+        PROJECT_ROOT / "test_photo" / safe_name,
+        PROJECT_ROOT / safe_name,
+        PROJECT_ROOT / "outputs" / safe_name,
     ]
     return next((candidate for candidate in candidates if candidate.is_file()), None)
 
@@ -363,7 +365,9 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                         for line in header.split(b"\r\n"):
                             if b"filename=" in line:
                                 fn_raw = line.split(b'filename="')[-1].split(b'"')[0]
-                                filename = fn_raw.decode("utf-8", errors="replace")
+                                filename = Path(
+                                    fn_raw.decode("utf-8", errors="replace").replace("\\", "/")
+                                ).name or "uploaded.webp"
 
                 if not file_bytes:
                     raise ValueError("사진 파일이 전달되지 않았습니다.")
@@ -492,7 +496,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 from app.exporters.excel_exporter import REVIEW_STATUSES
                 if new_status not in REVIEW_STATUSES:
                     raise ValueError(f"유효하지 않은 검토 상태입니다: {new_status}")
-                update_review_status(self.db_path, record_id, new_status)
+                if not update_review_status(self.db_path, record_id, new_status):
+                    raise ValueError(f"레코드 ID {record_id}를 찾을 수 없습니다.")
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.end_headers()
@@ -515,7 +520,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 user_score = None
                 if raw_score is not None and str(raw_score).strip() != "":
                     user_score = max(0.0, min(10.0, round(float(raw_score), 1)))
-                update_user_score(self.db_path, record_id, user_score)
+                if not update_user_score(self.db_path, record_id, user_score):
+                    raise ValueError(f"레코드 ID {record_id}를 찾을 수 없습니다.")
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.end_headers()
@@ -540,11 +546,14 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     record_ids = [int(data["id"])]
                 if not record_ids:
                     raise ValueError("삭제할 기록 ID가 지정되지 않았습니다.")
-                delete_analyses(self.db_path, record_ids)
+                deleted_ids = delete_analyses(self.db_path, record_ids)
+                if len(deleted_ids) != len(set(record_ids)):
+                    missing_ids = sorted(set(record_ids) - set(deleted_ids))
+                    raise ValueError(f"존재하지 않는 레코드 ID입니다: {missing_ids}")
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.end_headers()
-                self.wfile.write(json.dumps({"success": True, "deleted_ids": record_ids, "count": len(record_ids)}).encode("utf-8"))
+                self.wfile.write(json.dumps({"success": True, "deleted_ids": deleted_ids, "count": len(deleted_ids)}).encode("utf-8"))
                 return
             except Exception as exc:
                 self.send_response(HTTPStatus.INTERNAL_SERVER_ERROR)

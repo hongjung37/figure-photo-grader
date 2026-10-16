@@ -427,18 +427,20 @@ def update_photo_thumbnail(db_path: Path, record_id: int, thumb_bytes: bytes) ->
         conn.execute("UPDATE photo_analyses SET thumbnail = ? WHERE id = ?", (thumb_bytes, record_id))
 
 
-def update_review_status(db_path: Path, record_id: int, new_status: str) -> None:
+def update_review_status(db_path: Path, record_id: int, new_status: str) -> bool:
     """Update review_status for a record."""
     ensure_db_columns(db_path)
     with closing(get_db_connection(db_path)) as conn, conn:
-        conn.execute("UPDATE photo_analyses SET review_status = ? WHERE id = ?", (new_status, record_id))
+        cursor = conn.execute("UPDATE photo_analyses SET review_status = ? WHERE id = ?", (new_status, record_id))
+        return cursor.rowcount > 0
 
 
-def update_user_score(db_path: Path, record_id: int, user_score: float | None) -> None:
+def update_user_score(db_path: Path, record_id: int, user_score: float | None) -> bool:
     """Update user rating score for a record."""
     ensure_db_columns(db_path)
     with closing(get_db_connection(db_path)) as conn, conn:
-        conn.execute("UPDATE photo_analyses SET user_score = ? WHERE id = ?", (user_score, record_id))
+        cursor = conn.execute("UPDATE photo_analyses SET user_score = ? WHERE id = ?", (user_score, record_id))
+        return cursor.rowcount > 0
 
 
 def delete_analyses(db_path: Path, record_ids: list[int]) -> list[int]:
@@ -450,7 +452,7 @@ def delete_analyses(db_path: Path, record_ids: list[int]) -> list[int]:
         conn.execute("PRAGMA foreign_keys = ON")
         placeholders = ",".join("?" for _ in record_ids)
         rows = conn.execute(
-            f"SELECT sha256 FROM photo_analyses WHERE id IN ({placeholders})",
+            f"SELECT id, sha256 FROM photo_analyses WHERE id IN ({placeholders})",
             record_ids,
         ).fetchall()
         conn.execute(f"DELETE FROM photo_analysis_tags WHERE analysis_id IN ({placeholders})", record_ids)
@@ -460,15 +462,16 @@ def delete_analyses(db_path: Path, record_ids: list[int]) -> list[int]:
             for row in conn.execute("SELECT sha256 FROM photo_analyses").fetchall()
         }
         for row in rows:
-            if row[0] in remaining_hashes:
+            if row[1] in remaining_hashes:
                 continue
             for mime_type in ("image/jpeg", "image/png", "image/webp"):
-                original_path = get_original_photo_path(db_path, row[0], mime_type)
+                original_path = get_original_photo_path(db_path, row[1], mime_type)
                 try:
                     original_path.unlink(missing_ok=True)
                 except OSError:
                     pass
-    return record_ids
+    existing_ids = {row[0] for row in rows}
+    return [record_id for record_id in record_ids if record_id in existing_ids]
 
 
 def get_analysis_row_by_id(db_path: Path | str, record_id: int) -> dict[str, Any] | None:

@@ -390,6 +390,32 @@ class PhotoAnalyzerTests(unittest.TestCase):
             self.assertIn("fig1.jpg", comparison_text)
             self.assertIn("fig2.jpg", comparison_text)
 
+    def test_run_batch_pipeline_avoids_duplicate_report_stems(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            first_dir = root / "first"
+            second_dir = root / "second"
+            first_dir.mkdir()
+            second_dir.mkdir()
+            first_photo = first_dir / "same.jpg"
+            second_photo = second_dir / "same.jpg"
+            self._make_jpeg(first_photo)
+            self._make_jpeg(second_photo)
+
+            report_dir = root / "reports"
+            with patch.object(photo_analyzer, "analyze_with_gemini", return_value=self._valid_analysis()):
+                exit_code = photo_analyzer.run_batch_pipeline(
+                    photo_paths=[first_photo, second_photo],
+                    model="test-model",
+                    db_path=root / "batch.sqlite3",
+                    report_dir=report_dir,
+                    summary_html_path=None,
+                    max_workers=2,
+                )
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(len(list(report_dir.glob("same__*.html"))), 2)
+
     def test_dashboard_get_all_analyses(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             dir_path = Path(temporary_directory)
@@ -430,6 +456,29 @@ class PhotoAnalyzerTests(unittest.TestCase):
             with closing(sqlite3.connect(db_path)) as conn:
                 tag_count = conn.execute("SELECT COUNT(*) FROM photo_analysis_tags WHERE analysis_id = ?", (record_id,)).fetchone()[0]
                 self.assertEqual(tag_count, 0)
+
+    def test_unknown_record_updates_and_delete_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            db_path = Path(temporary_directory) / "missing_record.sqlite3"
+            image_path = Path(temporary_directory) / "sample.jpg"
+            self._make_jpeg(image_path)
+            photo = prepare_photo(image_path)
+            record_id = save_analysis(db_path, photo, "test-model", self._valid_analysis())
+
+            self.assertTrue(photo_dashboard.update_review_status(db_path, record_id, "검토 완료"))
+            self.assertTrue(photo_dashboard.update_user_score(db_path, record_id, 9.0))
+            self.assertFalse(photo_dashboard.update_review_status(db_path, 9999, "검토 완료"))
+            self.assertFalse(photo_dashboard.update_user_score(db_path, 9999, 9.0))
+            self.assertEqual(photo_dashboard.delete_analyses(db_path, [9999]), [])
+
+    def test_local_photo_lookup_rejects_absolute_and_parent_paths(self) -> None:
+        from app.web.handlers import _find_local_photo_path
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            external_photo = Path(temporary_directory) / "outside.jpg"
+            external_photo.write_bytes(b"not a project photo")
+            self.assertIsNone(_find_local_photo_path(str(external_photo)))
+            self.assertIsNone(_find_local_photo_path(f"..\\{external_photo.name}"))
 
 
     def test_figure_categories_defined(self) -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
@@ -50,6 +51,10 @@ def run_batch_pipeline(
         print("Lightroom / Capture One 호환 XMP 사이드카 자동 생성 활성화됨", file=sys.stderr)
 
     results: list[dict[str, Any]] = []
+    report_stem_counts = Counter(
+        re.sub(r"[^A-Za-z0-9._-]+", "_", photo_path.stem).strip("._") or "photo"
+        for photo_path in photo_paths
+    )
 
     def _process_one(photo_path: Path) -> dict[str, Any]:
         photo = prepare_photo(photo_path)
@@ -59,7 +64,10 @@ def run_batch_pipeline(
         rel_report = None
         if report_dir is not None:
             clean_stem = re.sub(r"[^A-Za-z0-9._-]+", "_", photo_path.stem).strip("._") or "photo"
-            report_path = report_dir / f"{clean_stem}.html"
+            report_name = clean_stem
+            if report_stem_counts[clean_stem] > 1:
+                report_name = f"{clean_stem}__{record_id}"
+            report_path = report_dir / f"{report_name}.html"
             save_html_report(photo, analysis, record_id, model, report_path)
             if summary_html_path is not None:
                 try:
