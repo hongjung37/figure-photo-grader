@@ -39,7 +39,7 @@ def run_batch_pipeline(
     generate_xmp: bool = False,
 ) -> int:
     """Analyze multiple photos in parallel, save results to DB, generate reports and optional XMP sidecars."""
-    from app.db.repository import save_analysis
+    from app.db.repository import find_existing_analysis, save_analysis
     from app.exporters.html_exporter import render_batch_comparison_html, save_html_report
     print(f"=== 피규어 사진 일괄 분석 시작 ===", file=sys.stderr)
     print(f"대상 사진: {len(photo_paths)}장 | 모델: {model} | 동시 워커: {max_workers}", file=sys.stderr)
@@ -58,8 +58,13 @@ def run_batch_pipeline(
 
     def _process_one(photo_path: Path) -> dict[str, Any]:
         photo = prepare_photo(photo_path)
-        analysis = _dispatch_analyze_with_gemini(photo, model=model, category_hint=category if category != "auto" else None)
-        record_id = save_analysis(db_path, photo, model, analysis)
+        existing = find_existing_analysis(db_path, photo.sha256)
+        if existing is not None:
+            record_id, analysis_dict = existing
+            analysis = PhotoAnalysis.model_validate(analysis_dict)
+        else:
+            analysis = _dispatch_analyze_with_gemini(photo, model=model, category_hint=category if category != "auto" else None)
+            record_id = save_analysis(db_path, photo, model, analysis)
         report_path = None
         rel_report = None
         if report_dir is not None:

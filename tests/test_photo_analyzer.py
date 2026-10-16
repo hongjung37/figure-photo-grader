@@ -480,6 +480,85 @@ class PhotoAnalyzerTests(unittest.TestCase):
             self.assertIsNone(_find_local_photo_path(str(external_photo)))
             self.assertIsNone(_find_local_photo_path(f"..\\{external_photo.name}"))
 
+    def test_legacy_db_without_dhash_backfills_and_clusters(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            db_path = Path(temporary_directory) / "legacy_test.sqlite3"
+            image_path = Path(temporary_directory) / "sample.jpg"
+            self._make_jpeg(image_path)
+            photo = prepare_photo(image_path)
+            record_id = save_analysis(db_path, photo, "test-model", self._valid_analysis())
+
+            # Simulate legacy database record where dhash is NULL
+            with closing(sqlite3.connect(db_path)) as conn, conn:
+                conn.execute("UPDATE photo_analyses SET dhash = NULL WHERE id = ?", (record_id,))
+                dhash_before = conn.execute("SELECT dhash FROM photo_analyses WHERE id = ?", (record_id,)).fetchone()[0]
+                self.assertIsNone(dhash_before)
+
+            # Retrieve analyses should compute dHash from thumbnail and backfill
+            analyses = photo_dashboard.get_all_analyses(db_path)
+            self.assertEqual(len(analyses), 1)
+            self.assertIsNotNone(analyses[0].get("dhash"))
+
+            with closing(sqlite3.connect(db_path)) as conn:
+                dhash_after = conn.execute("SELECT dhash FROM photo_analyses WHERE id = ?", (record_id,)).fetchone()[0]
+                self.assertIsNotNone(dhash_after)
+
+    def test_local_photo_lookup_sha256_verification(self) -> None:
+        from app.web.handlers import _find_local_photo_path
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            # Place photo in test_photo
+            test_dir = PROJECT_ROOT / "test_photo"
+            test_dir.mkdir(exist_ok=True)
+            probe_file = test_dir / "_probe_test_sample.jpg"
+            self._make_jpeg(probe_file)
+            try:
+                import hashlib
+                valid_sha = hashlib.sha256(probe_file.read_bytes()).hexdigest()
+                # Should find when sha256 matches
+                found = _find_local_photo_path(probe_file.name, expected_sha256=valid_sha)
+                self.assertIsNotNone(found)
+                # Should NOT match when sha256 is different (even if filename matches)
+                wrong_sha = "0" * 64
+                not_found = _find_local_photo_path(probe_file.name, expected_sha256=wrong_sha)
+                self.assertIsNone(not_found)
+            finally:
+                probe_file.unlink(missing_ok=True)
+
+    def test_batch_pipeline_reuses_existing_analysis(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            photo_file = root / "item.jpg"
+            self._make_jpeg(photo_file)
+            db_path = root / "batch_idempotent.sqlite3"
+
+            with patch.object(photo_analyzer, "analyze_with_gemini", return_value=self._valid_analysis()) as mock_ai:
+                # First run
+                code1 = photo_analyzer.run_batch_pipeline(
+                    photo_paths=[photo_file],
+                    model="test-model",
+                    db_path=db_path,
+                    report_dir=None,
+                    summary_html_path=None,
+                )
+                self.assertEqual(code1, 0)
+                self.assertEqual(mock_ai.call_count, 1)
+
+                # Second run with same photo should reuse existing analysis and NOT call AI again
+                code2 = photo_analyzer.run_batch_pipeline(
+                    photo_paths=[photo_file],
+                    model="test-model",
+                    db_path=db_path,
+                    report_dir=None,
+                    summary_html_path=None,
+                )
+                self.assertEqual(code2, 0)
+                # Call count should still be 1!
+                self.assertEqual(mock_ai.call_count, 1)
+
+            # DB should have exactly 1 record, not 2
+            analyses = photo_dashboard.get_all_analyses(db_path)
+            self.assertEqual(len(analyses), 1)
+
 
     def test_figure_categories_defined(self) -> None:
         from photo_tag_schema import FIGURE_CATEGORIES

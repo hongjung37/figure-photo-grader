@@ -133,7 +133,7 @@ DASHBOARD_HTML = (
 )
 
 
-def _find_local_photo_path(filename: str) -> Path | None:
+def _find_local_photo_path(filename: str, expected_sha256: str | None = None) -> Path | None:
     """Find a project-local photo without depending on the process working directory."""
     safe_name = Path(str(filename).replace("\\", "/")).name
     if not safe_name or safe_name in {".", ".."}:
@@ -143,10 +143,15 @@ def _find_local_photo_path(filename: str) -> Path | None:
         PROJECT_ROOT.resolve(),
         (PROJECT_ROOT / "outputs").resolve(),
     ]
+    import hashlib
     for base in allowed_dirs:
         candidate = (base / safe_name).resolve()
         try:
             if candidate.is_relative_to(base) and candidate.is_file():
+                if expected_sha256:
+                    h = hashlib.sha256(candidate.read_bytes()).hexdigest()
+                    if h != expected_sha256:
+                        continue
                 return candidate
         except (ValueError, OSError):
             continue
@@ -166,7 +171,7 @@ def _load_prepared_photo_for_record(db_path: Path, row: dict[str, Any] | Any) ->
             return replace(prep, source_filename=fname, sha256=sha256)
 
     # 2. Local candidate paths
-    found_file = _find_local_photo_path(fname)
+    found_file = _find_local_photo_path(fname, expected_sha256=sha256)
     if found_file:
         prep = prepare_photo(found_file)
         from dataclasses import replace
@@ -288,7 +293,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                         return
 
                     # Fallback: search local files, generate thumbnail and cache into DB
-                    cand = _find_local_photo_path(fname)
+                    cand = _find_local_photo_path(fname, expected_sha256=sha256)
                     if cand:
                         thumb_bytes = make_thumbnail_bytes(cand)
                         update_photo_thumbnail(self.db_path, record_id, thumb_bytes)
@@ -316,6 +321,12 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             return
 
         super().do_GET()
+
+    def _send_json_error(self, status: HTTPStatus, message: str) -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(json.dumps({"success": False, "error": message}, ensure_ascii=False).encode("utf-8"))
 
     def do_POST(self):
         parsed = urlparse(self.path)
@@ -481,16 +492,15 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     ).encode("utf-8")
                 )
                 return
+            except ValueError as exc:
+                status = HTTPStatus.NOT_FOUND if "찾을 수 없습니다" in str(exc) else HTTPStatus.BAD_REQUEST
+                self._send_json_error(status, str(exc))
+                return
             except Exception as exc:
                 import traceback
                 print(f"[/api/reanalyze ERROR] {type(exc).__name__}: {exc}", file=sys.stderr)
                 traceback.print_exc(file=sys.stderr)
-                self.send_response(HTTPStatus.INTERNAL_SERVER_ERROR)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.end_headers()
-                self.wfile.write(
-                    json.dumps({"success": False, "error": str(exc)}, ensure_ascii=False).encode("utf-8")
-                )
+                self._send_json_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
                 return
 
         if parsed.path == "/api/update-status":
@@ -502,19 +512,21 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 new_status = str(data.get("status", "토너먼트 1위"))
                 from app.exporters.excel_exporter import REVIEW_STATUSES
                 if new_status not in REVIEW_STATUSES:
-                    raise ValueError(f"유효하지 않은 검토 상태입니다: {new_status}")
+                    self._send_json_error(HTTPStatus.BAD_REQUEST, f"유효하지 않은 검토 상태입니다: {new_status}")
+                    return
                 if not update_review_status(self.db_path, record_id, new_status):
-                    raise ValueError(f"레코드 ID {record_id}를 찾을 수 없습니다.")
+                    self._send_json_error(HTTPStatus.NOT_FOUND, f"레코드 ID {record_id}를 찾을 수 없습니다.")
+                    return
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.end_headers()
                 self.wfile.write(json.dumps({"success": True}).encode("utf-8"))
                 return
+            except (ValueError, KeyError) as exc:
+                self._send_json_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
             except Exception as exc:
-                self.send_response(HTTPStatus.INTERNAL_SERVER_ERROR)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.end_headers()
-                self.wfile.write(json.dumps({"success": False, "error": str(exc)}).encode("utf-8"))
+                self._send_json_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
                 return
 
         if parsed.path == "/api/rate":
@@ -528,17 +540,18 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 if raw_score is not None and str(raw_score).strip() != "":
                     user_score = max(0.0, min(10.0, round(float(raw_score), 1)))
                 if not update_user_score(self.db_path, record_id, user_score):
-                    raise ValueError(f"레코드 ID {record_id}를 찾을 수 없습니다.")
+                    self._send_json_error(HTTPStatus.NOT_FOUND, f"레코드 ID {record_id}를 찾을 수 없습니다.")
+                    return
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.end_headers()
                 self.wfile.write(json.dumps({"success": True, "id": record_id, "user_score": user_score}, ensure_ascii=False).encode("utf-8"))
                 return
+            except (ValueError, KeyError) as exc:
+                self._send_json_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
             except Exception as exc:
-                self.send_response(HTTPStatus.INTERNAL_SERVER_ERROR)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.end_headers()
-                self.wfile.write(json.dumps({"success": False, "error": str(exc)}).encode("utf-8"))
+                self._send_json_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
                 return
 
         if parsed.path == "/api/delete-analysis":
@@ -552,60 +565,65 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 elif "id" in data:
                     record_ids = [int(data["id"])]
                 if not record_ids:
-                    raise ValueError("삭제할 기록 ID가 지정되지 않았습니다.")
-                deleted_ids = delete_analyses(self.db_path, record_ids)
-                if len(deleted_ids) != len(set(record_ids)):
-                    missing_ids = sorted(set(record_ids) - set(deleted_ids))
-                    raise ValueError(f"존재하지 않는 레코드 ID입니다: {missing_ids}")
+                    self._send_json_error(HTTPStatus.BAD_REQUEST, "삭제할 기록 ID가 지정되지 않았습니다.")
+                    return
+                unique_record_ids = list(dict.fromkeys(record_ids))
+                deleted_ids = delete_analyses(self.db_path, unique_record_ids)
+                if len(deleted_ids) != len(unique_record_ids):
+                    missing_ids = sorted(set(unique_record_ids) - set(deleted_ids))
+                    self._send_json_error(HTTPStatus.NOT_FOUND, f"존재하지 않는 레코드 ID입니다: {missing_ids}")
+                    return
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.end_headers()
                 self.wfile.write(json.dumps({"success": True, "deleted_ids": deleted_ids, "count": len(deleted_ids)}).encode("utf-8"))
                 return
+            except (ValueError, KeyError) as exc:
+                self._send_json_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
             except Exception as exc:
-                self.send_response(HTTPStatus.INTERNAL_SERVER_ERROR)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.end_headers()
-                self.wfile.write(json.dumps({"success": False, "error": str(exc)}).encode("utf-8"))
+                self._send_json_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
                 return
 
         if parsed.path == "/api/export-xmp":
             try:
                 from app.services.xmp_service import write_xmp_sidecar
                 exported_count = 0
+                skipped_files: list[str] = []
                 rows, tags_by_id = get_analyses_and_tags_for_export(self.db_path)
 
                 for r in rows:
                     aid = int(r["id"])
                     fname = r["source_filename"]
+                    sha256 = r.get("sha256")
                     analysis_data = json.loads(r["analysis_json"])
-                    # Search candidate locations
-                    target_file = _find_local_photo_path(fname)
+                    target_file = _find_local_photo_path(fname, expected_sha256=sha256)
                     if target_file is None:
-                        raise FileNotFoundError(f"사진 파일 '{fname}'을 찾을 수 없습니다.")
+                        skipped_files.append(fname)
+                        continue
                     xmp_file = target_file.with_suffix(".xmp")
-                    write_xmp_sidecar(
-                        photo_path=target_file,
-                        score=float(analysis_data.get("final_score", 0)),
-                        reason=analysis_data.get("final_reason", ""),
-                        figure_category=analysis_data.get("figure_category", "일반 피규어 촬영"),
-                        tags=tags_by_id.get(aid, []),
-                        strengths=analysis_data.get("strengths", []),
-                        improvements=analysis_data.get("improvements", []),
-                        target_xmp_path=xmp_file,
-                    )
-                    exported_count += 1
+                    try:
+                        write_xmp_sidecar(
+                            photo_path=target_file,
+                            score=float(analysis_data.get("final_score", 0)),
+                            reason=analysis_data.get("final_reason", ""),
+                            figure_category=analysis_data.get("figure_category", "일반 피규어 촬영"),
+                            tags=tags_by_id.get(aid, []),
+                            strengths=analysis_data.get("strengths", []),
+                            improvements=analysis_data.get("improvements", []),
+                            target_xmp_path=xmp_file,
+                        )
+                        exported_count += 1
+                    except Exception as sidecar_exc:
+                        skipped_files.append(f"{fname} ({sidecar_exc})")
 
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.end_headers()
-                self.wfile.write(json.dumps({"success": True, "count": exported_count}).encode("utf-8"))
+                self.wfile.write(json.dumps({"success": True, "count": exported_count, "skipped": skipped_files}, ensure_ascii=False).encode("utf-8"))
                 return
             except Exception as exc:
-                self.send_response(HTTPStatus.INTERNAL_SERVER_ERROR)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.end_headers()
-                self.wfile.write(json.dumps({"success": False, "error": str(exc)}).encode("utf-8"))
+                self._send_json_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
                 return
 
         if parsed.path.startswith("/api/post-process-advice/"):

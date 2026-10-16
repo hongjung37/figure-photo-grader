@@ -143,16 +143,41 @@ def get_all_analyses(db_path: Path, max_hamming_dist: int = 15) -> list[dict]:
             "SELECT analysis_id, category_key, tag FROM photo_analysis_tags"
         ).fetchall()
 
-    tags_by_id: dict[int, dict[str, list[str]]] = {}
-    for r in tag_rows:
-        aid = int(r["analysis_id"])
-        ckey = str(r["category_key"])
-        tag = str(r["tag"])
-        tags_by_id.setdefault(aid, {}).setdefault(ckey, []).append(tag)
+        tags_by_id: dict[int, dict[str, list[str]]] = {}
+        for r in tag_rows:
+            aid = int(r["analysis_id"])
+            ckey = str(r["category_key"])
+            tag = str(r["tag"])
+            tags_by_id.setdefault(aid, {}).setdefault(ckey, []).append(tag)
+
+        missing_dhash_ids = [int(r["id"]) for r in rows if r["dhash"] is None]
+        dhash_overrides: dict[int, int] = {}
+        if missing_dhash_ids:
+            placeholders = ",".join("?" for _ in missing_dhash_ids)
+            thumb_rows = conn.execute(
+                f"SELECT id, thumbnail FROM photo_analyses WHERE id IN ({placeholders}) AND thumbnail IS NOT NULL",
+                missing_dhash_ids,
+            ).fetchall()
+            with conn:
+                for tr in thumb_rows:
+                    tid = int(tr[0])
+                    tbytes = tr[1]
+                    if tbytes:
+                        try:
+                            dh = compute_dhash_from_bytes(tbytes)
+                            dhash_overrides[tid] = dh
+                            conn.execute("UPDATE photo_analyses SET dhash = ? WHERE id = ?", (dhash_to_sqlite(dh), tid))
+                        except Exception:
+                            pass
 
     results = []
     for row in rows:
-        formatted = _format_analysis_row(row, tags_by_id.get(int(row["id"])))
+        aid = int(row["id"])
+        formatted = _format_analysis_row(
+            row,
+            tags_by_id.get(aid),
+            dhash_override=dhash_overrides.get(aid),
+        )
         if formatted:
             results.append(formatted)
     from app.services.burst_detector import cluster_burst_groups
@@ -162,6 +187,7 @@ def get_all_analyses(db_path: Path, max_hamming_dist: int = 15) -> list[dict]:
 def _format_analysis_row(
     row: sqlite3.Row | dict[str, Any],
     tags_dict: dict[str, list[str]] | None = None,
+    dhash_override: int | None = None,
 ) -> dict[str, Any] | None:
     """Format a raw database row into the standardized analysis record dictionary."""
     aid = int(row["id"])
@@ -188,6 +214,8 @@ def _format_analysis_row(
     dhash_val = row["dhash"] if "dhash" in row.keys() and row["dhash"] is not None else None
     if dhash_val is not None:
         dhash_val = dhash_from_sqlite(dhash_val)
+    elif dhash_override is not None:
+        dhash_val = dhash_override
     elif "thumbnail" in row.keys() and row["thumbnail"]:
         try:
             dhash_val = compute_dhash_from_bytes(row["thumbnail"])
