@@ -159,12 +159,24 @@ class OpenAICrossCheck(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    score: float = Field(description="피규어 사진에 대한 10점 만점 기준 종합 평가 점수 (0.0 ~ 10.0)")
-    reason: str = Field(description="종합 비평 및 총평 (Gemini와 독립적인 관점의 평가 총평)")
-    strengths: list[str] = Field(description="사진의 주요 장점 (2~3개)")
-    improvements: list[str] = Field(description="사진의 단점 및 촬영 개선점 (2~3개)")
-    composition_critique: str = Field(description="구도/프레이밍에 대한 비평 ([장점]과 [단점] 구분)")
-    lighting_critique: str = Field(description="조명/노출/명암에 대한 비평 ([장점]과 [단점] 구분)")
+    score: float = Field(
+        description="구도, 조명, 색감, 촬영기술을 종합한 10점 만점 기준 최종 점수 (0.0~10.0). 7점대 평균 회귀를 피하고 실제 완성도에 따라 5~6점대(일반 스냅/평면 연출)와 8~9점대(수작)를 명확히 구분"
+    )
+    reason: str = Field(
+        description="구도·조명·색감·기술의 시각적 근거를 종합한 객관적 총평 및 해당 점수를 부여한 명확한 이유"
+    )
+    strengths: list[str] = Field(
+        description="사진에서 실제로 돋보이는 핵심 강점 목록 (1~3개, 억지로 부풀리지 말 것)"
+    )
+    improvements: list[str] = Field(
+        description="사진의 실제 한계점 및 다음 촬영을 위한 구체적 개선 조언 목록 (1~3개, 억지 트집 지양)"
+    )
+    composition_critique: str = Field(
+        description="구도, 프레이밍, 여백, 배경 분리 및 공간적 깊이감(3D 입체감 vs 2D 평면감)에 대한 객관적 평가"
+    )
+    lighting_critique: str = Field(
+        description="빛의 방향과 질, 조형 입체감, 노출, 반사광(핫스팟) 및 그림자 디테일에 대한 객관적 평가"
+    )
 
 
 class PhotoAnalysis(BaseModel):
