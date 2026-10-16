@@ -13,7 +13,7 @@ from app.config import (
     MODEL_PRESETS,
     SUPPORTED_FORMATS,
 )
-from app.db.repository import save_analysis
+from app.db import ensure_db_columns, save_analysis
 from app.exporters.html_exporter import save_html_report
 from app.services.batch_service import run_batch_pipeline
 from app.services.gemini_client import analyze_with_gemini, set_usage_log_db
@@ -107,6 +107,7 @@ def cli_main(argv: list[str] | None = None) -> int:
     target_path = args.target.expanduser().resolve()
     model = args.model if args.model else MODEL_PRESETS[args.tier]
     db_path = args.db.expanduser().resolve()
+    ensure_db_columns(db_path)
     set_usage_log_db(db_path)
 
     if target_path.is_dir():

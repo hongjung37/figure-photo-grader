@@ -70,13 +70,40 @@ def sync_analysis_tags(
     )
 
 
-def ensure_db_columns(db_path: Path) -> None:
-    """Ensure all required columns and tables exist in the SQLite database."""
-    if not db_path.is_file():
+def get_db_connection(db_path: Path | str, timeout: float = 30.0) -> sqlite3.Connection:
+    """Return a configured SQLite connection with WAL mode, busy timeout, and foreign keys."""
+    conn = sqlite3.connect(db_path, timeout=timeout)
+    try:
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute(f"PRAGMA busy_timeout = {int(timeout * 1000)}")
+        conn.execute("PRAGMA synchronous = NORMAL")
+        conn.execute("PRAGMA foreign_keys = ON")
+    except sqlite3.OperationalError:
+        pass
+    return conn
+
+
+_ENSURED_DBS: dict[str, float] = {}
+
+
+def ensure_db_columns(db_path: Path | str) -> None:
+    """Ensure all required columns and tables exist in the SQLite database (cached per file mtime)."""
+    database = Path(db_path).expanduser()
+    if not database.is_file():
         return
-    with closing(sqlite3.connect(db_path)) as conn, conn:
+    try:
+        resolved_str = str(database.resolve())
+        mtime = database.stat().st_mtime
+    except OSError:
+        return
+    if _ENSURED_DBS.get(resolved_str) == mtime:
+        return
+
+    with closing(get_db_connection(database)) as conn, conn:
         ensure_tag_tables(conn)
         cols = [r[1] for r in conn.execute("PRAGMA table_info(photo_analyses)").fetchall()]
+        if not cols:
+            return
         if "thumbnail" not in cols:
             conn.execute("ALTER TABLE photo_analyses ADD COLUMN thumbnail BLOB")
         if "lr_advice_json" not in cols:
@@ -103,3 +130,7 @@ def ensure_db_columns(db_path: Path) -> None:
                     conn.execute("UPDATE photo_analyses SET dhash = ? WHERE id = ?", (dhash_to_sqlite(dh), mid))
                 except Exception:
                     pass
+    try:
+        _ENSURED_DBS[resolved_str] = database.stat().st_mtime
+    except OSError:
+        pass

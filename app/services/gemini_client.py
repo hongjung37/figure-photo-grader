@@ -31,6 +31,7 @@ def _get_env_file_path() -> Path:
         return getattr(mod, "ENV_FILE_PATH")
     return ENV_FILE_PATH
 
+from app.db.connection import get_db_connection
 from app.models.analysis import PhotoAnalysis
 from app.models.crop import (
     CropBox,
@@ -106,7 +107,7 @@ def _log_api_usage(
     if db_path is None:
         return
     try:
-        with closing(sqlite3.connect(db_path, timeout=10)) as connection, connection:
+        with closing(get_db_connection(db_path, timeout=10.0)) as connection, connection:
             connection.execute(
                 """CREATE TABLE IF NOT EXISTS api_usage_log (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -152,7 +153,7 @@ def get_usage_stats(db_path: str | Path) -> dict[str, Any]:
     empty: dict[str, Any] = {"total_calls": 0, "by_task": [], "by_model": [], "recent": []}
     if not path.is_file():
         return empty
-    with closing(sqlite3.connect(path)) as connection:
+    with closing(get_db_connection(path)) as connection:
         connection.row_factory = sqlite3.Row
         exists = connection.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='api_usage_log'"

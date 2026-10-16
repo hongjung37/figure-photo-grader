@@ -103,10 +103,11 @@ def _open_database(db_path: Path, *, read_only: bool = False) -> sqlite3.Connect
     if not db_path.is_file():
         raise ExcelManagerError(f"SQLite DB 파일을 찾을 수 없습니다: {db_path}")
     if read_only:
-        connection = sqlite3.connect(db_path.resolve().as_uri() + "?mode=ro", uri=True)
+        connection = sqlite3.connect(db_path.resolve().as_uri() + "?mode=ro", uri=True, timeout=30.0)
     else:
-        connection = sqlite3.connect(db_path)
+        connection = sqlite3.connect(db_path, timeout=30.0)
     connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA busy_timeout = 30000")
     connection.execute("PRAGMA foreign_keys = ON")
     return connection
 

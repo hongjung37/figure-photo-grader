@@ -6,12 +6,14 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 from app.config import DEFAULT_DB_PATH, HOST, PORT
+from app.db import ensure_db_columns
 from app.services.gemini_client import set_usage_log_db
 from app.web.handlers import DashboardRequestHandler
 
 
 def run_dashboard(port: int = PORT, db_path: Path = DEFAULT_DB_PATH, host: str = HOST) -> None:
     DashboardRequestHandler.db_path = db_path.resolve()
+    ensure_db_columns(DashboardRequestHandler.db_path)
     set_usage_log_db(DashboardRequestHandler.db_path)
     server = ThreadingHTTPServer((host, port), DashboardRequestHandler)
     print(f"============================================================")

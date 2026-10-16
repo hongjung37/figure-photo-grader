@@ -12,6 +12,7 @@ from typing import Any
 from app.db.connection import (
     ensure_db_columns,
     ensure_tag_tables,
+    get_db_connection,
     sync_analysis_tags,
 )
 from app.models.analysis import AESTHETIC_TAG_CATEGORIES, CrossCheckOpinion, PhotoAnalysis, get_score_grade
@@ -36,7 +37,7 @@ def save_analysis(
     database = Path(db_path).expanduser()
     database.parent.mkdir(parents=True, exist_ok=True)
     thumb_data = thumbnail if thumbnail is not None else getattr(photo, "thumbnail_bytes", None)
-    with closing(sqlite3.connect(database)) as connection, connection:
+    with closing(get_db_connection(database)) as connection, connection:
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute(
             """CREATE TABLE IF NOT EXISTS photo_analyses (
@@ -107,7 +108,7 @@ def find_existing_analysis(db_path: Path, sha256: str) -> tuple[int, dict] | Non
     """Return (record_id, analysis dict) of the latest stored analysis with the same file hash."""
     if not db_path.is_file():
         return None
-    with closing(sqlite3.connect(db_path)) as conn:
+    with closing(get_db_connection(db_path)) as conn:
         try:
             row = conn.execute(
                 "SELECT id, analysis_json FROM photo_analyses WHERE sha256 = ? ORDER BY id DESC LIMIT 1",
@@ -128,10 +129,14 @@ def get_all_analyses(db_path: Path, max_hamming_dist: int = 15) -> list[dict]:
     if not db_path.is_file():
         return []
     ensure_db_columns(db_path)
-    with closing(sqlite3.connect(db_path)) as conn:
+    with closing(get_db_connection(db_path)) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
-            "SELECT * FROM photo_analyses ORDER BY id DESC"
+            """SELECT id, sha256, source_filename, width, height, image_format,
+                      model, exif_json, analysis_json, created_at,
+                      lr_advice_json, sns_advice_json, review_status,
+                      user_notes, dhash, user_score
+               FROM photo_analyses ORDER BY id DESC"""
         ).fetchall()
 
         tag_rows = conn.execute(
@@ -183,7 +188,7 @@ def _format_analysis_row(
     dhash_val = row["dhash"] if "dhash" in row.keys() and row["dhash"] is not None else None
     if dhash_val is not None:
         dhash_val = dhash_from_sqlite(dhash_val)
-    elif row["thumbnail"]:
+    elif "thumbnail" in row.keys() and row["thumbnail"]:
         try:
             dhash_val = compute_dhash_from_bytes(row["thumbnail"])
         except Exception:
@@ -234,7 +239,7 @@ def get_analysis_by_id(db_path: Path, record_id: int) -> dict[str, Any] | None:
     if not db_path.is_file():
         return None
     ensure_db_columns(db_path)
-    with closing(sqlite3.connect(db_path)) as conn:
+    with closing(get_db_connection(db_path)) as conn:
         conn.row_factory = sqlite3.Row
         row = conn.execute("SELECT * FROM photo_analyses WHERE id = ?", (record_id,)).fetchone()
         if not row:
@@ -262,7 +267,7 @@ def update_analysis(
     """Update model and complete analysis JSON for an existing record, re-syncing tags."""
     database = Path(db_path).expanduser()
     ensure_db_columns(database)
-    with closing(sqlite3.connect(database)) as connection, connection:
+    with closing(get_db_connection(database)) as connection, connection:
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute(
             "UPDATE photo_analyses SET model = ?, analysis_json = ? WHERE id = ?",
@@ -280,7 +285,7 @@ def update_cross_check_opinion(
     """Update only the cross_check_opinion inside analysis_json without modifying base evaluation."""
     database = Path(db_path).expanduser()
     ensure_db_columns(database)
-    with closing(sqlite3.connect(database)) as connection, connection:
+    with closing(get_db_connection(database)) as connection, connection:
         connection.execute("PRAGMA foreign_keys = ON")
         row = connection.execute(
             "SELECT analysis_json FROM photo_analyses WHERE id = ?", (record_id,)
@@ -407,7 +412,7 @@ def get_photo_thumbnail_and_hash(db_path: Path, record_id: int) -> tuple[bytes |
     """Retrieve thumbnail blob, source filename, and SHA256 hash for a specific record."""
     if not db_path.is_file():
         return None
-    with closing(sqlite3.connect(db_path)) as conn:
+    with closing(get_db_connection(db_path)) as conn:
         row = conn.execute(
             "SELECT thumbnail, source_filename, sha256 FROM photo_analyses WHERE id = ?", (record_id,)
         ).fetchone()
@@ -418,21 +423,21 @@ def get_photo_thumbnail_and_hash(db_path: Path, record_id: int) -> tuple[bytes |
 
 def update_photo_thumbnail(db_path: Path, record_id: int, thumb_bytes: bytes) -> None:
     """Update cached thumbnail blob for an analysis record."""
-    with closing(sqlite3.connect(db_path)) as conn, conn:
+    with closing(get_db_connection(db_path)) as conn, conn:
         conn.execute("UPDATE photo_analyses SET thumbnail = ? WHERE id = ?", (thumb_bytes, record_id))
 
 
 def update_review_status(db_path: Path, record_id: int, new_status: str) -> None:
     """Update review_status for a record."""
     ensure_db_columns(db_path)
-    with closing(sqlite3.connect(db_path)) as conn, conn:
+    with closing(get_db_connection(db_path)) as conn, conn:
         conn.execute("UPDATE photo_analyses SET review_status = ? WHERE id = ?", (new_status, record_id))
 
 
 def update_user_score(db_path: Path, record_id: int, user_score: float | None) -> None:
     """Update user rating score for a record."""
     ensure_db_columns(db_path)
-    with closing(sqlite3.connect(db_path)) as conn, conn:
+    with closing(get_db_connection(db_path)) as conn, conn:
         conn.execute("UPDATE photo_analyses SET user_score = ? WHERE id = ?", (user_score, record_id))
 
 
@@ -441,7 +446,7 @@ def delete_analyses(db_path: Path, record_ids: list[int]) -> list[int]:
     if not record_ids:
         return []
     ensure_db_columns(db_path)
-    with closing(sqlite3.connect(db_path)) as conn, conn:
+    with closing(get_db_connection(db_path)) as conn, conn:
         conn.execute("PRAGMA foreign_keys = ON")
         placeholders = ",".join("?" for _ in record_ids)
         rows = conn.execute(
@@ -459,7 +464,10 @@ def delete_analyses(db_path: Path, record_ids: list[int]) -> list[int]:
                 continue
             for mime_type in ("image/jpeg", "image/png", "image/webp"):
                 original_path = get_original_photo_path(db_path, row[0], mime_type)
-                original_path.unlink(missing_ok=True)
+                try:
+                    original_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
     return record_ids
 
 
@@ -468,7 +476,7 @@ def get_analysis_row_by_id(db_path: Path, record_id: int) -> dict[str, Any] | No
     if not db_path.is_file():
         return None
     ensure_db_columns(db_path)
-    with closing(sqlite3.connect(db_path)) as conn:
+    with closing(get_db_connection(db_path)) as conn:
         conn.row_factory = sqlite3.Row
         row = conn.execute("SELECT * FROM photo_analyses WHERE id = ?", (record_id,)).fetchone()
         return dict(row) if row else None
@@ -476,13 +484,13 @@ def get_analysis_row_by_id(db_path: Path, record_id: int) -> dict[str, Any] | No
 
 def update_lr_advice(db_path: Path, record_id: int, lr_advice_json: str) -> None:
     """Persist generated Lightroom post-processing advice JSON to the record."""
-    with closing(sqlite3.connect(db_path)) as conn, conn:
+    with closing(get_db_connection(db_path)) as conn, conn:
         conn.execute("UPDATE photo_analyses SET lr_advice_json = ? WHERE id = ?", (lr_advice_json, record_id))
 
 
 def update_sns_advice(db_path: Path, record_id: int, sns_advice_json: str) -> None:
     """Persist generated SNS crop & caption advice JSON to the record."""
-    with closing(sqlite3.connect(db_path)) as conn, conn:
+    with closing(get_db_connection(db_path)) as conn, conn:
         conn.execute("UPDATE photo_analyses SET sns_advice_json = ? WHERE id = ?", (sns_advice_json, record_id))
 
 
@@ -490,7 +498,7 @@ def get_analyses_and_tags_for_export(db_path: Path) -> tuple[list[dict[str, Any]
     """Retrieve all rows and associated tags for bulk export operations (e.g., XMP sidecars)."""
     if not db_path.is_file():
         return [], {}
-    with closing(sqlite3.connect(db_path)) as conn:
+    with closing(get_db_connection(db_path)) as conn:
         conn.row_factory = sqlite3.Row
         rows = [dict(r) for r in conn.execute("SELECT * FROM photo_analyses").fetchall()]
         tag_rows = conn.execute("SELECT analysis_id, tag FROM photo_analysis_tags").fetchall()

@@ -3,6 +3,7 @@
 from app.db.connection import (
     ensure_db_columns,
     ensure_tag_tables,
+    get_db_connection,
     sync_analysis_tags,
 )
 from app.db.repository import (
@@ -33,6 +34,7 @@ __all__ = [
     "get_analyses_and_tags_for_export",
     "get_analysis_by_id",
     "get_analysis_row_by_id",
+    "get_db_connection",
     "get_photo_thumbnail_and_hash",
     "get_tag_stats",
     "save_analysis",
