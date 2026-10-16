@@ -596,6 +596,17 @@ function openDetailModal(id) {
       if (typeof selectCropRatio === 'function') selectCropRatio(defaultRatio, item.id);
     }, 150);
   }
+
+  const img = document.getElementById('detail-modal-img');
+  if (img) {
+    if (img.complete) {
+      if (typeof repositionCropOverlay === 'function') repositionCropOverlay();
+    } else {
+      img.addEventListener('load', () => {
+        if (typeof repositionCropOverlay === 'function') repositionCropOverlay();
+      }, { once: true });
+    }
+  }
 }
 
 function renderCrossCheckOpinion(op) {
