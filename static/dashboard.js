@@ -601,9 +601,11 @@ function openDetailModal(id) {
   if (img) {
     if (img.complete) {
       if (typeof repositionCropOverlay === 'function') repositionCropOverlay();
+      if (typeof renderImageHistogram === 'function') renderImageHistogram(img);
     } else {
       img.addEventListener('load', () => {
         if (typeof repositionCropOverlay === 'function') repositionCropOverlay();
+        if (typeof renderImageHistogram === 'function') renderImageHistogram(img);
       }, { once: true });
     }
   }
