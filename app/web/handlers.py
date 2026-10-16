@@ -138,12 +138,19 @@ def _find_local_photo_path(filename: str) -> Path | None:
     safe_name = Path(str(filename).replace("\\", "/")).name
     if not safe_name or safe_name in {".", ".."}:
         return None
-    candidates = [
-        PROJECT_ROOT / "test_photo" / safe_name,
-        PROJECT_ROOT / safe_name,
-        PROJECT_ROOT / "outputs" / safe_name,
+    allowed_dirs = [
+        (PROJECT_ROOT / "test_photo").resolve(),
+        PROJECT_ROOT.resolve(),
+        (PROJECT_ROOT / "outputs").resolve(),
     ]
-    return next((candidate for candidate in candidates if candidate.is_file()), None)
+    for base in allowed_dirs:
+        candidate = (base / safe_name).resolve()
+        try:
+            if candidate.is_relative_to(base) and candidate.is_file():
+                return candidate
+        except (ValueError, OSError):
+            continue
+    return None
 
 def _load_prepared_photo_for_record(db_path: Path, row: dict[str, Any] | Any) -> PreparedPhoto:
     """Load PreparedPhoto prioritizing high-res photo_originals, then local files, then DB thumbnail."""

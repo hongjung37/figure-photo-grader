@@ -65,7 +65,7 @@ def run_batch_pipeline(
         if report_dir is not None:
             clean_stem = re.sub(r"[^A-Za-z0-9._-]+", "_", photo_path.stem).strip("._") or "photo"
             report_name = clean_stem
-            if report_stem_counts[clean_stem] > 1:
+            if report_stem_counts[clean_stem] > 1 or (report_dir / f"{report_name}.html").exists():
                 report_name = f"{clean_stem}__{record_id}"
             report_path = report_dir / f"{report_name}.html"
             save_html_report(photo, analysis, record_id, model, report_path)

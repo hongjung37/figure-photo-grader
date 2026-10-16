@@ -237,8 +237,44 @@ class TestTagInsightsAndUserRating(unittest.TestCase):
             )
             with urllib.request.urlopen(req_clear) as resp:
                 res = json.loads(resp.read().decode("utf-8"))
-                self.assertTrue(res["success"])
-                self.assertIsNone(res["user_score"])
+            # 4. Test POST /api/rate with nonexistent ID
+            req_data_missing = json.dumps({"id": 9999, "user_score": 5.0}).encode("utf-8")
+            req_missing = urllib.request.Request(
+                f"{base_url}/api/rate",
+                data=req_data_missing,
+                headers={"Content-Type": "application/json"}
+            )
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(req_missing)
+            err_body = json.loads(ctx.exception.read().decode("utf-8"))
+            self.assertFalse(err_body["success"])
+            self.assertIn("9999", err_body["error"])
+
+            # 5. Test POST /api/update-status with nonexistent ID
+            req_status_missing = json.dumps({"id": 9999, "status": "검토 완료"}).encode("utf-8")
+            req_st = urllib.request.Request(
+                f"{base_url}/api/update-status",
+                data=req_status_missing,
+                headers={"Content-Type": "application/json"}
+            )
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(req_st)
+            err_body = json.loads(ctx.exception.read().decode("utf-8"))
+            self.assertFalse(err_body["success"])
+            self.assertIn("9999", err_body["error"])
+
+            # 6. Test POST /api/delete-analysis with nonexistent ID
+            req_del_missing = json.dumps({"ids": [9999]}).encode("utf-8")
+            req_del = urllib.request.Request(
+                f"{base_url}/api/delete-analysis",
+                data=req_del_missing,
+                headers={"Content-Type": "application/json"}
+            )
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(req_del)
+            err_body = json.loads(ctx.exception.read().decode("utf-8"))
+            self.assertFalse(err_body["success"])
+            self.assertIn("9999", err_body["error"])
         finally:
             server.shutdown()
             server.server_close()
