@@ -1,5 +1,76 @@
 // --- API Client Module (static/js/api.js) ---
 
+const DEFAULT_AI_MODEL_SETTINGS = {
+  photo_grading: 'standard',
+  lightroom_advice: 'lite',
+  sns_crop: 'lite',
+  sns_caption: 'lite'
+};
+
+const TASK_MODEL_OPTIONS = [
+  { value: 'lite', label: '⚡ Flash-Lite 3.1 (초고속)', shortLabel: '⚡ Flash-Lite 3.1' },
+  { value: 'standard', label: '🔍 Flash-Lite 3.5 (표준)', shortLabel: '🔍 Flash-Lite 3.5' },
+  { value: 'pro', label: '💎 Flash 3.8 (고화질 심층)', shortLabel: '💎 Flash 3.8' },
+  { value: 'luna', label: '🌙 GPT-6 Luna (OpenAI)', shortLabel: '🌙 GPT-6 Luna' }
+];
+
+const ModelSettings = {
+  load() {
+    try {
+      const raw = localStorage.getItem('ai_model_settings');
+      if (!raw) return { ...DEFAULT_AI_MODEL_SETTINGS };
+      const parsed = JSON.parse(raw);
+      return {
+        photo_grading: parsed.photo_grading || DEFAULT_AI_MODEL_SETTINGS.photo_grading,
+        lightroom_advice: parsed.lightroom_advice || DEFAULT_AI_MODEL_SETTINGS.lightroom_advice,
+        sns_crop: parsed.sns_crop || DEFAULT_AI_MODEL_SETTINGS.sns_crop,
+        sns_caption: parsed.sns_caption || DEFAULT_AI_MODEL_SETTINGS.sns_caption
+      };
+    } catch (e) {
+      return { ...DEFAULT_AI_MODEL_SETTINGS };
+    }
+  },
+
+  save(settings) {
+    const merged = { ...this.load(), ...settings };
+    try {
+      localStorage.setItem('ai_model_settings', JSON.stringify(merged));
+    } catch (e) {}
+    return merged;
+  },
+
+  get(taskKey) {
+    const current = this.load();
+    return current[taskKey] || DEFAULT_AI_MODEL_SETTINGS[taskKey] || 'lite';
+  },
+
+  set(taskKey, modelValue) {
+    return this.save({ [taskKey]: modelValue });
+  },
+
+  formatBadge(modelStr) {
+    if (!modelStr) return '';
+    const s = String(modelStr).toLowerCase();
+    if (s.includes('luna')) return '🌙 GPT-6 Luna';
+    if (s.includes('3.8') || s === 'pro') return '💎 Flash 3.8';
+    if (s.includes('3.5') || s === 'standard') return '🔍 Flash-Lite 3.5';
+    if (s.includes('3.1') || s === 'lite') return '⚡ Flash-Lite 3.1';
+    if (s.includes('gpt-4o-mini') || s === 'mini') return '🤖 GPT-4o mini';
+    if (s.includes('gpt-4o')) return '🤖 GPT-4o';
+    return modelStr;
+  },
+
+  renderOptionsHtml(selectedValue) {
+    const sel = selectedValue || 'lite';
+    return TASK_MODEL_OPTIONS.map(opt =>
+      `<option value="${opt.value}" ${opt.value === sel ? 'selected' : ''}>${opt.label}</option>`
+    ).join('');
+  }
+};
+
+window.ModelSettings = ModelSettings;
+window.TASK_MODEL_OPTIONS = TASK_MODEL_OPTIONS;
+
 const API = {
   async fetchAnalyses(burstDist = 15) {
     const res = await fetch(`/api/analyses?burst_dist=${burstDist}`);
@@ -52,19 +123,33 @@ const API = {
     return await res.json();
   },
 
-  async fetchLightroomAdvice(id, force = false) {
-    const query = force ? '?force=true' : '';
-    const res = await fetch(`/api/post-process-advice/${id}${query}`, { method: 'POST' });
+  async fetchLightroomAdvice(id, force = false, model = '') {
+    const chosenModel = model || ModelSettings.get('lightroom_advice');
+    const params = new URLSearchParams();
+    if (force) params.set('force', 'true');
+    if (chosenModel) params.set('model', chosenModel);
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    const res = await fetch(`/api/post-process-advice/${id}${qs}`, { method: 'POST' });
     return await res.json();
   },
 
-  async fetchSnsCrop(id, ratioKey = 'all', force = false) {
-    const res = await fetch(`/api/sns-crop/${ratioKey}/${id}${force ? '?force=true' : ''}`, { method: 'POST' });
+  async fetchSnsCrop(id, ratioKey = 'all', force = false, model = '') {
+    const chosenModel = model || ModelSettings.get('sns_crop');
+    const params = new URLSearchParams();
+    if (force) params.set('force', 'true');
+    if (chosenModel) params.set('model', chosenModel);
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    const res = await fetch(`/api/sns-crop/${ratioKey}/${id}${qs}`, { method: 'POST' });
     return await res.json();
   },
 
-  async fetchSnsCaption(id, force = false) {
-    const res = await fetch(`/api/sns-caption/${id}${force ? '?force=true' : ''}`, { method: 'POST' });
+  async fetchSnsCaption(id, force = false, model = '') {
+    const chosenModel = model || ModelSettings.get('sns_caption');
+    const params = new URLSearchParams();
+    if (force) params.set('force', 'true');
+    if (chosenModel) params.set('model', chosenModel);
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    const res = await fetch(`/api/sns-caption/${id}${qs}`, { method: 'POST' });
     return await res.json();
   },
 
@@ -87,3 +172,4 @@ const API = {
 };
 
 window.API = API;
+

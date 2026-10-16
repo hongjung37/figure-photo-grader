@@ -105,6 +105,13 @@ function renderCropRatioDetailArea(ratioKey, currentAdv, recordId) {
   const target = TARGET_CROP_RATIOS[ratioKey] || TARGET_CROP_RATIOS['instagram_crop_4_5'];
   const box = currentAdv ? currentAdv[ratioKey] : null;
   const isBest = currentAdv && currentAdv.best_ratio_key === ratioKey;
+  const ms = (typeof window !== 'undefined' && window.ModelSettings) ? window.ModelSettings : null;
+  const cropModelVal = ms ? ms.get('sns_crop') : 'lite';
+  const cropModelOptions = ms ? ms.renderOptionsHtml(cropModelVal) : '<option value="lite">⚡ Flash-Lite 3.1</option>';
+  const usedCropBadge = (currentAdv && currentAdv.crop_model)
+    ? `<span style="font-size:0.72rem;background:rgba(2,132,199,0.14);color:#0284c7;padding:2px 8px;border-radius:999px;font-weight:700;">${escapeHtml(ms ? ms.formatBadge(currentAdv.crop_model) : currentAdv.crop_model)}</span>`
+    : '';
+  const cropSelectHtml = `<select id="sns-crop-model-select-${recordId}" class="select-input" style="padding:3px 7px;font-size:0.74rem;height:auto;" onchange="if(typeof window !== 'undefined' && window.ModelSettings) window.ModelSettings.set('sns_crop', this.value)" title="SNS 크롭 분석 모델 선택">${cropModelOptions}</select>`;
 
   if (isOriginal) {
     const bestKey = currentAdv ? currentAdv.best_ratio_key : null;
@@ -138,11 +145,13 @@ function renderCropRatioDetailArea(ratioKey, currentAdv, recordId) {
     return `
       <div id="crop-tip-box" class="sns-tip-box ${isBest ? 'is-best-tip-box' : ''}">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:6px;">
-          <div style="display:flex;align-items:center;gap:6px;">
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
             <b id="crop-tip-title" style="color:var(--blue);font-size:0.92rem;">📷 원본 구도 유지 (No Crop)</b>
             ${isBest ? '<span class="best-ratio-badge-pill">👑 AI Best Pick</span>' : ''}
+            ${usedCropBadge}
           </div>
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+            ${cropSelectHtml}
             <button class="filter-btn" style="padding:4px 9px;font-size:0.76rem;background:var(--card);color:var(--muted);border-color:var(--line);" onclick="requestAllSnsCrops(${recordId}, this)">🔄 전체 일괄 재분석</button>
             <a class="upload-btn" style="padding:5px 12px;font-size:0.78rem;background:#0284c7;text-decoration:none;display:inline-flex;align-items:center;color:white;" href="/api/image/${recordId}?original=1" download target="_blank">📥 원본 고해상도 다운로드</a>
           </div>
@@ -156,11 +165,13 @@ function renderCropRatioDetailArea(ratioKey, currentAdv, recordId) {
     return `
       <div id="crop-tip-box" class="sns-tip-box ${isBest ? 'is-best-tip-box' : ''}">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:6px;">
-          <div style="display:flex;align-items:center;gap:6px;">
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
             <b id="crop-tip-title" style="color:var(--blue);font-size:0.92rem;">${escapeHtml(box.ratio_label || target.tag)}</b>
             ${isBest ? '<span class="best-ratio-badge-pill">👑 AI Best Pick</span>' : ''}
+            ${usedCropBadge}
           </div>
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+            ${cropSelectHtml}
             <button class="filter-btn" style="padding:4px 9px;font-size:0.76rem;background:rgba(56,189,248,0.15);color:var(--blue);border-color:var(--line);" onclick="requestSingleSnsCrop('${ratioKey}', ${recordId}, this, true)">🔄 이 비율만 다시 제안</button>
             <button class="filter-btn" style="padding:4px 9px;font-size:0.76rem;background:var(--card);color:var(--muted);border-color:var(--line);" onclick="requestAllSnsCrops(${recordId}, this)">🔄 전체 4종 일괄 재분석</button>
             <button class="upload-btn" id="btn-crop-download" style="padding:5px 12px;font-size:0.78rem;background:#0284c7;" onclick="downloadCroppedImage('${ratioKey}', ${recordId})">✂️ 이 비율로 잘라 다운로드</button>
@@ -177,24 +188,38 @@ function renderCropRatioDetailArea(ratioKey, currentAdv, recordId) {
         SNS 최적 크롭 제안이 아직 생성되지 않았습니다.
       </div>
       <div style="color:var(--muted);font-size:0.8rem;margin-bottom:12px;">
-        단 1회의 Gemini 호출로 4대 규격(인스타 4:5, 1:1, X 16:9, 3:4)과 AI 자체 선정 최적 비율(원본 유지 포함)을 한 번에 분석합니다.
+        단 1회의 AI 호출로 4대 규격(인스타 4:5, 1:1, X 16:9, 3:4)과 AI 자체 선정 최적 비율(원본 유지 포함)을 한 번에 분석합니다.
       </div>
-      <button class="upload-btn" style="background:#0284c7;padding:8px 20px;font-size:0.86rem;margin:0 auto;display:inline-flex;" onclick="requestSingleSnsCrop('${ratioKey}', ${recordId}, this, false)">
-        ✨ SNS 4대 규격 + 최적 비율 일괄 제안 받기 (1회 호출)
-      </button>
+      <div style="display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap;">
+        ${cropSelectHtml}
+        <button class="upload-btn" style="background:#0284c7;padding:8px 20px;font-size:0.86rem;display:inline-flex;" onclick="requestSingleSnsCrop('${ratioKey}', ${recordId}, this, false)">
+          ✨ SNS 4대 규격 + 최적 비율 일괄 제안 받기 (1회 호출)
+        </button>
+      </div>
     </div>
   `;
 }
 
 function renderSnsCaptionArea(currentAdv, recordId) {
   const hasCaption = currentAdv && currentAdv.social_caption;
+  const ms = (typeof window !== 'undefined' && window.ModelSettings) ? window.ModelSettings : null;
+  const capModelVal = ms ? ms.get('sns_caption') : 'lite';
+  const capModelOptions = ms ? ms.renderOptionsHtml(capModelVal) : '<option value="lite">⚡ Flash-Lite 3.1</option>';
+  const usedCapBadge = (currentAdv && currentAdv.caption_model)
+    ? `<span style="font-size:0.72rem;background:rgba(2,132,199,0.14);color:#0284c7;padding:2px 8px;border-radius:999px;font-weight:700;margin-left:6px;">${escapeHtml(ms ? ms.formatBadge(currentAdv.caption_model) : currentAdv.caption_model)}</span>`
+    : '';
+  const capSelectHtml = `<select id="sns-caption-model-select-${recordId}" class="select-input" style="padding:3px 7px;font-size:0.74rem;height:auto;" onchange="if(typeof window !== 'undefined' && window.ModelSettings) window.ModelSettings.set('sns_caption', this.value)" title="SNS 캡션 생성 모델 선택">${capModelOptions}</select>`;
+
   if (!hasCaption) {
     return `
       <div style="background:white;padding:12px 14px;border-radius:10px;font-size:0.85rem;border:1px solid #e0f2fe;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
         <span style="color:#64748b;">✍️ SNS 감성 캡션과 해시태그가 필요하신가요?</span>
-        <button class="filter-btn" style="background:#0284c7;color:white;border-color:#0284c7;padding:5px 12px;font-size:0.78rem;" onclick="requestSnsCaption(${recordId}, this, false)">
-          ✍️ SNS 캡션 & 해시태그 제안 받기
-        </button>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+          ${capSelectHtml}
+          <button class="filter-btn" style="background:#0284c7;color:white;border-color:#0284c7;padding:5px 12px;font-size:0.78rem;" onclick="requestSnsCaption(${recordId}, this, false)">
+            ✍️ SNS 캡션 & 해시태그 제안 받기
+          </button>
+        </div>
       </div>
     `;
   }
@@ -202,9 +227,13 @@ function renderSnsCaptionArea(currentAdv, recordId) {
   const hashtags = currentAdv.hashtags || [];
   return `
     <div style="background:white;padding:12px 14px;border-radius:10px;font-size:0.85rem;border:1px solid #e0f2fe;margin-bottom:8px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-        <b style="color:#0369a1;">✍️ SNS 감성 캡션:</b>
-        <div style="display:flex;gap:6px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:6px;">
+        <div style="display:flex;align-items:center;">
+          <b style="color:#0369a1;">✍️ SNS 감성 캡션:</b>
+          ${usedCapBadge}
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+          ${capSelectHtml}
           <button class="filter-btn" style="padding:2px 8px;font-size:0.74rem;" onclick="requestSnsCaption(${recordId}, this, true)">🔄 다시 생성</button>
           <button class="filter-btn" style="padding:2px 8px;font-size:0.74rem;" onclick="copyCaption(${recordId}, this)">📋 캡션 복사</button>
         </div>
@@ -507,12 +536,17 @@ async function copyHashtags(recordId, btn) {
 }
 
 async function requestSingleSnsCrop(ratioKey, recordId, btn, force=false) {
+  const selectEl = document.getElementById(`sns-crop-model-select-${recordId}`);
+  const chosenModel = selectEl
+    ? selectEl.value
+    : ((typeof window !== 'undefined' && window.ModelSettings) ? window.ModelSettings.get('sns_crop') : 'lite');
+
   const origText = btn.textContent;
-  btn.textContent = 'Gemini 맞춤 구도 분석 중...';
+  btn.textContent = `${chosenModel === 'luna' ? 'Luna 6' : 'AI'} 맞춤 구도 분석 중...`;
   btn.disabled = true;
 
   try {
-    const data = await (window.API ? window.API.fetchSnsCrop(recordId, ratioKey, force) : (await fetch(`/api/sns-crop/${ratioKey}/${recordId}${force ? '?force=true' : ''}`, { method: 'POST' })).json());
+    const data = await ((typeof window !== 'undefined' && window.API) ? window.API.fetchSnsCrop(recordId, ratioKey, force, chosenModel) : (await fetch(`/api/sns-crop/${ratioKey}/${recordId}${force ? '?force=true' : ''}`, { method: 'POST' })).json());
     if (data.success && (data.crop_box || ratioKey === 'original' || data.advice)) {
       const item = (typeof allData !== 'undefined' && Array.isArray(allData))
         ? allData.find(d => d.id === recordId)
@@ -523,6 +557,9 @@ async function requestSingleSnsCrop(ratioKey, recordId, btn, force=false) {
         Object.assign(item.sns_advice, data.advice || {});
         if (data.crop_box) {
           item.sns_advice[ratioKey] = data.crop_box;
+        }
+        if (data.used_model) {
+          item.sns_advice.crop_model = data.used_model;
         }
         currentCropRatioKey = ratioKey;
         const container = document.getElementById('sns-advice-content');
@@ -544,12 +581,17 @@ async function requestSingleSnsCrop(ratioKey, recordId, btn, force=false) {
 }
 
 async function requestAllSnsCrops(recordId, btn) {
+  const selectEl = document.getElementById(`sns-crop-model-select-${recordId}`);
+  const chosenModel = selectEl
+    ? selectEl.value
+    : ((typeof window !== 'undefined' && window.ModelSettings) ? window.ModelSettings.get('sns_crop') : 'lite');
+
   const origText = btn.textContent;
-  btn.textContent = 'Gemini 4종 구도 일괄 분석 중...';
+  btn.textContent = `${chosenModel === 'luna' ? 'Luna 6' : 'AI'} 4종 구도 일괄 분석 중...`;
   btn.disabled = true;
 
   try {
-    const data = await (window.API ? window.API.fetchSnsCrop(recordId, 'all', true) : (await fetch(`/api/sns-crop/all/${recordId}?force=true`, { method: 'POST' })).json());
+    const data = await ((typeof window !== 'undefined' && window.API) ? window.API.fetchSnsCrop(recordId, 'all', true, chosenModel) : (await fetch(`/api/sns-crop/all/${recordId}?force=true`, { method: 'POST' })).json());
     if (data.success && data.advice) {
       const item = (typeof allData !== 'undefined' && Array.isArray(allData))
         ? allData.find(d => d.id === recordId)
@@ -557,6 +599,9 @@ async function requestAllSnsCrops(recordId, btn) {
       if (item) {
         if (!item.sns_advice) item.sns_advice = {};
         Object.assign(item.sns_advice, data.advice);
+        if (data.used_model) {
+          item.sns_advice.crop_model = data.used_model;
+        }
         const bestRatio = item.sns_advice.best_ratio_key || currentCropRatioKey || 'instagram_crop_4_5';
         currentCropRatioKey = bestRatio;
         const container = document.getElementById('sns-advice-content');
@@ -578,12 +623,17 @@ async function requestAllSnsCrops(recordId, btn) {
 }
 
 async function requestSnsCaption(recordId, btn, force=false) {
+  const selectEl = document.getElementById(`sns-caption-model-select-${recordId}`);
+  const chosenModel = selectEl
+    ? selectEl.value
+    : ((typeof window !== 'undefined' && window.ModelSettings) ? window.ModelSettings.get('sns_caption') : 'lite');
+
   const origText = btn.textContent;
-  btn.textContent = 'Gemini 캡션 생성 중...';
+  btn.textContent = `${chosenModel === 'luna' ? 'Luna 6' : 'AI'} 캡션 생성 중...`;
   btn.disabled = true;
 
   try {
-    const data = await (window.API ? window.API.fetchSnsCaption(recordId, force) : (await fetch(`/api/sns-caption/${recordId}${force ? '?force=true' : ''}`, { method: 'POST' })).json());
+    const data = await ((typeof window !== 'undefined' && window.API) ? window.API.fetchSnsCaption(recordId, force, chosenModel) : (await fetch(`/api/sns-caption/${recordId}${force ? '?force=true' : ''}`, { method: 'POST' })).json());
     if (data.success && data.social_caption) {
       const item = (typeof allData !== 'undefined' && Array.isArray(allData))
         ? allData.find(d => d.id === recordId)
@@ -592,6 +642,9 @@ async function requestSnsCaption(recordId, btn, force=false) {
         if (!item.sns_advice) item.sns_advice = {};
         item.sns_advice.social_caption = data.social_caption;
         item.sns_advice.hashtags = data.hashtags;
+        if (data.used_model) {
+          item.sns_advice.caption_model = data.used_model;
+        }
         const captionArea = document.getElementById('sns-caption-area');
         if (captionArea) {
           captionArea.innerHTML = renderSnsCaptionArea(item.sns_advice, recordId);

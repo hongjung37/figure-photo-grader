@@ -31,6 +31,7 @@
       <button class="upload-btn theme-toggle-btn" id="theme-toggle-btn" style="background:#334155;" onclick="toggleTheme()" title="다크룸 모드 전환">🌙 다크룸</button>
       <button class="upload-btn" style="background:#f59e0b;" onclick="openTournamentModal()">🏆 블라인드 토너먼트 (B-3)</button>
       <button class="upload-btn" style="background:#0d9488;" onclick="exportAllXmp(this)">📥 라이트룸 XMP 내보내기</button>
+      <button class="upload-btn" style="background:#6366f1;" onclick="openModelSettingsModal()">⚙️ 모델 설정</button>
       <button class="upload-btn" style="background:#475569;" onclick="openUsageModal()">📊 API 사용량</button>
       <button class="upload-btn" onclick="openUploadModal()">+ 새 사진 분석하기</button>
     </div>
@@ -166,6 +167,91 @@
       <div id="tour-progress-bar" style="height:100%;width:0%;background:linear-gradient(90deg, #38bdf8, #818cf8);transition:width 0.3s ease;"></div>
     </div>
     <div class="tour-body" id="tour-body-container"></div>
+  </div>
+</div>
+
+<!-- AI Model Settings Modal -->
+<div class="modal-overlay" id="model-settings-modal" onclick="closeModelSettingsModal(event)">
+  <div class="modal-content" style="max-width:680px;max-height:90vh;overflow-y:auto;" onclick="event.stopPropagation()">
+    <button class="close-btn" onclick="closeModelSettingsModal()">&times;</button>
+    <div style="display:flex;align-items:center;gap:10px;margin:0 0 6px;">
+      <h2 style="margin:0;">⚙️ 작업별 AI 모델 설정</h2>
+    </div>
+    <p style="color:var(--muted);font-size:0.86rem;margin:0 0 16px;">
+      사진 종합 평가부터 라이트룸 보정 수치, SNS 크롭 좌표, 감성 캡션까지 각 기능에 사용할 기본 AI 모델을 자유롭게 조합하고 전환할 수 있습니다.
+    </p>
+
+    <div style="margin-bottom:16px;">
+      <span style="font-size:0.8rem;font-weight:700;color:var(--muted);display:block;margin-bottom:8px;">⚡ 원클릭 추천 프리셋:</span>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button type="button" class="filter-btn" onclick="applyModelPreset('speed')">⚡ 초고속 가성비 (전체 Lite 3.1)</button>
+        <button type="button" class="filter-btn" onclick="applyModelPreset('balanced')">⚖️ 밸런스 표준 (평가 3.5 + 보조 3.1)</button>
+        <button type="button" class="filter-btn" style="border-color:#818cf8;color:#4f46e5;font-weight:700;" onclick="applyModelPreset('luna_all')">🌙 Luna 풀가동 (앙상블 + 보정/크롭/캡션 Luna)</button>
+        <button type="button" class="filter-btn" onclick="applyModelPreset('pro_all')">💎 최고품질 Pro (전체 Flash 3.8)</button>
+      </div>
+    </div>
+
+    <div style="display:grid;gap:12px;margin-bottom:18px;">
+      <div style="background:var(--card-sub);border:1px solid var(--line);border-radius:12px;padding:14px;">
+        <label for="setting-model-grading" style="font-weight:700;font-size:0.9rem;display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <span>📸 1. 사진 종합 평가 (Photo Grading)</span>
+          <span style="font-size:0.75rem;color:var(--muted);font-weight:500;">새 사진 업로드 및 재평가 기본값</span>
+        </label>
+        <select class="select-input" id="setting-model-grading" style="width:100%;">
+          <option value="standard">🔍 Gemini Flash-Lite 3.5 (균형 잡힌 표준 화질 평가 - 권장)</option>
+          <option value="lite">⚡ Gemini Flash-Lite 3.1 (초고속 대량 스크리닝)</option>
+          <option value="pro">💎 Gemini Flash 3.8 (고화질 심층 비평)</option>
+          <option value="ensemble">🤝 Gemini 3.5 + GPT-6 Luna 크로스 체크 (OpenAI 보조 비평 추가)</option>
+        </select>
+      </div>
+
+      <div style="background:var(--card-sub);border:1px solid var(--line);border-radius:12px;padding:14px;">
+        <label for="setting-model-lr" style="font-weight:700;font-size:0.9rem;display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <span>🛠️ 2. 라이트룸 보정 수치 추천 (Lightroom Advice)</span>
+          <span style="font-size:0.75rem;color:var(--muted);font-weight:500;">노출·대비·색온도·마스킹 레시피</span>
+        </label>
+        <select class="select-input" id="setting-model-lr" style="width:100%;">
+          <option value="lite">⚡ Gemini Flash-Lite 3.1 (빠른 기본 리터칭 추천)</option>
+          <option value="standard">🔍 Gemini Flash-Lite 3.5 (표준 정밀 보정 수치)</option>
+          <option value="pro">💎 Gemini Flash 3.8 (심층 리터칭 & 디테일 분석)</option>
+          <option value="luna">🌙 OpenAI GPT-6 Luna (Luna 시선 기반 색감·노출 레시피)</option>
+        </select>
+      </div>
+
+      <div style="background:var(--card-sub);border:1px solid var(--line);border-radius:12px;padding:14px;">
+        <label for="setting-model-crop" style="font-weight:700;font-size:0.9rem;display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <span>✂️ 3. SNS 규격별 최적 크롭 제안 (SNS Crop & Best Pick)</span>
+          <span style="font-size:0.75rem;color:var(--muted);font-weight:500;">4:5, 1:1, 16:9, 3:4 좌표 및 최적 구도 선정</span>
+        </label>
+        <select class="select-input" id="setting-model-crop" style="width:100%;">
+          <option value="lite">⚡ Gemini Flash-Lite 3.1 (빠른 4종 구도 크롭)</option>
+          <option value="standard">🔍 Gemini Flash-Lite 3.5 (표준 미학 크롭)</option>
+          <option value="pro">💎 Gemini Flash 3.8 (정밀 프레이밍 & 구도 분석)</option>
+          <option value="luna">🌙 OpenAI GPT-6 Luna (Luna 큐레이터 구도 크롭)</option>
+        </select>
+      </div>
+
+      <div style="background:var(--card-sub);border:1px solid var(--line);border-radius:12px;padding:14px;">
+        <label for="setting-model-caption" style="font-weight:700;font-size:0.9rem;display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <span>✍️ 4. SNS 감성 캡션 & 해시태그 (Social Caption)</span>
+          <span style="font-size:0.75rem;color:var(--muted);font-weight:500;">인스타/X 본문 문구 및 3개국어 태그</span>
+        </label>
+        <select class="select-input" id="setting-model-caption" style="width:100%;">
+          <option value="lite">⚡ Gemini Flash-Lite 3.1 (빠른 캡션 & 해시태그)</option>
+          <option value="standard">🔍 Gemini Flash-Lite 3.5 (표준 감성 캡션)</option>
+          <option value="pro">💎 Gemini Flash 3.8 (고급 에디터 감성 문구)</option>
+          <option value="luna">🌙 OpenAI GPT-6 Luna (Luna 감성 카피라이팅)</option>
+        </select>
+      </div>
+    </div>
+
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+      <span id="model-settings-status" style="font-size:0.84rem;font-weight:700;color:#059669;"></span>
+      <div style="display:flex;gap:8px;margin-left:auto;">
+        <button type="button" class="filter-btn" onclick="closeModelSettingsModal()">취소</button>
+        <button type="button" class="upload-btn" style="background:#4f46e5;" onclick="saveModelSettingsFromModal()">💾 설정 저장 및 적용</button>
+      </div>
+    </div>
   </div>
 </div>
 

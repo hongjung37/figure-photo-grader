@@ -19,13 +19,19 @@ from app.config import (
     OPENAI_IMAGE_MAX_EDGE,
     OPENAI_IMAGE_QUALITY,
     OPENAI_MODEL_PRESETS,
+    SNS_CROP_RATIO_CONFIGS,
 )
 from app.models.analysis import OpenAICrossCheck, PhotoAnalysis
+from app.models.crop import CropBox, CropSet, SNSAdvice, SNSCaptionAndTags
 from app.models.lightroom import LightroomAdvice
 from app.prompts import (
+    build_all_sns_crops_prompt,
+    build_caption_and_tags_prompt,
     build_cross_check_prompt,
     build_grader_prompt,
     build_lightroom_prompt,
+    build_single_crop_prompt,
+    build_sns_advice_prompt,
 )
 from app.services.gemini_client import (
     _get_env_file_path,
@@ -160,9 +166,20 @@ def _call_openai_structured(
                     if any(c in err_s for c in ("401", "invalid_api_key", "insufficient_quota")):
                         raise
                     # Fallback to standard chat completions with JSON mode for custom gateways
+                    import json as _json
+                    fallback_messages = [
+                        {
+                            "role": "system",
+                            "content": (
+                                "반드시 아래 JSON 스키마를 준수하는 순수 JSON 객체만 응답하세요:\n"
+                                f"{_json.dumps(response_model.model_json_schema(), ensure_ascii=False)}"
+                            ),
+                        },
+                        *messages,
+                    ]
                     completion = client.chat.completions.create(
                         model=model,
-                        messages=messages,
+                        messages=fallback_messages,
                         response_format={"type": "json_object"},
                     )
                     choice = completion.choices[0]
@@ -276,7 +293,7 @@ def analyze_with_openai(
 
 def suggest_lightroom_advice_with_openai(
     photo: PreparedPhoto,
-    analysis: PhotoAnalysis,
+    analysis: PhotoAnalysis | None = None,
     model: str = DEFAULT_OPENAI_MODEL,
     api_key: str | None = None,
 ) -> LightroomAdvice:
@@ -292,5 +309,104 @@ def suggest_lightroom_advice_with_openai(
         prompt_text=prompt_text,
         photo=photo,
         response_model=LightroomAdvice,
-        task_desc="OpenAI 라이트룸 보정 추천",
+        task_desc="Lightroom 보정 제안",
     )
+
+
+def generate_all_sns_crops_with_openai(
+    photo: PreparedPhoto,
+    model: str = DEFAULT_OPENAI_MODEL,
+    api_key: str | None = None,
+) -> CropSet:
+    """Generate the 4 SNS crop boxes and AI best ratio recommendation in ONE call via OpenAI."""
+    key = _resolve_api_key(api_key)
+    client = _get_client(key)
+    resolved_model = OPENAI_MODEL_PRESETS.get(model, model)
+
+    ratio_lines = []
+    for r_key, cfg in SNS_CROP_RATIO_CONFIGS.items():
+        ratio_lines.append(
+            f"- {r_key}: {cfg['name']} ({cfg['aspect']}, 목표 픽셀 종횡비 {cfg['w'] / cfg['h']:.4f})\n"
+            f"  가이드: {cfg['guide']}\n"
+            f"  ratio_label: '{cfg['name']} ({cfg['aspect']})'"
+        )
+    ratio_block = "\n".join(ratio_lines)
+    prompt_text = build_all_sns_crops_prompt(photo, ratio_block)
+
+    return _call_openai_structured(
+        client=client,
+        model=resolved_model,
+        prompt_text=prompt_text,
+        photo=photo,
+        response_model=CropSet,
+        task_desc="SNS 크롭 4종 일괄 제안",
+    )
+
+
+def generate_single_sns_crop_with_openai(
+    photo: PreparedPhoto,
+    ratio_key: str,
+    model: str = DEFAULT_OPENAI_MODEL,
+    api_key: str | None = None,
+) -> CropBox:
+    """Generate a single focused SNS crop recommendation via OpenAI."""
+    if ratio_key not in SNS_CROP_RATIO_CONFIGS:
+        raise ValueError(f"지원하지 않는 SNS 크롭 비율 키입니다: {ratio_key}")
+
+    cfg = SNS_CROP_RATIO_CONFIGS[ratio_key]
+    key = _resolve_api_key(api_key)
+    client = _get_client(key)
+    resolved_model = OPENAI_MODEL_PRESETS.get(model, model)
+    prompt_text = build_single_crop_prompt(photo, ratio_key, cfg)
+
+    return _call_openai_structured(
+        client=client,
+        model=resolved_model,
+        prompt_text=prompt_text,
+        photo=photo,
+        response_model=CropBox,
+        task_desc=f"{cfg['name']} 크롭 제안",
+    )
+
+
+def generate_sns_caption_and_tags_with_openai(
+    photo: PreparedPhoto,
+    model: str = DEFAULT_OPENAI_MODEL,
+    api_key: str | None = None,
+) -> SNSCaptionAndTags:
+    """Generate social caption and hashtags on-demand via OpenAI."""
+    key = _resolve_api_key(api_key)
+    client = _get_client(key)
+    resolved_model = OPENAI_MODEL_PRESETS.get(model, model)
+    prompt_text = build_caption_and_tags_prompt(photo)
+
+    return _call_openai_structured(
+        client=client,
+        model=resolved_model,
+        prompt_text=prompt_text,
+        photo=photo,
+        response_model=SNSCaptionAndTags,
+        task_desc="SNS 캡션 및 해시태그",
+    )
+
+
+def generate_sns_advice_with_openai(
+    photo: PreparedPhoto,
+    model: str = DEFAULT_OPENAI_MODEL,
+    api_key: str | None = None,
+) -> SNSAdvice:
+    """Generate full SNS crops and captions via OpenAI."""
+    key = _resolve_api_key(api_key)
+    client = _get_client(key)
+    resolved_model = OPENAI_MODEL_PRESETS.get(model, model)
+    prompt_text = build_sns_advice_prompt(photo)
+
+    return _call_openai_structured(
+        client=client,
+        model=resolved_model,
+        prompt_text=prompt_text,
+        photo=photo,
+        response_model=SNSAdvice,
+        task_desc="SNS 크롭 및 캡션 제안",
+    )
+

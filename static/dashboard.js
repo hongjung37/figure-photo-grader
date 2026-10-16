@@ -324,13 +324,19 @@ function openDetailModal(id) {
       <!-- Adobe Lightroom Advice Box (사진 바로 아래 배치) -->
       <div class="lr-advice-box" id="lr-advice-box-section">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
-          <h3 class="lr-advice-title">
+          <h3 class="lr-advice-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
             <span class="lr-advice-badge">Lr</span>
             <span>Adobe Lightroom 추천 보정 수치</span>
+            <span id="lr-used-model-badge-${item.id}">${item.lr_advice && item.lr_advice.used_model ? `<span style="font-size:0.73rem;background:rgba(99,102,241,0.14);color:#4f46e5;padding:2px 8px;border-radius:999px;font-weight:700;">${escapeHtml(window.ModelSettings ? window.ModelSettings.formatBadge(item.lr_advice.used_model) : item.lr_advice.used_model)}</span>` : ''}</span>
           </h3>
-          <button class="filter-btn" style="background:#4f46e5;color:white;border-color:#4f46e5;" onclick="requestLrAdvice(${item.id}, this)">
-            ${item.lr_advice ? '🔄 보정 수치 다시 제안' : '🛠️ 라이트룸 보정 수치 제안 받기'}
-          </button>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+            <select id="lr-model-select-${item.id}" class="select-input" style="padding:4px 8px;font-size:0.76rem;height:auto;" onchange="if(window.ModelSettings) window.ModelSettings.set('lightroom_advice', this.value)" title="라이트룸 보정 수치 분석 모델 선택">
+              ${window.ModelSettings ? window.ModelSettings.renderOptionsHtml(window.ModelSettings.get('lightroom_advice')) : '<option value="lite">⚡ Flash-Lite 3.1</option>'}
+            </select>
+            <button class="filter-btn" style="background:#4f46e5;color:white;border-color:#4f46e5;" onclick="requestLrAdvice(${item.id}, this)">
+              ${item.lr_advice ? '🔄 보정 수치 다시 제안' : '🛠️ 라이트룸 보정 수치 제안 받기'}
+            </button>
+          </div>
         </div>
         <div id="lr-advice-content">
           ${renderLrAdviceContent(item.lr_advice)}
@@ -860,18 +866,32 @@ async function requestLrAdvice(recordId, btn) {
   const origText = btn.textContent;
   const item = allData.find(d => d.id === recordId);
   const shouldForce = Boolean(item && item.lr_advice);
+  const modelSel = document.getElementById(`lr-model-select-${recordId}`);
+  const chosenModel = modelSel ? modelSel.value : (window.ModelSettings ? window.ModelSettings.get('lightroom_advice') : 'lite');
+  if (window.ModelSettings) {
+    window.ModelSettings.set('lightroom_advice', chosenModel);
+  }
+  const badgeText = window.ModelSettings ? window.ModelSettings.formatBadge(chosenModel) : chosenModel;
 
-  btn.textContent = shouldForce ? '🔄 보정 수치 재분석 중...' : 'Gemini 분석 중...';
+  btn.textContent = `${badgeText} 분석 중...`;
   btn.disabled = true;
   try {
-    const data = await API.fetchLightroomAdvice(recordId, shouldForce);
+    const data = await API.fetchLightroomAdvice(recordId, shouldForce, chosenModel);
     if (data.success && data.advice) {
+      if (data.used_model) {
+        data.advice.used_model = data.used_model;
+      }
       if (item) {
         item.lr_advice = data.advice;
       }
       const container = document.getElementById('lr-advice-content');
       if (container) {
         container.innerHTML = renderLrAdviceContent(data.advice);
+      }
+      const badgeEl = document.getElementById(`lr-used-model-badge-${recordId}`);
+      if (badgeEl && data.advice.used_model) {
+        const usedLabel = window.ModelSettings ? window.ModelSettings.formatBadge(data.advice.used_model) : data.advice.used_model;
+        badgeEl.innerHTML = `<span style="font-size:0.73rem;background:rgba(99,102,241,0.14);color:#4f46e5;padding:2px 8px;border-radius:999px;font-weight:700;">${escapeHtml(usedLabel)}</span>`;
       }
       btn.textContent = '🔄 보정 수치 다시 제안';
       btn.disabled = false;
@@ -1996,10 +2016,112 @@ async function refreshUsageStats() {
   }
 }
 
+function openModelSettingsModal() {
+  const modal = document.getElementById('model-settings-modal');
+  if (!modal) return;
+  const s = window.ModelSettings ? window.ModelSettings.load() : {
+    photo_grading: 'standard',
+    lightroom_advice: 'lite',
+    sns_crop: 'lite',
+    sns_caption: 'lite'
+  };
+  const gEl = document.getElementById('setting-model-grading');
+  const lrEl = document.getElementById('setting-model-lr');
+  const cropEl = document.getElementById('setting-model-crop');
+  const capEl = document.getElementById('setting-model-caption');
+  const statusEl = document.getElementById('model-settings-status');
+
+  if (gEl) gEl.value = s.photo_grading || 'standard';
+  if (lrEl) lrEl.value = s.lightroom_advice || 'lite';
+  if (cropEl) cropEl.value = s.sns_crop || 'lite';
+  if (capEl) capEl.value = s.sns_caption || 'lite';
+  if (statusEl) statusEl.textContent = '';
+
+  modal.style.display = 'flex';
+}
+
+function closeModelSettingsModal(e) {
+  if (!e || e.target.id === 'model-settings-modal') {
+    const modal = document.getElementById('model-settings-modal');
+    if (modal) modal.style.display = 'none';
+  }
+}
+
+function applyModelPreset(presetKey) {
+  const presets = {
+    speed: { photo_grading: 'lite', lightroom_advice: 'lite', sns_crop: 'lite', sns_caption: 'lite' },
+    balanced: { photo_grading: 'standard', lightroom_advice: 'lite', sns_crop: 'lite', sns_caption: 'lite' },
+    luna_all: { photo_grading: 'ensemble', lightroom_advice: 'luna', sns_crop: 'luna', sns_caption: 'luna' },
+    pro_all: { photo_grading: 'pro', lightroom_advice: 'pro', sns_crop: 'pro', sns_caption: 'pro' }
+  };
+  const p = presets[presetKey];
+  if (!p) return;
+  const gEl = document.getElementById('setting-model-grading');
+  const lrEl = document.getElementById('setting-model-lr');
+  const cropEl = document.getElementById('setting-model-crop');
+  const capEl = document.getElementById('setting-model-caption');
+  if (gEl) gEl.value = p.photo_grading;
+  if (lrEl) lrEl.value = p.lightroom_advice;
+  if (cropEl) cropEl.value = p.sns_crop;
+  if (capEl) capEl.value = p.sns_caption;
+
+  const statusEl = document.getElementById('model-settings-status');
+  if (statusEl) {
+    statusEl.textContent = '✨ 프리셋이 선택되었습니다. [설정 저장 및 적용]을 눌러 확정하세요.';
+  }
+}
+
+function saveModelSettingsFromModal() {
+  const gEl = document.getElementById('setting-model-grading');
+  const lrEl = document.getElementById('setting-model-lr');
+  const cropEl = document.getElementById('setting-model-crop');
+  const capEl = document.getElementById('setting-model-caption');
+
+  const newSettings = {
+    photo_grading: gEl ? gEl.value : 'standard',
+    lightroom_advice: lrEl ? lrEl.value : 'lite',
+    sns_crop: cropEl ? cropEl.value : 'lite',
+    sns_caption: capEl ? capEl.value : 'lite'
+  };
+
+  if (window.ModelSettings) {
+    window.ModelSettings.save(newSettings);
+  }
+
+  // Sync upload modal tier if present
+  const uploadTierEl = document.getElementById('upload-tier');
+  if (uploadTierEl) {
+    uploadTierEl.value = newSettings.photo_grading;
+  }
+
+  // Sync any open inline selectors in detail modal
+  document.querySelectorAll('[id^="lr-model-select-"]').forEach(el => {
+    el.value = newSettings.lightroom_advice;
+  });
+  document.querySelectorAll('[id^="sns-crop-model-select-"]').forEach(el => {
+    el.value = newSettings.sns_crop;
+  });
+  document.querySelectorAll('[id^="sns-caption-model-select-"]').forEach(el => {
+    el.value = newSettings.sns_caption;
+  });
+
+  const statusEl = document.getElementById('model-settings-status');
+  if (statusEl) {
+    statusEl.textContent = '✓ 작업별 AI 모델 설정이 저장 및 적용되었습니다!';
+  }
+  setTimeout(() => {
+    closeModelSettingsModal();
+  }, 550);
+}
+
 let isBatchUploading = false;
 
 function openUploadModal() {
   document.getElementById('upload-modal').style.display = 'flex';
+  const uploadTierEl = document.getElementById('upload-tier');
+  if (uploadTierEl && window.ModelSettings) {
+    uploadTierEl.value = window.ModelSettings.get('photo_grading');
+  }
   document.getElementById('upload-status').textContent = '';
   document.getElementById('progress-container').style.display = 'none';
   document.getElementById('progress-bar').style.width = '0%';

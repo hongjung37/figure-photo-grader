@@ -72,7 +72,13 @@ from app.services.gemini_client import (
     get_usage_stats,
     set_usage_log_db,
 )
-from app.services.multi_llm import analyze_photo
+from app.services.multi_llm import analyze_photo, resolve_task_model
+from app.services.openai_client import (
+    generate_all_sns_crops_with_openai,
+    generate_sns_advice_with_openai,
+    generate_sns_caption_and_tags_with_openai,
+    suggest_lightroom_advice_with_openai,
+)
 from app.services.image_processor import (
     PreparedPhoto,
     compute_dhash_from_bytes,
@@ -175,6 +181,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(html_bytes)))
+            self.send_header("Cache-Control", "no-cache")
             self.end_headers()
             self.wfile.write(html_bytes)
             return
@@ -605,6 +612,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 record_id = int(parsed.path.rstrip("/").split("/")[-1])
                 query = parse_qs(parsed.query)
                 force = query.get("force", ["false"])[0].lower() in ("true", "1", "yes")
+                model_param = query.get("model", ["lite"])[0]
+                provider_type, resolved_model = resolve_task_model(model_param, default_tier="lite")
 
                 row = get_analysis_row_by_id(self.db_path, record_id)
                 if not row:
@@ -617,15 +626,24 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                         self.send_response(HTTPStatus.OK)
                         self.send_header("Content-Type", "application/json; charset=utf-8")
                         self.end_headers()
-                        self.wfile.write(json.dumps({"success": True, "advice": cached_advice, "cached": True}, ensure_ascii=False).encode("utf-8"))
+                        self.wfile.write(json.dumps({
+                            "success": True,
+                            "advice": cached_advice,
+                            "used_model": cached_advice.get("used_model", MODEL_PRESETS["lite"]),
+                            "cached": True,
+                        }, ensure_ascii=False).encode("utf-8"))
                         return
                     except Exception:
                         pass  # 캐시 손상 시 재분석 진행
 
                 prepared = _load_prepared_photo_for_record(self.db_path, row)
 
-                advice = generate_lightroom_advice(prepared, model=MODEL_PRESETS["lite"])
+                if provider_type == "openai":
+                    advice = suggest_lightroom_advice_with_openai(prepared, model=resolved_model)
+                else:
+                    advice = generate_lightroom_advice(prepared, model=resolved_model)
                 advice_dict = advice.model_dump(mode="json")
+                advice_dict["used_model"] = resolved_model
                 advice_json = json.dumps(advice_dict, ensure_ascii=False)
 
                 update_lr_advice(self.db_path, record_id, advice_json)
@@ -633,13 +651,18 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.end_headers()
-                self.wfile.write(json.dumps({"success": True, "advice": advice_dict, "cached": False}, ensure_ascii=False).encode("utf-8"))
+                self.wfile.write(json.dumps({
+                    "success": True,
+                    "advice": advice_dict,
+                    "used_model": resolved_model,
+                    "cached": False,
+                }, ensure_ascii=False).encode("utf-8"))
                 return
             except Exception as exc:
                 self.send_response(HTTPStatus.INTERNAL_SERVER_ERROR)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.end_headers()
-                self.wfile.write(json.dumps({"success": False, "error": str(exc)}).encode("utf-8"))
+                self.wfile.write(json.dumps({"success": False, "error": str(exc)}, ensure_ascii=False).encode("utf-8"))
                 return
 
         if parsed.path.startswith("/api/sns-crop/"):
@@ -651,6 +674,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 record_id = int(parts[3])
                 query = parse_qs(parsed.query)
                 force = query.get("force", ["false"])[0].lower() in ("true", "1", "yes")
+                model_param = query.get("model", ["lite"])[0]
+                provider_type, resolved_model = resolve_task_model(model_param, default_tier="lite")
 
                 row = get_analysis_row_by_id(self.db_path, record_id)
                 if not row:
@@ -680,14 +705,20 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                         "ratio_key": ratio_key,
                         "crop_box": cached_advice.get(ratio_key),
                         "advice": cached_advice,
+                        "used_model": cached_advice.get("crop_model", MODEL_PRESETS["lite"]),
                         "cached": True,
                     }, ensure_ascii=False).encode("utf-8"))
                     return
 
                 prepared = _load_prepared_photo_for_record(self.db_path, row)
 
+                def _fetch_crops():
+                    if provider_type == "openai":
+                        return generate_all_sns_crops_with_openai(prepared, model=resolved_model)
+                    return generate_all_sns_crops(prepared, model=resolved_model)
+
                 if ratio_key in ("all", "original"):
-                    crop_set = generate_all_sns_crops(prepared, model=MODEL_PRESETS["lite"])
+                    crop_set = _fetch_crops()
                     for key, box in crop_set.model_dump(mode="json").items():
                         cached_advice[key] = box
                     crop_dict = cached_advice.get(ratio_key) if ratio_key != "all" else cached_advice.get("instagram_crop_4_5", {})
@@ -696,17 +727,18 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 elif force:
                     # Explicit regenerate: refresh all crops and recommendations together in ONE call
                     # so that crop boxes, best_ratio_key, best_ratio_reason, and original_tip remain 100% consistent.
-                    crop_set = generate_all_sns_crops(prepared, model=MODEL_PRESETS["lite"])
+                    crop_set = _fetch_crops()
                     for key, box in crop_set.model_dump(mode="json").items():
                         cached_advice[key] = box
                     crop_dict = cached_advice[ratio_key]
                 else:
                     # First crop request for this photo: get all 4 ratios + best pick in ONE call and cache them,
                     # so the other ratio buttons need no further API calls.
-                    crop_set = generate_all_sns_crops(prepared, model=MODEL_PRESETS["lite"])
+                    crop_set = _fetch_crops()
                     for key, box in crop_set.model_dump(mode="json").items():
                         cached_advice[key] = box
                     crop_dict = cached_advice[ratio_key]
+                cached_advice["crop_model"] = resolved_model
                 advice_json = json.dumps(cached_advice, ensure_ascii=False)
 
                 update_sns_advice(self.db_path, record_id, advice_json)
@@ -719,6 +751,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     "ratio_key": ratio_key,
                     "crop_box": crop_dict,
                     "advice": cached_advice,
+                    "used_model": resolved_model,
                     "cached": False,
                 }, ensure_ascii=False).encode("utf-8"))
                 return
@@ -726,7 +759,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 self.send_response(HTTPStatus.INTERNAL_SERVER_ERROR)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.end_headers()
-                self.wfile.write(json.dumps({"success": False, "error": str(exc)}).encode("utf-8"))
+                self.wfile.write(json.dumps({"success": False, "error": str(exc)}, ensure_ascii=False).encode("utf-8"))
                 return
 
         if parsed.path.startswith("/api/sns-caption/"):
@@ -734,6 +767,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 record_id = int(parsed.path.split("/")[-1])
                 query = parse_qs(parsed.query)
                 force = query.get("force", ["false"])[0].lower() in ("true", "1", "yes")
+                model_param = query.get("model", ["lite"])[0]
+                provider_type, resolved_model = resolve_task_model(model_param, default_tier="lite")
 
                 row = get_analysis_row_by_id(self.db_path, record_id)
                 if not row:
@@ -755,15 +790,20 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                         "social_caption": cached_advice["social_caption"],
                         "hashtags": cached_advice.get("hashtags", []),
                         "advice": cached_advice,
+                        "used_model": cached_advice.get("caption_model", MODEL_PRESETS["lite"]),
                         "cached": True,
                     }, ensure_ascii=False).encode("utf-8"))
                     return
 
                 prepared = _load_prepared_photo_for_record(self.db_path, row)
 
-                cap = generate_sns_caption_and_tags(prepared, model=MODEL_PRESETS["lite"])
+                if provider_type == "openai":
+                    cap = generate_sns_caption_and_tags_with_openai(prepared, model=resolved_model)
+                else:
+                    cap = generate_sns_caption_and_tags(prepared, model=resolved_model)
                 cached_advice["social_caption"] = cap.social_caption
                 cached_advice["hashtags"] = cap.hashtags
+                cached_advice["caption_model"] = resolved_model
                 advice_json = json.dumps(cached_advice, ensure_ascii=False)
 
                 update_sns_advice(self.db_path, record_id, advice_json)
@@ -776,6 +816,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     "social_caption": cap.social_caption,
                     "hashtags": cap.hashtags,
                     "advice": cached_advice,
+                    "used_model": resolved_model,
                     "cached": False,
                 }, ensure_ascii=False).encode("utf-8"))
                 return
@@ -783,18 +824,23 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 self.send_response(HTTPStatus.INTERNAL_SERVER_ERROR)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.end_headers()
-                self.wfile.write(json.dumps({"success": False, "error": str(exc)}).encode("utf-8"))
+                self.wfile.write(json.dumps({"success": False, "error": str(exc)}, ensure_ascii=False).encode("utf-8"))
                 return
 
         if parsed.path.startswith("/api/sns-advice/"):
             try:
                 record_id = int(parsed.path.split("/")[-1])
+                query = parse_qs(parsed.query)
+                force = query.get("force", ["false"])[0].lower() in ("true", "1", "yes")
+                model_param = query.get("model", ["lite"])[0]
+                provider_type, resolved_model = resolve_task_model(model_param, default_tier="lite")
+
                 row = get_analysis_row_by_id(self.db_path, record_id)
                 if not row:
                     raise ValueError(f"레코드 ID {record_id}를 찾을 수 없습니다.")
 
                 # 이미 캐시가 있으면 즉시 반환 (API 호출 방지)
-                if "sns_advice_json" in row.keys() and row["sns_advice_json"]:
+                if not force and "sns_advice_json" in row.keys() and row["sns_advice_json"]:
                     cached_advice = json.loads(row["sns_advice_json"])
                     self.send_response(HTTPStatus.OK)
                     self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -804,8 +850,13 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
                 prepared = _load_prepared_photo_for_record(self.db_path, row)
 
-                advice = generate_sns_advice(prepared, model=MODEL_PRESETS["lite"])
+                if provider_type == "openai":
+                    advice = generate_sns_advice_with_openai(prepared, model=resolved_model)
+                else:
+                    advice = generate_sns_advice(prepared, model=resolved_model)
                 advice_dict = advice.model_dump(mode="json")
+                advice_dict["crop_model"] = resolved_model
+                advice_dict["caption_model"] = resolved_model
                 advice_json = json.dumps(advice_dict, ensure_ascii=False)
 
                 update_sns_advice(self.db_path, record_id, advice_json)
@@ -813,13 +864,13 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.end_headers()
-                self.wfile.write(json.dumps({"success": True, "advice": advice_dict, "cached": False}, ensure_ascii=False).encode("utf-8"))
+                self.wfile.write(json.dumps({"success": True, "advice": advice_dict, "used_model": resolved_model, "cached": False}, ensure_ascii=False).encode("utf-8"))
                 return
             except Exception as exc:
                 self.send_response(HTTPStatus.INTERNAL_SERVER_ERROR)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.end_headers()
-                self.wfile.write(json.dumps({"success": False, "error": str(exc)}).encode("utf-8"))
+                self.wfile.write(json.dumps({"success": False, "error": str(exc)}, ensure_ascii=False).encode("utf-8"))
                 return
 
         self.send_response(HTTPStatus.NOT_FOUND)

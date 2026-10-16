@@ -205,6 +205,83 @@ class OpenAIClientTests(unittest.TestCase):
             mock_cross.assert_called_once()
             self.assertEqual(mock_cross.call_args.kwargs.get("model"), "gpt-6-luna")
 
+    def test_resolve_task_model(self) -> None:
+        from app.services.multi_llm import resolve_task_model
+
+        self.assertEqual(resolve_task_model("lite"), ("gemini", "gemini-3.1-flash-lite"))
+        self.assertEqual(resolve_task_model("standard"), ("gemini", "gemini-3.5-flash-lite"))
+        self.assertEqual(resolve_task_model("pro"), ("gemini", "gemini-3.8-flash"))
+        self.assertEqual(resolve_task_model("luna"), ("openai", "gpt-6-luna"))
+        self.assertEqual(resolve_task_model("gpt-6-luna"), ("openai", "gpt-6-luna"))
+        self.assertEqual(resolve_task_model("gpt-4o-mini"), ("openai", "gpt-4o-mini"))
+        self.assertEqual(resolve_task_model(""), ("gemini", "gemini-3.1-flash-lite"))
+
+    def test_multi_llm_task_routing_lightroom_and_sns(self) -> None:
+        from app.models.crop import CropBox, CropSet, SNSCaptionAndTags
+        from app.services.multi_llm import (
+            suggest_all_sns_crops,
+            suggest_lightroom_advice,
+            suggest_sns_caption_and_tags,
+        )
+
+        dummy_lr = LightroomAdvice(
+            exposure=0.1,
+            contrast=5,
+            highlights=-10,
+            shadows=15,
+            whites=0,
+            blacks=0,
+            texture=5,
+            clarity=5,
+            dehaze=0,
+            vibrance=10,
+            saturation=0,
+            temp_tint_notes="5000K",
+            retouching_guide="가이드",
+        )
+        dummy_box = CropBox(ymin=0.1, xmin=0.1, ymax=0.9, xmax=0.9, ratio_label="4:5", composition_tip="팁")
+        dummy_crops = CropSet(
+            best_ratio_key="instagram_crop_4_5",
+            best_ratio_reason="최적",
+            original_tip="원본 팁",
+            instagram_crop_4_5=dummy_box,
+            instagram_crop_1_1=dummy_box,
+            x_crop_16_9=dummy_box,
+            x_crop_3_4=dummy_box,
+        )
+        dummy_caption = SNSCaptionAndTags(
+            social_caption="멋진 피규어 스냅",
+            hashtags=["#피규어", "#토이포토"],
+        )
+
+        with patch("app.services.multi_llm.generate_lightroom_advice_with_gemini", return_value=dummy_lr) as mock_g_lr, \
+             patch("app.services.multi_llm.suggest_lightroom_advice_with_openai", return_value=dummy_lr) as mock_o_lr:
+            res_lr_g = suggest_lightroom_advice(self.sample_photo, model="pro")
+            self.assertEqual(res_lr_g.exposure, 0.1)
+            mock_g_lr.assert_called_once_with(photo=self.sample_photo, model="gemini-3.8-flash")
+
+            res_lr_o = suggest_lightroom_advice(self.sample_photo, model="luna")
+            self.assertEqual(res_lr_o.exposure, 0.1)
+            mock_o_lr.assert_called_once()
+            self.assertEqual(mock_o_lr.call_args.kwargs.get("model"), "gpt-6-luna")
+
+        with patch("app.services.multi_llm.generate_all_sns_crops_with_gemini", return_value=dummy_crops) as mock_g_crop, \
+             patch("app.services.multi_llm.generate_all_sns_crops_with_openai", return_value=dummy_crops) as mock_o_crop:
+            res_crop_g = suggest_all_sns_crops(self.sample_photo, model="standard")
+            self.assertEqual(res_crop_g.best_ratio_key, "instagram_crop_4_5")
+            mock_g_crop.assert_called_once_with(photo=self.sample_photo, model="gemini-3.5-flash-lite")
+
+            res_crop_o = suggest_all_sns_crops(self.sample_photo, model="luna")
+            self.assertEqual(res_crop_o.best_ratio_key, "instagram_crop_4_5")
+            mock_o_crop.assert_called_once_with(photo=self.sample_photo, model="gpt-6-luna", api_key=None)
+
+        with patch("app.services.multi_llm.generate_sns_caption_and_tags_with_gemini", return_value=dummy_caption) as mock_g_cap, \
+             patch("app.services.multi_llm.generate_sns_caption_and_tags_with_openai", return_value=dummy_caption) as mock_o_cap:
+            res_cap_o = suggest_sns_caption_and_tags(self.sample_photo, model="luna")
+            self.assertEqual(res_cap_o.social_caption, "멋진 피규어 스냅")
+            mock_o_cap.assert_called_once_with(photo=self.sample_photo, model="gpt-6-luna", api_key=None)
+            mock_g_cap.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
