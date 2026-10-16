@@ -397,11 +397,33 @@ function populateCompareSelects() {
   const selB = document.getElementById('comp-b-select');
   if (!selA || !selB) return;
   const dataList = (typeof allData !== 'undefined' && Array.isArray(allData)) ? allData : [];
-  if (!dataList.length) return;
+  if (!dataList.length) {
+    selA.innerHTML = '<option value="">(비교할 사진 없음)</option>';
+    selB.innerHTML = '<option value="">(비교할 사진 없음)</option>';
+    return;
+  }
+  const prevA = selA.value;
+  const prevB = selB.value;
   const options = dataList.map(d => `<option value="${d.id}">${escapeHtml(d.filename)} (${(d.final_score || 0).toFixed(1)}점 - ${escapeHtml(d.grade || '-')})</option>`).join('');
   selA.innerHTML = options;
   selB.innerHTML = options;
-  if (dataList.length > 1) selB.selectedIndex = 1;
+
+  const hasPrevA = dataList.some(d => String(d.id) === String(prevA));
+  const hasPrevB = dataList.some(d => String(d.id) === String(prevB));
+
+  if (hasPrevA) {
+    selA.value = prevA;
+  } else {
+    selA.selectedIndex = 0;
+  }
+
+  if (hasPrevB) {
+    selB.value = prevB;
+  } else if (dataList.length > 1) {
+    selB.selectedIndex = 1;
+  } else {
+    selB.selectedIndex = 0;
+  }
 }
 
 function updateComparison() {
@@ -416,7 +438,7 @@ function updateComparison() {
     return;
   }
 
-  if (selA && selB && (!selA.options || selA.options.length === 0)) {
+  if (selA && selB && (!selA.options || selA.options.length === 0 || !selA.value)) {
     populateCompareSelects();
   }
 
@@ -425,6 +447,9 @@ function updateComparison() {
   const a = dataList.find(d => d.id === idA) || dataList[0];
   const b = dataList.find(d => d.id === idB) || (dataList.length > 1 ? dataList[1] : dataList[0]);
   if (!a || !b) return;
+
+  if (selA && String(selA.value) !== String(a.id)) selA.value = String(a.id);
+  if (selB && String(selB.value) !== String(b.id)) selB.value = String(b.id);
 
   content.innerHTML = [a, b].map((item, idx) => `
     <div class="compare-col">

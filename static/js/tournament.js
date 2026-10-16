@@ -20,8 +20,13 @@ function openTournamentModal() {
 
 function closeTournamentModal(e) {
   if (e && e.target && e.target.id !== 'tournament-modal' && !e.target.classList.contains('close-btn')) return;
+  if (tourState && tourState.mode === 'battle') {
+    if (!confirm('토너먼트 대결이 진행 중입니다. 정말 중단하고 나가시겠습니까? (현재까지의 대진 진행 상황이 초기화됩니다)')) {
+      return;
+    }
+  }
   const modal = document.getElementById('tournament-modal');
-  modal.style.display = 'none';
+  if (modal) modal.style.display = 'none';
   tourState.mode = 'setup';
 }
 

@@ -142,6 +142,8 @@
 <!-- Detail Modal -->
 <div class="modal-overlay" id="detail-modal" onclick="closeModal(event)">
   <div class="modal-content" onclick="event.stopPropagation()">
+    <button class="modal-nav-btn prev-btn" id="modal-prev-btn" title="이전 사진 (← 또는 J)" onclick="navigateDetail(-1)">‹</button>
+    <button class="modal-nav-btn next-btn" id="modal-next-btn" title="다음 사진 (→ 또는 K)" onclick="navigateDetail(1)">›</button>
     <button class="close-btn" onclick="closeDetailModal()">&times;</button>
     <div class="modal-grid" id="modal-body"></div>
   </div>

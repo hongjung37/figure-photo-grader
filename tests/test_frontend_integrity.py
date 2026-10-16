@@ -129,6 +129,22 @@ if (typeof ctx.makeMatchesFromList === 'function') {
   }
 }
 
+// Verify compare selection persistence across populateCompareSelects
+const popFn = ctx.populateCompareSelects || windowObj.populateCompareSelects;
+if (typeof popFn === 'function') {
+  ctx.allData = [
+    { id: 101, filename: 'fig1.jpg', final_score: 8.5, grade: 'S' },
+    { id: 102, filename: 'fig2.jpg', final_score: 7.9, grade: 'A' },
+    { id: 103, filename: 'fig3.jpg', final_score: 9.1, grade: 'EX' }
+  ];
+  mockElements['comp-a-select'].value = '102';
+  mockElements['comp-b-select'].value = '103';
+  popFn();
+  if (mockElements['comp-a-select'].value !== '102' || mockElements['comp-b-select'].value !== '103') {
+    throw new Error('populateCompareSelects failed to preserve user selection');
+  }
+}
+
 process.stdout.write('OK');
 """
         res = subprocess.run(

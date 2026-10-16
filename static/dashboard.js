@@ -609,6 +609,7 @@ function openDetailModal(id) {
       }, { once: true });
     }
   }
+  updateModalNavButtons();
 }
 
 function renderCrossCheckOpinion(op) {
@@ -1042,6 +1043,23 @@ function panZoom(e) {
   img.style.transformOrigin = `${x}% ${y}%`;
 }
 
+function updateModalNavButtons() {
+  const prevBtn = document.getElementById('modal-prev-btn');
+  const nextBtn = document.getElementById('modal-next-btn');
+  if (!prevBtn || !nextBtn) return;
+  const filtered = sortList(filterList(allData));
+  const idx = filtered.findIndex(d => d.id === currentDetailId);
+  if (idx === -1) {
+    prevBtn.disabled = true;
+    nextBtn.disabled = true;
+    return;
+  }
+  prevBtn.disabled = (idx <= 0);
+  nextBtn.disabled = (idx >= filtered.length - 1);
+  prevBtn.title = idx > 0 ? `이전 사진: ${filtered[idx - 1].filename} (← / J)` : '첫 번째 사진입니다';
+  nextBtn.title = idx < filtered.length - 1 ? `다음 사진: ${filtered[idx + 1].filename} (→ / K)` : '마지막 사진입니다';
+}
+
 function navigateDetail(dir) {
   const modal = document.getElementById('detail-modal');
   if (!modal || modal.style.display !== 'flex' || currentDetailId === null) return;
@@ -1084,7 +1102,14 @@ async function exportAllXmp(btn) {
   try {
     const data = await API.exportXmp();
     if (data.success) {
-      alert(`총 ${data.count}개 사진의 Lightroom / Capture One 호환 XMP 사이드카 생성이 완료되었습니다!\n라이트룸에서 폴더를 새로고침하면 별점(1~5)과 색상 라벨이 즉시 표시됩니다.`);
+      let msg = `총 ${data.count}개 사진의 Lightroom / Capture One 호환 XMP 사이드카 생성이 완료되었습니다!`;
+      if (data.skipped && data.skipped.length > 0) {
+        msg += `\n\n⚠️ 로컬 원본 사진을 찾지 못해 ${data.skipped.length}개 파일은 건너뛰었습니다. (웹 업로드 전용이거나 원본 파일 이동됨)`;
+      }
+      if (data.errors && data.errors.length > 0) {
+        msg += `\n\n❌ 생성 중 오류 발생: ${data.errors.length}건`;
+      }
+      alert(msg + '\n\n라이트룸에서 폴더를 동기화하면 별점(1~5)과 색상 라벨이 즉시 표시됩니다.');
     } else {
       alert(`XMP 내보내기 실패: ${data.error}`);
     }

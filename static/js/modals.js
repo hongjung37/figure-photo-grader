@@ -385,3 +385,40 @@ async function processBatchUpload(files) {
     alert(`업로드 처리 중 오류 발생: ${err.message}`);
   }
 }
+
+// --- Window-level Drag & Drop Prevention & Auto-Upload ---
+if (typeof window !== 'undefined') {
+  window.addEventListener('dragover', (e) => {
+    e.preventDefault();
+  });
+
+  window.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    const dropZone = document.getElementById('drop-zone');
+    if (dropZone && (e.target === dropZone || dropZone.contains(e.target))) {
+      return;
+    }
+
+    if (isBatchUploading) return;
+
+    let collected = [];
+    const items = e.dataTransfer && e.dataTransfer.items;
+    if (items && items.length > 0 && items[0].webkitGetAsEntry) {
+      for (let i = 0; i < items.length; i++) {
+        const entry = items[i].webkitGetAsEntry();
+        if (entry) {
+          const fList = await getFilesFromEntry(entry);
+          collected.push(...fList);
+        }
+      }
+    } else if (e.dataTransfer && e.dataTransfer.files) {
+      collected = Array.from(e.dataTransfer.files);
+    }
+
+    const validFiles = collected.filter(isImageFile);
+    if (validFiles.length > 0) {
+      openUploadModal();
+      await processBatchUpload(validFiles);
+    }
+  });
+}
