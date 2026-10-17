@@ -255,7 +255,8 @@ class PhotoAnalyzerTests(unittest.TestCase):
             self.assertIn("9.0 ~ 10.0: [프로사진작가 및 전문가급]", prompt)
             self.assertIn("[장점]", prompt)
             self.assertIn("[단점]", prompt)
-            self.assertIn("과도하게 칭찬하거나 호의적으로만 평가하지 마세요", prompt)
+            self.assertIn("억지 칭찬도, 억지 트집 잡기(Nitpicking)도 지양하세요", prompt)
+            self.assertIn("스타일 중립성", prompt)
 
 
     def test_model_presets_tiers(self) -> None:
