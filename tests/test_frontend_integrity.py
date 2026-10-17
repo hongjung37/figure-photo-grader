@@ -84,7 +84,8 @@ const mockElements = {
   'tab-insights': { classList: { toggle: () => {} } },
   'comp-a-select': { options: [], innerHTML: '', value: '1' },
   'comp-b-select': { options: [], innerHTML: '', value: '2' },
-  'compare-content': { innerHTML: '' }
+  'compare-content': { innerHTML: '' },
+  'sort-select': { value: 'score_desc' }
 };
 
 const windowObj = { addEventListener: () => {} };
@@ -149,6 +150,80 @@ if (typeof popFn === 'function') {
   if (mockElements['comp-a-select'].value !== '102' || mockElements['comp-b-select'].value !== '103') {
     throw new Error('populateCompareSelects failed to preserve user selection');
   }
+}
+
+// Verify filterList with object aesthetic_tags, AND/OR tagLogic, and burst filter modes
+const sampleItems = [
+  {
+    id: 1, filename: 'b_item.jpg', final_score: 8.8, user_score: 7.0,
+    created_at: '2026-10-15T10:00:00+00:00', captured_at: '2026-10-10T10:00:00',
+    figure_category: '접사/디테일', is_burst: true, is_best_pick: true, burst_group_id: 'g1', burst_total: 2,
+    aesthetic_tags: { viewpoint: ['정면'], mood: ['고요함'] },
+    composition_score: 8.5, lighting_score: 8.5, color_score: 8.5, technique_score: 8.5,
+    review_status: '토너먼트 1위', sns_advice: { best_ratio_key: 'original' }
+  },
+  {
+    id: 2, filename: 'a_item.jpg', final_score: 7.5, user_score: 9.5,
+    created_at: '2026-10-17T10:00:00+00:00', captured_at: '2024-01-01T10:00:00',
+    figure_category: '접사/디테일', is_burst: true, is_best_pick: false, burst_group_id: 'g1', burst_total: 2, drop_reason: '초점 열세',
+    aesthetic_tags: { viewpoint: ['로우앵글'], mood: ['고요함'] },
+    composition_score: 7.5, lighting_score: 7.5, color_score: 7.5, technique_score: 7.5
+  }
+];
+
+// 1) Burst filter 'all' must keep B-cut, while 'stack' hides unexpanded B-cut
+const resAll = vm.runInContext('currentBurstFilter = "all"; filterList(' + JSON.stringify(sampleItems) + ')', ctx);
+if (resAll.length !== 2) {
+  throw new Error('currentBurstFilter="all" should keep B-cuts, got ' + resAll.length);
+}
+const resStack = vm.runInContext('currentBurstFilter = "stack"; filterList(' + JSON.stringify(sampleItems) + ')', ctx);
+if (resStack.length !== 1 || resStack[0].id !== 1) {
+  throw new Error('currentBurstFilter="stack" should hide unexpanded B-cuts');
+}
+vm.runInContext('currentBurstFilter = "all";', ctx);
+
+// 2) Tag filter with object aesthetic_tags must not crash and must honor AND / OR
+const resTagAnd = vm.runInContext('selectedTags.clear(); selectedTags.add("정면"); selectedTags.add("고요함"); tagLogic = "AND"; filterList(' + JSON.stringify(sampleItems) + ')', ctx);
+if (resTagAnd.length !== 1 || resTagAnd[0].id !== 1) {
+  throw new Error('Tag filter AND failed');
+}
+const resTagOr = vm.runInContext('selectedTags.clear(); selectedTags.add("정면"); selectedTags.add("로우앵글"); tagLogic = "OR"; filterList(' + JSON.stringify(sampleItems) + ')', ctx);
+if (resTagOr.length !== 2) {
+  throw new Error('Tag filter OR failed');
+}
+vm.runInContext('selectedTags.clear();', ctx);
+
+// 3) Sort dropdown (#sort-select) must sort properly
+mockElements['sort-select'].value = 'score_asc';
+const sortedScoreAsc = vm.runInContext('sortList(' + JSON.stringify(sampleItems) + ')', ctx);
+if (sortedScoreAsc[0].id !== 2) {
+  throw new Error('sortList score_asc failed');
+}
+mockElements['sort-select'].value = 'user_score_desc';
+const sortedUserDesc = vm.runInContext('sortList(' + JSON.stringify(sampleItems) + ')', ctx);
+if (sortedUserDesc[0].id !== 2) {
+  throw new Error('sortList user_score_desc failed');
+}
+mockElements['sort-select'].value = 'newest';
+const sortedNewest = vm.runInContext('sortList(' + JSON.stringify(sampleItems) + ')', ctx);
+if (sortedNewest[0].id !== 2) {
+  throw new Error('sortList newest (by created_at) failed');
+}
+mockElements['sort-select'].value = 'captured_desc';
+const sortedCaptured = vm.runInContext('sortList(' + JSON.stringify(sampleItems) + ')', ctx);
+if (sortedCaptured[0].id !== 1) {
+  throw new Error('sortList captured_desc (by captured_at) failed');
+}
+mockElements['sort-select'].value = 'name';
+const sortedName = vm.runInContext('sortList(' + JSON.stringify(sampleItems) + ')', ctx);
+if (sortedName[0].filename !== 'a_item.jpg') {
+  throw new Error('sortList name failed');
+}
+
+// 4) renderGalleryCard must include delete button, tournament winner badge, and SNS crop badge
+const cardHtml = vm.runInContext('renderGalleryCard(' + JSON.stringify(sampleItems[0]) + ')', ctx);
+if (!cardHtml.includes('card-delete-btn') || !cardHtml.includes('토너먼트 1위') || !cardHtml.includes('SNS크롭')) {
+  throw new Error('renderGalleryCard missing delete button or badges');
 }
 
 process.stdout.write('OK');

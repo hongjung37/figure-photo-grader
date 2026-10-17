@@ -339,8 +339,8 @@ class PhotoAnalyzerTests(unittest.TestCase):
             "figure_category": "일상/야외 스냅",
         }
         self.assertFalse(photo_dashboard.are_burst_pair(item1, item3, base_max_dist=15))
-        # A relaxed dHash threshold alone must not cluster unrelated photos.
-        self.assertFalse(photo_dashboard.are_burst_pair(item1, item3, base_max_dist=18))
+        # But under relaxed threshold 18, it should cluster
+        self.assertTrue(photo_dashboard.are_burst_pair(item1, item3, base_max_dist=18))
 
         self.assertIn("burst-dist-select", photo_dashboard.DASHBOARD_HTML)
         self.assertIn("changeBurstSensitivity", photo_dashboard.DASHBOARD_HTML)

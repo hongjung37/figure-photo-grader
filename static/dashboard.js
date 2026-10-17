@@ -1,18 +1,6 @@
-// static/dashboard.js - Core Dashboard Lifecycle, Filtering, Sorting & Gallery Module
+// static/dashboard.js - Core State, Gallery Progressive Renderer, Detail Inspector & Reanalyze
 
-let allData = (typeof window !== 'undefined' && window.allData) || [];
-let currentFilter = 'all';
-let currentCatFilter = 'all';
-let currentSort = 'score-desc';
-let currentBurstFilter = 'all';
-let burstSensitivity = 15;
-let expandedBurstGroups = new Set();
-let currentDetailId = null;
-
-const GALLERY_PAGE_SIZE = 40;
-let currentGalleryRenderCount = GALLERY_PAGE_SIZE;
-let galleryObserver = null;
-
+// --- HTML Escaping Utility ---
 function escapeHtml(str) {
   if (str === null || str === undefined) return '';
   return String(str)
@@ -23,6 +11,7 @@ function escapeHtml(str) {
     .replace(/'/g, '&#39;');
 }
 
+// --- Darkroom Theme Management ---
 function initTheme() {
   try {
     const saved = localStorage.getItem('theme');
@@ -37,15 +26,15 @@ function initTheme() {
       document.documentElement.classList.remove('darkroom');
       updateThemeButton(false);
     }
-  } catch(e) {}
+  } catch (e) {}
 }
 
 function toggleTheme() {
-  const isDark = document.documentElement.classList.toggle('darkroom');
-  document.body.classList.toggle('darkroom', isDark);
+  const isDark = document.body.classList.toggle('darkroom');
+  document.documentElement.classList.toggle('darkroom', isDark);
   try {
     localStorage.setItem('theme', isDark ? 'dark' : 'light');
-  } catch(e) {}
+  } catch (e) {}
   updateThemeButton(isDark);
 }
 
@@ -54,16 +43,29 @@ function updateThemeButton(isDark) {
   if (!btn) return;
   if (isDark) {
     btn.innerHTML = '☀️ 라이트룸';
-    btn.title = '표준 라이트 모드로 전환';
-    btn.style.background = '#e2e8f0';
-    btn.style.color = '#0f172a';
+    btn.style.background = '#475569';
+    btn.title = '라이트 모드로 전환';
   } else {
     btn.innerHTML = '🌙 다크룸';
-    btn.title = '사진 감상 최적화 다크룸 모드로 전환';
     btn.style.background = '#334155';
-    btn.style.color = '#ffffff';
+    btn.title = '다크룸 모드로 전환';
   }
 }
+
+// --- Core State ---
+let allData = (typeof window !== 'undefined' && window.allData) || [];
+let currentFilter = 'all';
+let currentCatFilter = 'all';
+let currentSort = 'score_desc';
+let currentDetailId = null;
+let currentBurstDist = 15;
+let currentBurstFilter = 'all'; // 'all', 'best_only', 'stack'
+let expandedBurstGroups = new Set();
+
+// --- Progressive Gallery Chunk Rendering ---
+const GALLERY_PAGE_SIZE = 40;
+let currentGalleryRenderCount = GALLERY_PAGE_SIZE;
+let galleryObserver = null;
 
 function setCatFilter(cat, btn) {
   currentCatFilter = cat;
@@ -73,42 +75,45 @@ function setCatFilter(cat, btn) {
 }
 
 async function loadData() {
-  try {
-    const data = await API.fetchAnalyses(burstSensitivity);
-    allData = Array.isArray(data) ? data : [];
-    window.allData = allData;
-    updateStats();
-    renderGallery();
-    if (typeof populateCompareSelects === 'function') populateCompareSelects();
-    if (typeof populateTagSelectorAndQuickTags === 'function') populateTagSelectorAndQuickTags();
-  } catch (err) {
-    console.error('데이터 로드 실패:', err);
+  const data = await API.fetchAnalyses(currentBurstDist);
+  allData = Array.isArray(data) ? data : [];
+  window.allData = allData;
+  updateStats();
+  if (typeof populateCompareSelects === 'function') populateCompareSelects();
+  if (typeof populateTagSelectorAndQuickTags === 'function') populateTagSelectorAndQuickTags();
+  if (typeof updateTagFilterUI === 'function') updateTagFilterUI();
+  renderGallery();
+  if (typeof currentView !== 'undefined' && currentView === 'insights' && typeof renderTagInsights === 'function') {
+    renderTagInsights();
   }
 }
 
 const loadAnalyses = loadData;
 
 async function changeBurstSensitivity(val) {
-  burstSensitivity = parseInt(val, 10) || 15;
+  currentBurstDist = parseInt(val, 10) || 15;
   await loadData();
 }
 
 function updateStats() {
-  document.getElementById('total-count').textContent = allData.length;
+  const totalEl = document.getElementById('total-count');
+  const avgEl = document.getElementById('avg-score');
+  const goodEl = document.getElementById('good-count');
+  if (totalEl) totalEl.textContent = allData.length;
   if (!allData.length) {
-    document.getElementById('avg-score').textContent = '0.0';
-    document.getElementById('good-count').textContent = '0';
+    if (avgEl) avgEl.textContent = '0.0';
+    if (goodEl) goodEl.textContent = '0';
     return;
   }
-  const avg = allData.reduce((s, d) => s + d.final_score, 0) / allData.length;
-  document.getElementById('avg-score').textContent = avg.toFixed(1);
+  const avg = (allData.reduce((acc, cur) => acc + cur.final_score, 0) / allData.length).toFixed(1);
   const good = allData.filter(d => d.final_score >= 7.0).length;
-  document.getElementById('good-count').textContent = good;
+  if (avgEl) avgEl.textContent = avg;
+  if (goodEl) goodEl.textContent = good;
 }
 
 function setBurstFilter(mode, btn) {
   currentBurstFilter = mode;
-  document.querySelectorAll('.burst-filter-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.burst-btn, .burst-filter-btn').forEach(b => b.classList.remove('active'));
   if (btn) btn.classList.add('active');
   renderGallery();
 }
@@ -125,7 +130,7 @@ function toggleExpandBurstGroup(groupId, e) {
 
 function setFilter(filter, btn) {
   currentFilter = filter;
-  document.querySelectorAll('.filter-group:first-child .filter-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.filter-btn:not(.burst-btn):not(.cat-btn)').forEach(b => b.classList.remove('active'));
   if (btn) btn.classList.add('active');
   renderGallery();
 }
@@ -146,51 +151,64 @@ function filterList(list) {
     if (currentBurstFilter === 'best_only' && item.is_burst && !item.is_best_pick) return false;
 
     // 4. Tag filter
-    if (typeof selectedTags !== 'undefined' && selectedTags && selectedTags.size > 0) {
-      const itemTags = item.aesthetic_tags || [];
-      const hasAll = Array.from(selectedTags).every(t => itemTags.includes(t));
-      if (!hasAll) return false;
-    }
-
-    // 5. Burst group collapse logic
-    if (currentBurstFilter !== 'burst_only' && currentBurstFilter !== 'best_only') {
-      if (item.is_burst && !item.is_best_pick) {
-        if (!expandedBurstGroups.has(item.burst_group_id)) {
-          return false;
-        }
+    if (typeof selectedTags !== 'undefined' && selectedTags && selectedTags.size > 0 && typeof getAllTagsFromItem === 'function') {
+      const itemTags = getAllTagsFromItem(item);
+      if (typeof tagLogic !== 'undefined' && tagLogic === 'OR') {
+        if (!Array.from(selectedTags).some(t => itemTags.has(t))) return false;
+      } else {
+        if (!Array.from(selectedTags).every(t => itemTags.has(t))) return false;
       }
     }
+
+    // 5. Burst group collapse logic (only in 'stack' mode)
+    if (currentBurstFilter === 'stack') {
+      if (item.is_burst && !item.is_best_pick && !expandedBurstGroups.has(item.burst_group_id)) {
+        return false;
+      }
+    }
+
     return true;
   });
 }
 
 function sortList(list) {
-  const sorted = [...list];
-  sorted.sort((a, b) => {
-    if (currentSort === 'score-desc') return b.final_score - a.final_score;
-    if (currentSort === 'score-asc') return a.final_score - b.final_score;
-    if (currentSort === 'date-desc') {
-      const timeA = a.captured_at ? new Date(a.captured_at).getTime() : new Date(a.created_at).getTime();
-      const timeB = b.captured_at ? new Date(b.captured_at).getTime() : new Date(b.created_at).getTime();
-      return timeB - timeA;
+  const sortSelect = document.getElementById('sort-select');
+  const sort = sortSelect ? sortSelect.value : currentSort;
+  return [...list].sort((a, b) => {
+    if (sort === 'score_desc' || sort === 'score-desc') return b.final_score - a.final_score;
+    if (sort === 'score_asc' || sort === 'score-asc') return a.final_score - b.final_score;
+    if (sort === 'user_score_desc') {
+      const sa = (a.user_score !== null && a.user_score !== undefined) ? a.user_score : -1;
+      const sb = (b.user_score !== null && b.user_score !== undefined) ? b.user_score : -1;
+      return sb - sa;
     }
-    if (currentSort === 'date-asc') {
-      const timeA = a.captured_at ? new Date(a.captured_at).getTime() : new Date(a.created_at).getTime();
-      const timeB = b.captured_at ? new Date(b.captured_at).getTime() : new Date(b.created_at).getTime();
-      return timeA - timeB;
+    if (sort === 'user_score_asc') {
+      const sa = (a.user_score !== null && a.user_score !== undefined) ? a.user_score : 999;
+      const sb = (b.user_score !== null && b.user_score !== undefined) ? b.user_score : 999;
+      return sa - sb;
     }
-    if (currentSort === 'comp-desc') return b.composition_score - a.composition_score;
-    if (currentSort === 'light-desc') return b.lighting_score - a.lighting_score;
-    if (currentSort === 'color-desc') return b.color_score - a.color_score;
-    if (currentSort === 'tech-desc') return b.technique_score - a.technique_score;
-    if (currentSort === 'diff-desc') {
-      const diffA = a.user_score !== null && a.user_score !== undefined ? Math.abs(a.user_score - a.final_score) : -1;
-      const diffB = b.user_score !== null && b.user_score !== undefined ? Math.abs(b.user_score - b.final_score) : -1;
-      return diffB - diffA;
+    if (sort === 'gap_desc' || sort === 'diff-desc') {
+      const ga = (a.user_score !== null && a.user_score !== undefined) ? Math.abs(a.user_score - a.final_score) : -1;
+      const gb = (b.user_score !== null && b.user_score !== undefined) ? Math.abs(b.user_score - b.final_score) : -1;
+      return gb - ga;
     }
+    if (sort === 'newest' || sort === 'date-desc') {
+      const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+      const validA = Number.isNaN(timeA) ? 0 : timeA;
+      const validB = Number.isNaN(timeB) ? 0 : timeB;
+      return (validB - validA) || (b.id - a.id);
+    }
+    if (sort === 'captured_desc') {
+      const timeA = a.captured_at ? new Date(a.captured_at).getTime() : -1;
+      const timeB = b.captured_at ? new Date(b.captured_at).getTime() : -1;
+      const validA = Number.isNaN(timeA) ? -1 : timeA;
+      const validB = Number.isNaN(timeB) ? -1 : timeB;
+      return (validB - validA) || (b.id - a.id);
+    }
+    if (sort === 'name') return a.filename.localeCompare(b.filename);
     return 0;
   });
-  return sorted;
 }
 
 function formatCapturedAt(value) {
@@ -203,6 +221,7 @@ function formatCapturedAt(value) {
 function renderGalleryCard(item) {
   return `
     <article class="card" onclick="openDetailModal(${item.id})">
+      <button class="card-delete-btn" title="이 분석 기록 삭제" onclick="event.stopPropagation(); deleteAnalysisRecord(${item.id})">🗑️</button>
       <img class="card-thumb" src="/api/image/${item.id}" alt="${escapeHtml(item.filename)}" loading="lazy">
       <div class="card-body">
         <div class="card-header">
@@ -212,48 +231,42 @@ function renderGalleryCard(item) {
             <span style="display:inline-block;margin-top:4px;font-size:0.75rem;font-weight:700;color:#4f46e5;background:#eef2ff;padding:2px 7px;border-radius:6px;">${escapeHtml(item.figure_category)}</span>
             <span style="display:inline-block;margin-top:4px;margin-left:4px;font-size:0.75rem;font-weight:700;color:#0d9488;background:#f0fdfa;padding:2px 7px;border-radius:6px;">🎯 ${escapeHtml(item.focus_status || '완벽 칼초점')}</span>
             ${item.is_burst ? (item.is_best_pick ?
-              `<span class="burst-badge burst-badge-best" onclick="toggleExpandBurstGroup('${item.burst_group_id}', event)" title="클릭하여 연사 B컷 ${item.burst_total - 1}장 보기/접기">👑 연사 베스트 (${item.burst_total}장) ${expandedBurstGroups.has(item.burst_group_id) ? '▲' : '▼'}</span>` :
-              `<span class="burst-badge burst-badge-bcut">🗂️ 연사 B컷 (${item.burst_rank}/${item.burst_total})</span>`
+              `<span class="badge-best-pick" style="display:inline-block;margin-top:4px;margin-left:4px;">👑 Best Pick (${item.burst_total}장 1위)</span>` :
+              `<span class="badge-b-cut" style="display:inline-block;margin-top:4px;margin-left:4px;" title="${escapeHtml(item.drop_reason)}">⚠️ B컷 (${escapeHtml(item.drop_reason)})</span>`
             ) : ''}
+            ${item.review_status === '토너먼트 1위' ? '<span class="badge-best-pick" style="background:#fef3c7;color:#b45309;border:1px solid #fde68a;display:inline-block;margin-top:4px;margin-left:4px;">🏆 토너먼트 1위</span>' : ''}
+            ${item.sns_advice ? '<span style="display:inline-block;margin-top:4px;margin-left:4px;font-size:0.75rem;font-weight:700;color:#0284c7;background:#e0f2fe;padding:2px 7px;border-radius:6px;">📱 SNS크롭</span>' : ''}
+            ${item.user_score !== null && item.user_score !== undefined ? `
+              <span class="badge-user-score" style="display:inline-block;margin-top:4px;margin-left:4px;" title="사용자 직접 평점: ${item.user_score.toFixed(1)}점 (AI: ${item.final_score.toFixed(1)}점)">👤 내 점수 ${item.user_score.toFixed(1)}</span>
+            ` : ''}
             ${item.cross_check_opinion ? `
-              <span class="burst-badge" style="background:#fdf4ff;color:#9333ea;border:1px solid #f0abfc;" title="OpenAI GPT-6 Luna의 독립 크로스체크 의견이 포함됨">
-                🤝 Luna ${item.cross_check_opinion.score !== undefined ? Number(item.cross_check_opinion.score).toFixed(1) + '점' : '체크 완료'}
-              </span>
+              <span class="cross-check-badge" title="OpenAI(${escapeHtml(item.cross_check_opinion.model || 'GPT-6 Luna')}) 보조 의견: ${Number(item.cross_check_opinion.score).toFixed(1)}점">🤝 OpenAI ${Number(item.cross_check_opinion.score).toFixed(1)}</span>
             ` : ''}
           </div>
           <div class="score-badge">
-            <div class="score-num">${item.final_score.toFixed(1)}</div>
-            <div class="score-grade">${escapeHtml(item.grade)}</div>
+            <span class="score-num">${item.final_score.toFixed(1)}</span>
+            <span class="score-grade">${escapeHtml(item.grade)}</span>
+            ${item.user_score !== null && item.user_score !== undefined ? `
+              <span style="font-size:0.74rem;font-weight:800;color:#1d4ed8;margin-top:3px;">👤 ${item.user_score.toFixed(1)}점</span>
+            ` : ''}
           </div>
         </div>
-
-        <div style="margin-top:6px;font-size:0.78rem;">
-          ${item.user_score !== null && item.user_score !== undefined ? `
-            <div style="display:inline-flex;align-items:center;gap:4px;background:var(--filter-btn-bg);border:1px solid var(--line);border-radius:6px;padding:2px 8px;">
-              <span style="font-weight:700;color:var(--navy);">👤 내 평가:</span>
-              <strong style="color:var(--blue);">${item.user_score.toFixed(1)}점</strong>
-              <small style="color:var(--muted);">(${item.user_score >= item.final_score ? '+' : ''}${(item.user_score - item.final_score).toFixed(1)})</small>
-            </div>
-          ` : `
-            <span style="color:var(--muted);font-size:0.73rem;">👤 미평가</span>
-          `}
+        <div class="mini-scores">
+          <div><span>구도</span><strong>${item.composition_score.toFixed(1)}</strong></div>
+          <div><span>조명</span><strong>${item.lighting_score.toFixed(1)}</strong></div>
+          <div><span>색감</span><strong>${item.color_score.toFixed(1)}</strong></div>
+          <div><span>기술</span><strong>${item.technique_score.toFixed(1)}</strong></div>
         </div>
-
-        <p class="reason-preview">${escapeHtml(item.final_reason)}</p>
-
-        <div class="card-footer">
-          <div class="mini-scores">
-            <span>📐 ${item.composition_score.toFixed(1)}</span>
-            <span>💡 ${item.lighting_score.toFixed(1)}</span>
-            <span>🎨 ${item.color_score.toFixed(1)}</span>
-            <span>📷 ${item.technique_score.toFixed(1)}</span>
-          </div>
-          <span>${item.width}×${item.height}</span>
+        <div class="reason-box">${escapeHtml(item.final_reason)}</div>
+        <div class="tag-pills">
+          ${typeof renderTagPills === 'function' ? renderTagPills(item.aesthetic_tags) : ''}
         </div>
-
-        ${typeof renderTagPills === 'function' ? `
-          <div class="tag-pills" style="margin-top:8px;">
-            ${renderTagPills(item.aesthetic_tags, 3)}
+        ${currentBurstFilter === 'stack' && item.is_burst && item.is_best_pick ? `
+          <div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);display:flex;justify-content:space-between;align-items:center;" onclick="event.stopPropagation()">
+            <span style="font-size:0.74rem;color:var(--muted);font-weight:600;">🗂️ 연사 묶음 (${item.burst_total}장)</span>
+            <button class="filter-btn" style="padding:2px 8px;font-size:0.72rem;background:#f0f9ff;border-color:#bae6fd;color:#0369a1;" onclick="toggleExpandBurstGroup('${escapeHtml(item.burst_group_id)}', event)">
+              ${expandedBurstGroups.has(item.burst_group_id) ? '▲ B컷 접기' : `▼ B컷 ${item.burst_total - 1}장 펼치기`}
+            </button>
           </div>
         ` : ''}
       </div>

@@ -310,11 +310,12 @@ def update_analysis(
     """Update model and complete analysis JSON for an existing record, re-syncing tags."""
     database = Path(db_path).expanduser()
     ensure_db_columns(database)
+    now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
     with closing(get_db_connection(database)) as connection, connection:
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute(
-            "UPDATE photo_analyses SET model = ?, analysis_json = ? WHERE id = ?",
-            (model, analysis.model_dump_json(), record_id),
+            "UPDATE photo_analyses SET model = ?, analysis_json = ?, created_at = ? WHERE id = ?",
+            (model, analysis.model_dump_json(), now_iso, record_id),
         )
         sync_analysis_tags(connection, record_id, analysis.aesthetic_tags)
     return get_analysis_by_id(database, record_id)
@@ -328,6 +329,7 @@ def update_cross_check_opinion(
     """Update only the cross_check_opinion inside analysis_json without modifying base evaluation."""
     database = Path(db_path).expanduser()
     ensure_db_columns(database)
+    now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
     with closing(get_db_connection(database)) as connection, connection:
         connection.execute("PRAGMA foreign_keys = ON")
         row = connection.execute(
@@ -341,8 +343,8 @@ def update_cross_check_opinion(
             data = {}
         data["cross_check_opinion"] = cross_check.model_dump()
         connection.execute(
-            "UPDATE photo_analyses SET analysis_json = ? WHERE id = ?",
-            (json.dumps(data, ensure_ascii=False), record_id),
+            "UPDATE photo_analyses SET analysis_json = ?, created_at = ? WHERE id = ?",
+            (json.dumps(data, ensure_ascii=False), now_iso, record_id),
         )
     return get_analysis_by_id(database, record_id)
 

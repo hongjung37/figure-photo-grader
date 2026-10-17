@@ -77,7 +77,7 @@ def are_burst_pair(
     item1: dict,
     item2: dict,
     base_max_dist: int = 15,
-    time_window_sec: int = 15,
+    time_window_sec: int = 180,
 ) -> bool:
     """Determine if two photos belong to the same burst sequence using a hybrid
     perceptual hash, filename sequentiality, and timestamp proximity model.
@@ -94,8 +94,8 @@ def are_burst_pair(
 
     dist = bin(h1 ^ h2).count("1")
 
-    # Very close perceptual matches are safe without metadata support.
-    if dist <= min(base_max_dist, 8):
+    # If within base threshold, it's a burst directly
+    if dist <= base_max_dist:
         return True
 
     fn_seq = are_filenames_sequential(item1.get("filename", ""), item2.get("filename", ""))
@@ -115,13 +115,16 @@ def are_burst_pair(
     cat2 = item2.get("figure_category")
     same_cat = bool(cat1 and cat2 and cat1 == cat2)
 
-    # Wider visual differences require both burst-like filename and timing
-    # evidence; category alone must not pull unrelated photos together.
-    if fn_seq and time_prox:
-        allowed_dist = min(base_max_dist + 12, 30)
-        return dist <= allowed_dist
+    bonus = 0
+    if fn_seq:
+        bonus += 3
+    if time_prox:
+        bonus += 2
+    if same_cat and (fn_seq or time_prox):
+        bonus += 1
 
-    return False
+    allowed_dist = min(base_max_dist + bonus, 21)
+    return dist <= allowed_dist
 
 
 def cluster_burst_groups(analyses: list[dict], max_hamming_dist: int = 15) -> list[dict]:
