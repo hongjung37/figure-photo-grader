@@ -235,6 +235,7 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
         self.end_headers()
         self.wfile.write(body)
 
@@ -523,6 +524,14 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         if existing is not None:
             record_id, analysis_dict = existing
             duplicate = True
+            # Bump created_at so re-uploaded existing photos also surface at the top of 'newest' sort
+            from datetime import timezone
+            from contextlib import closing
+            from app.db.connection import get_db_connection
+            now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            with closing(get_db_connection(self.db_path)) as conn, conn:
+                conn.execute("UPDATE photo_analyses SET created_at = ? WHERE id = ?", (now_iso, record_id))
+            analysis_dict["created_at"] = now_iso
         else:
             category_hint = category_param if category_param != "auto" else None
             analysis = analyze_photo(prepared, provider=active_provider, model=model, category_hint=category_hint)

@@ -168,6 +168,19 @@ async function executeReanalyze(id) {
       await loadData();
     }
 
+    // Ensure the reanalyzed record has the freshest created_at timestamp for 'newest' sort
+    const dataList = (typeof allData !== 'undefined' && Array.isArray(allData)) ? allData : (window.allData || []);
+    const targetItem = dataList.find(d => d.id === id);
+    if (targetItem) {
+      if (res.analysis && res.analysis.created_at) {
+        targetItem.created_at = res.analysis.created_at;
+      } else {
+        targetItem.created_at = new Date().toISOString();
+      }
+      if (typeof renderScoreDistPanel === 'function') renderScoreDistPanel();
+      if (typeof renderGallery === 'function') renderGallery();
+    }
+
     // Re-open detail modal to show freshly evaluated state
     if (typeof openDetailModal === 'function') {
       openDetailModal(id);

@@ -79,19 +79,19 @@ window.TASK_MODEL_OPTIONS = TASK_MODEL_OPTIONS;
 
 const API = {
   async fetchAnalyses(burstDist = 15) {
-    const res = await fetch(`/api/analyses?burst_dist=${burstDist}`);
+    const res = await fetch(`/api/analyses?burst_dist=${burstDist}&_t=${Date.now()}`, { cache: 'no-store' });
     if (!res.ok) throw new Error(`서버 응답 오류: ${res.status}`);
     return await res.json();
   },
 
   async fetchUsageStats() {
-    const res = await fetch('/api/usage-stats');
+    const res = await fetch(`/api/usage-stats?_t=${Date.now()}`, { cache: 'no-store' });
     if (!res.ok) throw new Error(`사용 통계 조회 오류: ${res.status}`);
     return await res.json();
   },
 
   async fetchTagStats(minCount = 1) {
-    const res = await fetch(`/api/tag-stats?min_count=${minCount}`);
+    const res = await fetch(`/api/tag-stats?min_count=${minCount}&_t=${Date.now()}`, { cache: 'no-store' });
     if (!res.ok) throw new Error(`태그 통계 조회 오류: ${res.status}`);
     return await res.json();
   },
