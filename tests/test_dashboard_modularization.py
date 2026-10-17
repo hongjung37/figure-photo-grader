@@ -31,15 +31,19 @@ class DashboardModularizationTests(unittest.TestCase):
         css_path = PROJECT_ROOT / "static/dashboard.css"
         js_path = PROJECT_ROOT / "static/dashboard.js"
         crop_js_path = PROJECT_ROOT / "static/js/crop_viewer.js"
+        detail_js_path = PROJECT_ROOT / "static/js/detail_modal.js"
         tmpl_path = PROJECT_ROOT / "templates/index.html"
 
         self.assertTrue(css_path.is_file(), "static/dashboard.css should exist")
         self.assertTrue(js_path.is_file(), "static/dashboard.js should exist")
         self.assertTrue(crop_js_path.is_file(), "static/js/crop_viewer.js should exist")
+        self.assertTrue(detail_js_path.is_file(), "static/js/detail_modal.js should exist")
         self.assertTrue(tmpl_path.is_file(), "templates/index.html should exist")
 
         css = css_path.read_text(encoding="utf-8")
         js = js_path.read_text(encoding="utf-8")
+        detail_js = detail_js_path.read_text(encoding="utf-8")
+        js_all = js + "\n" + detail_js
         tmpl = tmpl_path.read_text(encoding="utf-8")
 
         # Verify darkroom rules in CSS
@@ -56,10 +60,10 @@ class DashboardModularizationTests(unittest.TestCase):
         self.assertIn("function toggleTheme", js)
         self.assertIn("function initTheme", js)
         self.assertIn("localStorage.setItem('theme'", js)
-        self.assertIn('class="strengths-box"', js)
-        self.assertIn('class="improvements-box"', js)
-        self.assertIn('class="user-score-section"', js)
-        self.assertIn('class="lr-advice-box"', js)
+        self.assertIn('class="strengths-box"', js_all)
+        self.assertIn('class="improvements-box"', js_all)
+        self.assertIn('class="user-score-section"', js_all)
+        self.assertIn('class="lr-advice-box"', js_all)
 
         # Verify template links and theme button
         self.assertIn('href="/static/dashboard.css"', tmpl)

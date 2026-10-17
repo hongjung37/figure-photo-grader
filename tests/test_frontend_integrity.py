@@ -17,6 +17,9 @@ class FrontendIntegrityTests(unittest.TestCase):
             PROJECT_ROOT / "static/js/tournament.js",
             PROJECT_ROOT / "static/js/tag_insights.js",
             PROJECT_ROOT / "static/js/modals.js",
+            PROJECT_ROOT / "static/js/rating_advice.js",
+            PROJECT_ROOT / "static/js/reanalyze.js",
+            PROJECT_ROOT / "static/js/detail_modal.js",
             PROJECT_ROOT / "static/dashboard.js",
         ]
         self.js = "\n".join(p.read_text(encoding="utf-8") for p in js_files if p.is_file())
@@ -66,6 +69,9 @@ const files = [
   'static/js/tournament.js',
   'static/js/tag_insights.js',
   'static/js/modals.js',
+  'static/js/rating_advice.js',
+  'static/js/reanalyze.js',
+  'static/js/detail_modal.js',
   'static/dashboard.js'
 ];
 

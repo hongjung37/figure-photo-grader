@@ -206,21 +206,26 @@ class ReanalyzeFeatureTests(unittest.TestCase):
 
     def test_ui_and_css_integrity(self):
         js_path = PROJECT_ROOT / "static/dashboard.js"
+        reanalyze_path = PROJECT_ROOT / "static/js/reanalyze.js"
+        detail_path = PROJECT_ROOT / "static/js/detail_modal.js"
         css_path = PROJECT_ROOT / "static/dashboard.css"
         api_path = PROJECT_ROOT / "static/js/api.js"
 
         js = js_path.read_text(encoding="utf-8")
+        reanalyze_js = reanalyze_path.read_text(encoding="utf-8") if reanalyze_path.is_file() else ""
+        detail_js = detail_path.read_text(encoding="utf-8") if detail_path.is_file() else ""
+        all_ui_js = js + "\n" + reanalyze_js + "\n" + detail_js
         css = css_path.read_text(encoding="utf-8")
         api = api_path.read_text(encoding="utf-8")
 
         # Check button label in UI is strictly '🔄 재평가'
-        self.assertIn(">🔄 재평가</button>", js)
+        self.assertIn(">🔄 재평가</button>", all_ui_js)
 
         # Check supporting JS functions
-        self.assertIn("function toggleReanalyzePanel", js)
-        self.assertIn("function renderReanalyzePanel", js)
-        self.assertIn("function executeReanalyze", js)
-        self.assertIn("function selectReanalyzeMode", js)
+        self.assertIn("function toggleReanalyzePanel", all_ui_js)
+        self.assertIn("function renderReanalyzePanel", all_ui_js)
+        self.assertIn("function executeReanalyze", all_ui_js)
+        self.assertIn("function selectReanalyzeMode", all_ui_js)
 
         # Check API client method
         self.assertIn("reanalyzePhoto(id", api)

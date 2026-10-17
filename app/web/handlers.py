@@ -110,6 +110,9 @@ _CROP_VIEWER_JS = load_template_file("static/js/crop_viewer.js")
 _TOURNAMENT_JS = load_template_file("static/js/tournament.js")
 _TAG_INSIGHTS_JS = load_template_file("static/js/tag_insights.js")
 _MODALS_JS = load_template_file("static/js/modals.js")
+_RATING_ADVICE_JS = load_template_file("static/js/rating_advice.js")
+_REANALYZE_JS = load_template_file("static/js/reanalyze.js")
+_DETAIL_MODAL_JS = load_template_file("static/js/detail_modal.js")
 _DASHBOARD_JS = load_template_file("static/dashboard.js")
 DASHBOARD_HTML = (
     _INDEX_HTML
@@ -128,6 +131,12 @@ DASHBOARD_HTML = (
     + _TAG_INSIGHTS_JS
     + "\n"
     + _MODALS_JS
+    + "\n"
+    + _RATING_ADVICE_JS
+    + "\n"
+    + _REANALYZE_JS
+    + "\n"
+    + _DETAIL_MODAL_JS
     + "\n"
     + _DASHBOARD_JS
     + "\n</script>\n"
