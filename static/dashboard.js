@@ -61,11 +61,12 @@ let currentDetailId = null;
 let currentBurstDist = 15;
 let currentBurstFilter = 'all'; // 'all', 'best_only', 'stack'
 let expandedBurstGroups = new Set();
-let selectedScoreBin = null; // 0.5-point bin key (e.g., '8.0')
+let selectedScoreBin = null; // 0.5-point or 0.1-point bin key (e.g., '8.0' or 'p_7.8')
 let scoreDistMetric = 'ai'; // 'ai' | 'user' | 'overlay'
+let scoreDistStep = '0.5'; // '0.5' | '0.1'
 let scoreDistCollapsed = false;
 
-// --- 0.5-Point Score Bins Definition ---
+// --- 0.5-Point & 0.1-Point Score Bins Definition ---
 const SCORE_BINS_05 = [
   { key: 'le_5.0', label: '≤5.0', sub: '하위', min: -Infinity, max: 5.5, color: '#94a3b8' },
   { key: '5.5',    label: '5.5',  sub: '5.5~5.9', min: 5.5, max: 6.0, color: '#64748b' },
@@ -79,16 +80,74 @@ const SCORE_BINS_05 = [
 ];
 window.SCORE_BINS_05 = SCORE_BINS_05;
 
+function getScoreTierColor(val) {
+  if (val >= 9.0) return '#8b5cf6';
+  if (val >= 8.5) return '#3b82f6';
+  if (val >= 8.0) return '#0d9488';
+  if (val >= 7.5) return '#10b981';
+  if (val >= 7.0) return '#eab308';
+  if (val >= 6.5) return '#f59e0b';
+  if (val >= 6.0) return '#f97316';
+  if (val >= 5.5) return '#64748b';
+  return '#94a3b8';
+}
+
+function buildScoreBins01(items) {
+  const vals = [];
+  (items || []).forEach(it => {
+    if (it && it.final_score !== null && it.final_score !== undefined && !Number.isNaN(Number(it.final_score))) {
+      vals.push(Math.round(Number(it.final_score) * 10));
+    }
+    if (it && it.user_score !== null && it.user_score !== undefined && !Number.isNaN(Number(it.user_score))) {
+      vals.push(Math.round(Number(it.user_score) * 10));
+    }
+  });
+  let minTenth = vals.length ? Math.min(...vals) : 60;
+  let maxTenth = vals.length ? Math.max(...vals) : 90;
+  // Pad by 1 step and clamp to [0, 100], ensuring a clean visual range
+  minTenth = Math.max(0, Math.min(minTenth, 60));
+  maxTenth = Math.min(100, Math.max(maxTenth, 85));
+
+  const bins = [];
+  for (let t = minTenth; t <= maxTenth; t++) {
+    const exact = t / 10;
+    const label = exact.toFixed(1);
+    bins.push({
+      key: `p_${label}`,
+      label: label,
+      sub: `${label}점`,
+      min: exact - 0.05,
+      max: exact + 0.05,
+      color: getScoreTierColor(exact)
+    });
+  }
+  return bins;
+}
+window.buildScoreBins01 = buildScoreBins01;
+
+function getActiveScoreBins(items, stepMode) {
+  const mode = stepMode || scoreDistStep;
+  if (mode === '0.1') {
+    return buildScoreBins01(items && items.length ? items : allData);
+  }
+  return SCORE_BINS_05;
+}
+
 function matchScoreBin(score, binKey) {
   if (score === null || score === undefined || Number.isNaN(Number(score))) return false;
   const val = Number(score);
+  if (binKey && binKey.startsWith('p_')) {
+    const target = parseFloat(binKey.slice(2));
+    return Math.round(val * 10) === Math.round(target * 10);
+  }
   const bin = SCORE_BINS_05.find(b => b.key === binKey);
   if (!bin) return true;
   return val >= bin.min && val < bin.max;
 }
 
-function computeScoreDistribution(items, scoreGetter) {
-  const counts = SCORE_BINS_05.map(b => ({ ...b, count: 0, pct: 0 }));
+function computeScoreDistribution(items, scoreGetter, customBins) {
+  const templateBins = customBins || SCORE_BINS_05;
+  const counts = templateBins.map(b => ({ ...b, count: 0, pct: 0 }));
   const validScores = [];
   (items || []).forEach(it => {
     const s = scoreGetter(it);
@@ -96,7 +155,13 @@ function computeScoreDistribution(items, scoreGetter) {
     const val = Number(s);
     validScores.push(val);
     for (let i = 0; i < counts.length; i++) {
-      if (val >= counts[i].min && val < counts[i].max) {
+      if (counts[i].key.startsWith('p_')) {
+        const target = parseFloat(counts[i].key.slice(2));
+        if (Math.round(val * 10) === Math.round(target * 10)) {
+          counts[i].count += 1;
+          break;
+        }
+      } else if (val >= counts[i].min && val < counts[i].max) {
         counts[i].count += 1;
         break;
       }
@@ -133,6 +198,20 @@ function toggleScoreDistPanel() {
   if (arrow) arrow.textContent = scoreDistCollapsed ? '▾' : '▴';
 }
 
+function setScoreDistStep(step) {
+  if (scoreDistStep !== step) {
+    scoreDistStep = step;
+    selectedScoreBin = null;
+    updateScoreBinFilterBadge();
+  }
+  renderScoreDistPanel();
+  renderGallery();
+  if (typeof currentView !== 'undefined' && currentView === 'insights' && typeof renderTagInsights === 'function') {
+    renderTagInsights();
+  }
+}
+window.setScoreDistStep = setScoreDistStep;
+
 function setScoreDistMetric(mode) {
   scoreDistMetric = mode;
   renderScoreDistPanel();
@@ -165,9 +244,14 @@ function updateScoreBinFilterBadge() {
     badge.style.display = 'none';
     return;
   }
-  const bin = SCORE_BINS_05.find(b => b.key === selectedScoreBin);
   const modeLabel = scoreDistMetric === 'user' ? '내 점수' : 'AI 점수';
-  text.textContent = `📊 ${modeLabel} ${bin ? bin.label : selectedScoreBin} 구간 (${bin ? bin.sub : ''})`;
+  if (selectedScoreBin.startsWith('p_')) {
+    const exactLabel = selectedScoreBin.slice(2);
+    text.textContent = `📊 ${modeLabel} ${exactLabel}점`;
+  } else {
+    const bin = SCORE_BINS_05.find(b => b.key === selectedScoreBin);
+    text.textContent = `📊 ${modeLabel} ${bin ? bin.label : selectedScoreBin} 구간 (${bin ? bin.sub : ''})`;
+  }
   badge.style.display = 'inline-flex';
 }
 
@@ -200,19 +284,25 @@ function renderScoreDistPanel() {
     return true;
   });
 
-  const aiDist = computeScoreDistribution(baseList, d => d.final_score);
-  const userDist = computeScoreDistribution(baseList, d => d.user_score);
+  const activeBins = getActiveScoreBins(baseList, scoreDistStep);
+  const aiDist = computeScoreDistribution(baseList, d => d.final_score, activeBins);
+  const userDist = computeScoreDistribution(baseList, d => d.user_score, activeBins);
   const activeDist = scoreDistMetric === 'user' ? userDist : aiDist;
   const maxBar = scoreDistMetric === 'overlay'
     ? Math.max(aiDist.maxCount, userDist.maxCount, 1)
     : Math.max(activeDist.maxCount, 1);
+  const isStep01 = scoreDistStep === '0.1';
 
   panel.innerHTML = `
     <div class="score-dist-header">
       <div class="score-dist-title-group">
         <span style="font-size:0.95rem;font-weight:800;color:var(--navy);display:flex;align-items:center;gap:6px;">
-          📊 0.5점 단위 점수 분포표
+          📊 ${isStep01 ? '0.1점 정밀' : '0.5점 단위'} 점수 분포표
         </span>
+        <div style="display:inline-flex;background:var(--filter-btn-bg);border:1px solid var(--line);border-radius:8px;padding:2px;gap:2px;">
+          <button type="button" class="toggle-logic-btn ${!isStep01 ? 'active' : ''}" onclick="setScoreDistStep('0.5')">0.5점 단위</button>
+          <button type="button" class="toggle-logic-btn ${isStep01 ? 'active' : ''}" onclick="setScoreDistStep('0.1')">0.1점 단위 (정밀)</button>
+        </div>
         <span style="font-size:0.74rem;color:var(--muted);">막대를 클릭하면 해당 점수대 사진만 즉시 필터링됩니다</span>
       </div>
 
@@ -232,37 +322,42 @@ function renderScoreDistPanel() {
       </div>
     </div>
 
-    <div class="score-dist-bars">
-      ${SCORE_BINS_05.map((bin, idx) => {
-        const aiBin = aiDist.bins[idx];
-        const uBin = userDist.bins[idx];
-        const primaryBin = scoreDistMetric === 'user' ? uBin : aiBin;
-        const hPct = primaryBin.count > 0 ? Math.max(8, Math.round((primaryBin.count / maxBar) * 100)) : 4;
-        const uPct = uBin.count > 0 ? Math.max(8, Math.round((uBin.count / maxBar) * 100)) : 4;
-        const isSelected = selectedScoreBin === bin.key;
-        const isEmpty = scoreDistMetric === 'overlay' ? (aiBin.count === 0 && uBin.count === 0) : (primaryBin.count === 0);
+    <div class="score-dist-scroll-wrap">
+      <div class="score-dist-bars ${isStep01 ? 'step-01' : 'step-05'}" style="--bin-count:${activeBins.length};">
+        ${activeBins.map((bin, idx) => {
+          const aiBin = aiDist.bins[idx];
+          const uBin = userDist.bins[idx];
+          const primaryBin = scoreDistMetric === 'user' ? uBin : aiBin;
+          const hPct = primaryBin.count > 0 ? Math.max(8, Math.round((primaryBin.count / maxBar) * 100)) : 4;
+          const uPct = uBin.count > 0 ? Math.max(8, Math.round((uBin.count / maxBar) * 100)) : 4;
+          const isSelected = selectedScoreBin === bin.key;
+          const isEmpty = scoreDistMetric === 'overlay' ? (aiBin.count === 0 && uBin.count === 0) : (primaryBin.count === 0);
 
-        return `
-          <div class="score-dist-col ${isSelected ? 'active' : ''} ${isEmpty ? 'empty' : ''}"
-               onclick="selectScoreBin('${bin.key}')"
-               title="${bin.label} 구간 (${bin.sub}) — AI: ${aiBin.count}장 (${aiBin.pct}%) / 내 점수: ${uBin.count}장 (${uBin.pct}%) | 클릭하여 필터링">
-            <div class="score-dist-count">
-              ${scoreDistMetric === 'overlay'
-                ? `<span style="color:${bin.color};">${aiBin.count}</span><span style="color:var(--muted);font-weight:500;">/</span><span style="color:#4f46e5;">${uBin.count}</span>`
-                : `${primaryBin.count}장 <span class="score-dist-pct">${primaryBin.pct}%</span>`
-              }
+          return `
+            <div class="score-dist-col ${isSelected ? 'active' : ''} ${isEmpty ? 'empty' : ''}"
+                 onclick="selectScoreBin('${bin.key}')"
+                 title="${bin.label}점 (${bin.sub}) — AI: ${aiBin.count}장 (${aiBin.pct}%) / 내 점수: ${uBin.count}장 (${uBin.pct}%) | 클릭하여 필터링">
+              <div class="score-dist-count">
+                ${scoreDistMetric === 'overlay'
+                  ? `<span style="color:${bin.color};">${aiBin.count}</span><span style="color:var(--muted);font-weight:500;">/</span><span style="color:#4f46e5;">${uBin.count}</span>`
+                  : (isStep01
+                      ? `<span>${primaryBin.count > 0 ? primaryBin.count : '0'}</span><span class="score-dist-pct">${primaryBin.count > 0 ? primaryBin.pct + '%' : ''}</span>`
+                      : `${primaryBin.count}장 <span class="score-dist-pct">${primaryBin.pct}%</span>`
+                    )
+                }
+              </div>
+              <div class="score-dist-bar-wrap">
+                <div class="score-dist-bar" style="height:${hPct}%;background:${bin.color};opacity:${primaryBin.count > 0 ? 1 : 0.22};"></div>
+                ${scoreDistMetric === 'overlay' ? `
+                  <div class="score-dist-bar user-overlay-bar" style="height:${uPct}%;opacity:${uBin.count > 0 ? 0.95 : 0.18};"></div>
+                ` : ''}
+              </div>
+              <div class="score-dist-label">${bin.label}</div>
+              ${!isStep01 ? `<div class="score-dist-sublabel">${bin.sub}</div>` : ''}
             </div>
-            <div class="score-dist-bar-wrap">
-              <div class="score-dist-bar" style="height:${hPct}%;background:${bin.color};opacity:${primaryBin.count > 0 ? 1 : 0.25};"></div>
-              ${scoreDistMetric === 'overlay' ? `
-                <div class="score-dist-bar user-overlay-bar" style="height:${uPct}%;opacity:${uBin.count > 0 ? 0.95 : 0.2};"></div>
-              ` : ''}
-            </div>
-            <div class="score-dist-label">${bin.label}</div>
-            <div class="score-dist-sublabel">${bin.sub}</div>
-          </div>
-        `;
-      }).join('')}
+          `;
+        }).join('')}
+      </div>
     </div>
   `;
 }

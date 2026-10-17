@@ -231,7 +231,7 @@ if (!cardHtml.includes('card-delete-btn') || !cardHtml.includes('토너먼트 1�
   throw new Error('renderGalleryCard missing delete button or badges');
 }
 
-// 5) 0.5-point Score Distribution & Interactive Bin Filtering (Option C)
+// 5) 0.5-point & 0.1-point Score Distribution & Interactive Bin Filtering (Option C)
 const distRes = vm.runInContext('computeScoreDistribution(' + JSON.stringify(sampleItems) + ', d => d.final_score)', ctx);
 if (distRes.total !== 2 || distRes.bins.length !== 9) {
   throw new Error('computeScoreDistribution failed to compute 9 bins for 2 items');
@@ -245,9 +245,18 @@ const filteredByBin85 = vm.runInContext('selectScoreBin("8.5"); filterList(' + J
 if (filteredByBin85.length !== 1 || filteredByBin85[0].id !== 1) {
   throw new Error('selectScoreBin("8.5") failed to filter gallery items');
 }
-vm.runInContext('clearScoreBinFilter();', ctx);
+// Verify 0.1-point mode
+const bins01 = vm.runInContext('setScoreDistStep("0.1"); getActiveScoreBins(' + JSON.stringify(sampleItems) + ', "0.1")', ctx);
+if (!bins01.some(b => b.key === 'p_8.8') || !bins01.some(b => b.key === 'p_7.5')) {
+  throw new Error('0.1-point bins missing p_8.8 or p_7.5');
+}
+const filteredByBin01 = vm.runInContext('selectScoreBin("p_8.8"); filterList(' + JSON.stringify(sampleItems) + ')', ctx);
+if (filteredByBin01.length !== 1 || filteredByBin01[0].id !== 1) {
+  throw new Error('selectScoreBin("p_8.8") failed to filter 8.8 item');
+}
+vm.runInContext('setScoreDistStep("0.5"); clearScoreBinFilter();', ctx);
 const insightsDistHtml = vm.runInContext('renderInsightsScoreDistSection(' + JSON.stringify(sampleItems) + ')', ctx);
-if (!insightsDistHtml.includes('0.5점 단위 종합 점수 분포') || !insightsDistHtml.includes('구도 (Composition)')) {
+if (!insightsDistHtml.includes('종합 점수 분포') || !insightsDistHtml.includes('구도 (Composition)')) {
   throw new Error('renderInsightsScoreDistSection missing expected sections');
 }
 

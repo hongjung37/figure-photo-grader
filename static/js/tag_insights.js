@@ -197,12 +197,17 @@ function getScoreColor(score) {
 function renderInsightsScoreDistSection(dataList) {
   if (typeof computeScoreDistribution !== 'function' || typeof SCORE_BINS_05 === 'undefined') return '';
 
-  const aiDist = computeScoreDistribution(dataList, d => d.final_score);
-  const userDist = computeScoreDistribution(dataList, d => d.user_score);
-  const compDist = computeScoreDistribution(dataList, d => d.composition_score);
-  const lightDist = computeScoreDistribution(dataList, d => d.lighting_score);
-  const colorDist = computeScoreDistribution(dataList, d => d.color_score);
-  const techDist = computeScoreDistribution(dataList, d => d.technique_score);
+  const isStep01 = (typeof scoreDistStep !== 'undefined' && scoreDistStep === '0.1');
+  const mainBins = (typeof getActiveScoreBins === 'function')
+    ? getActiveScoreBins(dataList, isStep01 ? '0.1' : '0.5')
+    : SCORE_BINS_05;
+
+  const aiDist = computeScoreDistribution(dataList, d => d.final_score, mainBins);
+  const userDist = computeScoreDistribution(dataList, d => d.user_score, mainBins);
+  const compDist = computeScoreDistribution(dataList, d => d.composition_score, SCORE_BINS_05);
+  const lightDist = computeScoreDistribution(dataList, d => d.lighting_score, SCORE_BINS_05);
+  const colorDist = computeScoreDistribution(dataList, d => d.color_score, SCORE_BINS_05);
+  const techDist = computeScoreDistribution(dataList, d => d.technique_score, SCORE_BINS_05);
 
   const maxMain = Math.max(aiDist.maxCount, userDist.maxCount, 1);
   const metrics = [
@@ -215,13 +220,19 @@ function renderInsightsScoreDistSection(dataList) {
   return `
     <div class="insights-score-section">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px;">
-        <div>
-          <h3 style="margin:0;font-size:1.08rem;font-weight:800;color:var(--navy);display:flex;align-items:center;gap:6px;">
-            📈 0.5점 단위 종합 점수 분포 & 4대 심사 영역 비교
-          </h3>
-          <span style="font-size:0.76rem;color:var(--muted);">
-            전체 사진(${aiDist.total}장)의 0.5점 구간별 밀집도와 구도·조명·색감·기술 영역별 체급을 비교합니다. (막대 클릭 시 해당 점수대 갤러리로 이동)
-          </span>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <div>
+            <h3 style="margin:0;font-size:1.08rem;font-weight:800;color:var(--navy);display:flex;align-items:center;gap:6px;">
+              📈 ${isStep01 ? '0.1점 정밀' : '0.5점 단위'} 종합 점수 분포 & 4대 심사 영역 비교
+            </h3>
+            <span style="font-size:0.76rem;color:var(--muted);">
+              전체 사진(${aiDist.total}장)의 점수 밀집도와 구도·조명·색감·기술 영역별 체급을 비교합니다. (막대 클릭 시 해당 점수대 갤러리로 이동)
+            </span>
+          </div>
+          <div style="display:inline-flex;background:var(--filter-btn-bg);border:1px solid var(--line);border-radius:8px;padding:2px;gap:2px;">
+            <button type="button" class="toggle-logic-btn ${!isStep01 ? 'active' : ''}" onclick="setScoreDistStep('0.5')">0.5점 단위</button>
+            <button type="button" class="toggle-logic-btn ${isStep01 ? 'active' : ''}" onclick="setScoreDistStep('0.1')">0.1점 단위 (정밀)</button>
+          </div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;font-size:0.75rem;">
           <span class="score-dist-kpi-pill">🤖 AI 평균 <strong>${aiDist.mean.toFixed(2)}점</strong> (중앙값 ${aiDist.median.toFixed(1)})</span>
@@ -230,30 +241,32 @@ function renderInsightsScoreDistSection(dataList) {
         </div>
       </div>
 
-      <!-- Main AI vs User 0.5-point Histogram -->
-      <div class="score-dist-bars" style="height:145px;">
-        ${SCORE_BINS_05.map((bin, idx) => {
-          const aiBin = aiDist.bins[idx];
-          const uBin = userDist.bins[idx];
-          const hAi = aiBin.count > 0 ? Math.max(8, Math.round((aiBin.count / maxMain) * 100)) : 4;
-          const hUser = uBin.count > 0 ? Math.max(8, Math.round((uBin.count / maxMain) * 100)) : 4;
-          return `
-            <div class="score-dist-col ${aiBin.count === 0 && uBin.count === 0 ? 'empty' : ''}"
-                 onclick="switchView('gallery'); selectScoreBin('${bin.key}');"
-                 title="${bin.label} 구간 (${bin.sub}) — AI: ${aiBin.count}장 (${aiBin.pct}%) / 내 점수: ${uBin.count}장 (${uBin.pct}%) | 클릭 시 갤러리 이동">
-              <div class="score-dist-count">
-                <span style="color:${bin.color};">${aiBin.count}장</span>
-                ${userDist.total > 0 ? `<span class="score-dist-pct" style="color:#4f46e5;">👤 ${uBin.count}장</span>` : `<span class="score-dist-pct">${aiBin.pct}%</span>`}
+      <!-- Main AI vs User Histogram -->
+      <div class="score-dist-scroll-wrap">
+        <div class="score-dist-bars ${isStep01 ? 'step-01' : 'step-05'}" style="--bin-count:${mainBins.length};">
+          ${mainBins.map((bin, idx) => {
+            const aiBin = aiDist.bins[idx];
+            const uBin = userDist.bins[idx];
+            const hAi = aiBin.count > 0 ? Math.max(8, Math.round((aiBin.count / maxMain) * 100)) : 4;
+            const hUser = uBin.count > 0 ? Math.max(8, Math.round((uBin.count / maxMain) * 100)) : 4;
+            return `
+              <div class="score-dist-col ${aiBin.count === 0 && uBin.count === 0 ? 'empty' : ''}"
+                   onclick="switchView('gallery'); selectScoreBin('${bin.key}');"
+                   title="${bin.label}점 (${bin.sub}) — AI: ${aiBin.count}장 (${aiBin.pct}%) / 내 점수: ${uBin.count}장 (${uBin.pct}%) | 클릭 시 갤러리 이동">
+                <div class="score-dist-count">
+                  <span style="color:${bin.color};">${isStep01 ? aiBin.count : aiBin.count + '장'}</span>
+                  ${userDist.total > 0 ? `<span class="score-dist-pct" style="color:#4f46e5;">${isStep01 ? '/' + uBin.count : '👤 ' + uBin.count + '장'}</span>` : `<span class="score-dist-pct">${aiBin.count > 0 ? aiBin.pct + '%' : ''}</span>`}
+                </div>
+                <div class="score-dist-bar-wrap">
+                  <div class="score-dist-bar" style="height:${hAi}%;background:${bin.color};opacity:${aiBin.count > 0 ? 1 : 0.22};"></div>
+                  ${userDist.total > 0 ? `<div class="score-dist-bar user-overlay-bar" style="height:${hUser}%;opacity:${uBin.count > 0 ? 0.95 : 0.18};"></div>` : ''}
+                </div>
+                <div class="score-dist-label">${bin.label}</div>
+                ${!isStep01 ? `<div class="score-dist-sublabel">${bin.sub}</div>` : ''}
               </div>
-              <div class="score-dist-bar-wrap">
-                <div class="score-dist-bar" style="height:${hAi}%;background:${bin.color};opacity:${aiBin.count > 0 ? 1 : 0.25};"></div>
-                ${userDist.total > 0 ? `<div class="score-dist-bar user-overlay-bar" style="height:${hUser}%;opacity:${uBin.count > 0 ? 0.95 : 0.2};"></div>` : ''}
-              </div>
-              <div class="score-dist-label">${bin.label}</div>
-              <div class="score-dist-sublabel">${bin.sub}</div>
-            </div>
-          `;
-        }).join('')}
+            `;
+          }).join('')}
+        </div>
       </div>
 
       <!-- 4 Evaluation Domains Mini Histograms -->
