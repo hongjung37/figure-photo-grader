@@ -79,6 +79,7 @@ class PhotoAnalyzerTests(unittest.TestCase):
             image_path = Path(temporary_directory) / "sample.jpg"
             self._make_jpeg(image_path, with_exif=True)
             photo = prepare_photo(image_path)
+            self.assertEqual(photo.captured_at, "2026-01-02T03:04:05")
 
             self.assertEqual(photo.safe_exif["Make"], "Example Camera")
             self.assertEqual(photo.safe_exif["Model"], "Model X")
@@ -206,7 +207,7 @@ class PhotoAnalyzerTests(unittest.TestCase):
 
             with closing(sqlite3.connect(database_path)) as connection:
                 row = connection.execute(
-                    "SELECT exif_json, analysis_json FROM photo_analyses WHERE id = ?",
+                    "SELECT exif_json, analysis_json, captured_at FROM photo_analyses WHERE id = ?",
                     (record_id,),
                 ).fetchone()
                 stored_tags = connection.execute(
@@ -219,6 +220,7 @@ class PhotoAnalyzerTests(unittest.TestCase):
             self.assertIsNotNone(row)
             exif_data = json.loads(row[0])
             analysis_data = json.loads(row[1])
+            self.assertEqual(row[2], "2026-01-02T03:04:05")
             self.assertNotIn("GPSInfo", exif_data)
             self.assertNotIn("DateTime", exif_data)
             self.assertEqual(analysis_data["final_score"], 7.8)
@@ -316,16 +318,14 @@ class PhotoAnalyzerTests(unittest.TestCase):
             "created_at": "2026-10-14T10:00:00+00:00",
             "figure_category": "접사/디테일",
         }
-        # Item 2 has distance 17 from item1, but same stem and same time!
-        # Base threshold is 15. Without bonus, 17 > 15 (False).
-        # With bonus (+3 for filename, +2 for time), allowed is 20, so 17 <= 20 (True).
+        # Item 2 has distance 17 from item1, but sequential filename and close time.
         diff_bits = 17
         diff_val = (1 << diff_bits) - 1
         item2 = {
             "id": 2,
             "filename": "SG_01089-2.webp",
             "dhash": 0x1111111111111111 ^ diff_val,
-            "created_at": "2026-10-14T10:00:30+00:00",
+            "created_at": "2026-10-14T10:00:10+00:00",
             "figure_category": "접사/디테일",
         }
         self.assertTrue(photo_dashboard.are_burst_pair(item1, item2, base_max_dist=15))
@@ -339,8 +339,8 @@ class PhotoAnalyzerTests(unittest.TestCase):
             "figure_category": "일상/야외 스냅",
         }
         self.assertFalse(photo_dashboard.are_burst_pair(item1, item3, base_max_dist=15))
-        # But under relaxed threshold 18, it should cluster
-        self.assertTrue(photo_dashboard.are_burst_pair(item1, item3, base_max_dist=18))
+        # A relaxed dHash threshold alone must not cluster unrelated photos.
+        self.assertFalse(photo_dashboard.are_burst_pair(item1, item3, base_max_dist=18))
 
         self.assertIn("burst-dist-select", photo_dashboard.DASHBOARD_HTML)
         self.assertIn("changeBurstSensitivity", photo_dashboard.DASHBOARD_HTML)

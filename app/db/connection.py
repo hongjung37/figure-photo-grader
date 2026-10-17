@@ -83,20 +83,25 @@ def get_db_connection(db_path: Path | str, timeout: float = 30.0) -> sqlite3.Con
     return conn
 
 
-_ENSURED_DBS: dict[str, float] = {}
+_ENSURED_DBS: set[tuple[int, int]] = set()
 
 
-def ensure_db_columns(db_path: Path | str) -> None:
-    """Ensure all required columns and tables exist in the SQLite database (cached per file mtime)."""
+def reset_ensured_dbs_cache() -> None:
+    """Clear the ensured DBs cache (primarily for tests)."""
+    _ENSURED_DBS.clear()
+
+
+def ensure_db_columns(db_path: Path | str, force: bool = False) -> None:
+    """Ensure all required columns and tables exist in the SQLite database (cached per file identity)."""
     database = Path(db_path).expanduser()
     if not database.is_file():
         return
     try:
-        resolved_str = str(database.resolve())
-        mtime = database.stat().st_mtime
+        stat_res = database.stat()
+        file_key = (int(stat_res.st_dev), int(stat_res.st_ino))
     except OSError:
         return
-    if _ENSURED_DBS.get(resolved_str) == mtime:
+    if not force and file_key in _ENSURED_DBS and file_key != (0, 0):
         return
 
     with closing(get_db_connection(database)) as conn, conn:
@@ -118,6 +123,42 @@ def ensure_db_columns(db_path: Path | str) -> None:
             conn.execute("ALTER TABLE photo_analyses ADD COLUMN dhash INTEGER")
         if "user_score" not in cols:
             conn.execute("ALTER TABLE photo_analyses ADD COLUMN user_score REAL")
+        if "captured_at" not in cols:
+            conn.execute("ALTER TABLE photo_analyses ADD COLUMN captured_at TEXT")
+
+        missing_capture_times = []
+        if {"sha256", "image_format", "captured_at"} <= set(cols):
+            missing_capture_times = conn.execute(
+                "SELECT id, sha256, image_format FROM photo_analyses "
+                "WHERE captured_at IS NULL"
+            ).fetchall()
+        if missing_capture_times:
+            from PIL import Image
+            from app.services.image_processor import extract_capture_time, get_original_photo_path
+
+            mime_by_format = {
+                "JPEG": "image/jpeg",
+                "MPO": "image/jpeg",
+                "PNG": "image/png",
+                "WEBP": "image/webp",
+            }
+            for mid, sha256, image_format in missing_capture_times:
+                mime_type = mime_by_format.get(str(image_format).upper())
+                if not mime_type:
+                    continue
+                original_path = get_original_photo_path(database, sha256, mime_type)
+                if not original_path.is_file():
+                    continue
+                try:
+                    with Image.open(original_path) as image:
+                        captured_at = extract_capture_time(image)
+                    if captured_at:
+                        conn.execute(
+                            "UPDATE photo_analyses SET captured_at = ? WHERE id = ?",
+                            (captured_at, mid),
+                        )
+                except Exception:
+                    pass
 
         missing = conn.execute(
             "SELECT id, thumbnail FROM photo_analyses WHERE dhash IS NULL AND thumbnail IS NOT NULL"
@@ -131,6 +172,7 @@ def ensure_db_columns(db_path: Path | str) -> None:
                 except Exception:
                     pass
     try:
-        _ENSURED_DBS[resolved_str] = database.stat().st_mtime
+        stat_res = database.stat()
+        _ENSURED_DBS.add((int(stat_res.st_dev), int(stat_res.st_ino)))
     except OSError:
         pass

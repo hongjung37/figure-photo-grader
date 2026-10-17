@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import io
+import math
 from dataclasses import dataclass
+from datetime import datetime
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -14,7 +16,9 @@ from PIL import ExifTags, Image, ImageOps
 from app.config import (
     DEFAULT_DATA_DIR,
     DEFAULT_DB_PATH,
+    EXIF_DATETIME_DIGITIZED_ID,
     EXIF_DATETIME_ORIGINAL_ID,
+    EXIF_DATETIME_ID,
     EXIF_IFD_ID,
     EXIF_IFD_TAG_NAMES,
     EXIF_OFFSET_TIME_ID,
@@ -78,6 +82,7 @@ class PreparedPhoto:
     upload_mime_type: str
     thumbnail_bytes: bytes | None = None
     dhash: int | None = None
+    captured_at: str | None = None
 
 
 def make_thumbnail_bytes(image_path_or_bytes: Path | bytes | str, max_dim: int = 800, quality: int = 82) -> bytes:
@@ -141,6 +146,8 @@ def save_original_photo(db_path: str | Path, photo: PreparedPhoto) -> Path:
 def _json_safe(value: Any) -> Any:
     """Convert Pillow EXIF values into JSON-compatible primitives."""
     if value is None or isinstance(value, (str, int, float, bool)):
+        if isinstance(value, float) and not math.isfinite(value):
+            return None
         return value
     if isinstance(value, bytes):
         return value[:128].decode("utf-8", errors="replace")
@@ -149,7 +156,8 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, dict):
         return {str(key): _json_safe(item) for key, item in value.items()}
     try:
-        return float(value)
+        number = float(value)
+        return number if math.isfinite(number) else None
     except (TypeError, ValueError, OverflowError):
         return str(value)
 
@@ -291,6 +299,7 @@ def prepare_photo_from_bytes(data: bytes, filename: str) -> PreparedPhoto:
         if source_format not in SUPPORTED_FORMATS:
             raise ValueError("지원하지 않는 이미지 형식입니다. JPEG, MPO, PNG, WEBP만 사용할 수 있습니다.")
         safe_exif = extract_safe_exif(source)
+        captured_at = extract_capture_time(source)
         safe_upload_exif = _build_safe_upload_exif_bytes(source)
         oriented = ImageOps.exif_transpose(source)
         oriented.load()
@@ -322,7 +331,32 @@ def prepare_photo_from_bytes(data: bytes, filename: str) -> PreparedPhoto:
         upload_mime_type=upload_mime_type,
         thumbnail_bytes=thumbnail_bytes,
         dhash=dhash_val,
+        captured_at=captured_at,
     )
+
+
+def extract_capture_time(image: Image.Image) -> str | None:
+    """Extract the camera capture time without adding it to the AI-facing EXIF payload."""
+    exif = image.getexif()
+    nested_exif: dict[int, Any] = {}
+    try:
+        nested_exif = exif.get_ifd(EXIF_IFD_ID)
+    except (AttributeError, KeyError, TypeError, ValueError):
+        pass
+
+    for tag_id in (EXIF_DATETIME_ORIGINAL_ID, EXIF_DATETIME_DIGITIZED_ID, EXIF_DATETIME_ID):
+        value = exif.get(tag_id, nested_exif.get(tag_id))
+        if not value:
+            continue
+        if isinstance(value, bytes):
+            value = value.decode("utf-8", errors="replace")
+        text = str(value).strip()
+        try:
+            normalized = text.replace(":", "-", 2).replace(" ", "T", 1)
+            return datetime.fromisoformat(normalized).isoformat(timespec="seconds")
+        except ValueError:
+            continue
+    return None
 
 
 def prepare_photo(image_path: str | Path) -> PreparedPhoto:

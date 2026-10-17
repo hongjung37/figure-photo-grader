@@ -192,6 +192,13 @@ function sortList(list) {
   });
 }
 
+function formatCapturedAt(value) {
+  if (!value) return '촬영 시각 정보 없음';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return `촬영 ${value}`;
+  return `촬영 ${date.toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'medium' })}`;
+}
+
 function renderGalleryCard(item) {
   return `
     <article class="card" onclick="openDetailModal(${item.id})">
@@ -201,6 +208,7 @@ function renderGalleryCard(item) {
         <div class="card-header">
           <div>
             <h3 class="card-title">${escapeHtml(item.filename)}</h3>
+            <div style="margin-top:4px;font-size:0.72rem;color:var(--muted);">📷 ${escapeHtml(formatCapturedAt(item.captured_at))}</div>
             <span style="display:inline-block;margin-top:4px;font-size:0.75rem;font-weight:700;color:#4f46e5;background:#eef2ff;padding:2px 7px;border-radius:6px;">${escapeHtml(item.figure_category)}</span>
             <span style="display:inline-block;margin-top:4px;margin-left:4px;font-size:0.75rem;font-weight:700;color:#0d9488;background:#f0fdfa;padding:2px 7px;border-radius:6px;">🎯 ${escapeHtml(item.focus_status || '완벽 칼초점')}</span>
             ${item.is_burst ? (item.is_best_pick ?
@@ -364,6 +372,7 @@ function openDetailModal(id) {
       </div>
       <div style="margin-top:12px;font-size:0.84rem;color:var(--muted)">
         <div><b>해상도:</b> ${item.width} × ${item.height}px (${escapeHtml(item.format)})</div>
+        <div><b>촬영시각:</b> ${escapeHtml(item.captured_at ? formatCapturedAt(item.captured_at).replace(/^촬영 /, '') : '정보 없음')}</div>
         <div><b>분석 모델:</b> ${escapeHtml(item.model)} · <b>분석시각:</b> ${escapeHtml(item.created_at)}</div>
         ${renderExifSummary(item.exif, item.detected_camera_settings)}
       </div>

@@ -23,6 +23,7 @@ from app.services.image_processor import (
     dhash_to_sqlite,
     get_original_photo_path,
     save_original_photo,
+    _json_safe,
 )
 
 
@@ -61,6 +62,7 @@ def save_analysis(
             ("sns_advice_json", "TEXT"),
             ("dhash", "INTEGER"),
             ("user_score", "REAL"),
+                ("captured_at", "TEXT"),
         ):
             if col_name not in existing_cols:
                 try:
@@ -82,8 +84,8 @@ def save_analysis(
         cursor = connection.execute(
             """INSERT INTO photo_analyses (
                 sha256, source_filename, width, height, image_format,
-                model, exif_json, analysis_json, created_at, thumbnail, dhash
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                model, exif_json, analysis_json, created_at, thumbnail, dhash, captured_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 photo.sha256,
                 photo.source_filename,
@@ -96,6 +98,7 @@ def save_analysis(
                 datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 thumb_data,
                 dhash_to_sqlite(dhash_to_save),
+                photo.captured_at,
             ),
         )
         record_id = int(cursor.lastrowid)
@@ -141,7 +144,7 @@ def get_all_analyses(db_path: Path, max_hamming_dist: int = 15) -> list[dict]:
             """SELECT id, sha256, source_filename, width, height, image_format,
                       model, exif_json, analysis_json, created_at,
                       lr_advice_json, sns_advice_json, review_status,
-                      user_notes, dhash, user_score
+                      user_notes, dhash, user_score, captured_at
                FROM photo_analyses ORDER BY id DESC"""
         ).fetchall()
 
@@ -204,7 +207,7 @@ def _format_analysis_row(
     aid = int(row["id"])
     try:
         analysis_data = json.loads(row["analysis_json"])
-        exif_data = json.loads(row["exif_json"])
+        exif_data = _json_safe(json.loads(row["exif_json"]))
     except Exception:
         return None
 
@@ -244,6 +247,7 @@ def _format_analysis_row(
         "format": row["image_format"],
         "model": row["model"],
         "created_at": row["created_at"],
+        "captured_at": row["captured_at"] if "captured_at" in row.keys() else None,
         "review_status": row["review_status"] if "review_status" in row.keys() else "미검토",
         "user_notes": row["user_notes"] if "user_notes" in row.keys() else "",
         "user_score": float(row["user_score"]) if "user_score" in row.keys() and row["user_score"] is not None else None,
