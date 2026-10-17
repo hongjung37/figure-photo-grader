@@ -51,6 +51,15 @@ const ModelSettings = {
   formatBadge(modelStr) {
     if (!modelStr) return '';
     const s = String(modelStr).toLowerCase();
+    if (s.startsWith('ensemble') || s.includes('+')) {
+      let gLabel = 'Lite 3.5';
+      if (s.includes('3.8') || s.includes('pro')) gLabel = 'Flash 3.8';
+      else if (s.includes('3.7')) gLabel = 'Flash 3.7';
+      else if (s.includes('3.6')) gLabel = 'Flash 3.6';
+      else if (s.includes('3.1') || s.includes('lite)')) gLabel = 'Lite 3.1';
+      else if (s.includes('3.5')) gLabel = 'Lite 3.5';
+      return `🤝 ${gLabel} + Luna`;
+    }
     if (s.includes('luna')) return '🌙 GPT-6 Luna';
     if (s.includes('3.8') || s === 'pro') return '💎 Flash 3.8';
     if (s.includes('3.7') || s === 'flash-3.7') return '🚀 Flash 3.7';

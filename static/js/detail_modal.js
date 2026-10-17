@@ -119,7 +119,46 @@ function openDetailModal(id) {
   const lrAdviceFn = typeof renderLrAdviceContent === 'function' ? renderLrAdviceContent : (window.renderLrAdviceContent || (() => ''));
   const reanalyzePanelFn = typeof renderReanalyzePanel === 'function' ? renderReanalyzePanel : (window.renderReanalyzePanel || (() => ''));
 
+  const fmtModel = (m) => (window.ModelSettings && m) ? window.ModelSettings.formatBadge(m) : (m || '-');
+  const reanalyzeDiff = (window._lastReanalyzeDiff && window._lastReanalyzeDiff.id === item.id) ? window._lastReanalyzeDiff : null;
+  let reanalyzeBannerHtml = '';
+  if (reanalyzeDiff) {
+    if (reanalyzeDiff.mode === 'cross_check_only') {
+      const lunaAfter = reanalyzeDiff.newLunaScore != null ? `${reanalyzeDiff.newLunaScore.toFixed(1)}점` : '-';
+      const lunaBefore = reanalyzeDiff.prevLunaScore != null ? `${reanalyzeDiff.prevLunaScore.toFixed(1)}점` : '없음';
+      reanalyzeBannerHtml = `
+        <div style="grid-column: 1 / -1; background: rgba(99,102,241,0.12); border: 1px solid #818cf8; border-radius: 10px; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap;">
+          <div style="font-size: 0.85rem; color: var(--text);">
+            <strong>🤝 GPT-6 Luna 크로스체크 단독 갱신 완료:</strong>
+            Luna 보조 점수 <b>${_escapeDetailHtml(lunaBefore)} → ${_escapeDetailHtml(lunaAfter)}</b>
+            <span style="color:var(--muted);font-size:0.78rem;margin-left:6px;">(크로스체크 단독 모드는 주 종합 점수 ${item.final_score.toFixed(1)}점과 주 모델을 유지합니다)</span>
+          </div>
+          <button type="button" class="filter-btn" style="padding:2px 8px;font-size:0.74rem;" onclick="window._lastReanalyzeDiff=null; this.parentElement.remove();">확인 ✕</button>
+        </div>
+      `;
+    } else {
+      const pScore = reanalyzeDiff.prevScore != null ? reanalyzeDiff.prevScore : item.final_score;
+      const nScore = item.final_score;
+      const diffVal = +(nScore - pScore).toFixed(1);
+      const diffSign = diffVal > 0 ? `+${diffVal.toFixed(1)}` : `${diffVal.toFixed(1)}`;
+      const diffColor = diffVal > 0 ? '#059669' : (diffVal < 0 ? '#e11d48' : '#64748b');
+      const pModel = fmtModel(reanalyzeDiff.prevModel);
+      const nModel = fmtModel(item.model);
+      reanalyzeBannerHtml = `
+        <div style="grid-column: 1 / -1; background: rgba(16,185,129,0.12); border: 1px solid #34d399; border-radius: 10px; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap;">
+          <div style="font-size: 0.86rem; color: var(--text); display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+            <span>✅ <strong>전면 재평가 반영 완료!</strong></span>
+            <span>📊 <b>종합 점수:</b> ${pScore.toFixed(1)}점 → <strong style="color:${diffColor};font-size:0.95rem;">${nScore.toFixed(1)}점 (${diffSign}점)</strong></span>
+            <span>🤖 <b>평가 모델:</b> ${_escapeDetailHtml(pModel)} → <strong style="color:#4f46e5;">${_escapeDetailHtml(nModel)}</strong> <small style="color:var(--muted);">(${_escapeDetailHtml(item.model)})</small></span>
+          </div>
+          <button type="button" class="filter-btn" style="padding:2px 8px;font-size:0.74rem;" onclick="window._lastReanalyzeDiff=null; this.parentElement.remove();">확인 ✕</button>
+        </div>
+      `;
+    }
+  }
+
   body.innerHTML = `
+    ${reanalyzeBannerHtml}
     ${item.is_burst ? `
       <div class="burst-banner ${item.is_best_pick ? '' : 'is-b-cut'}" style="grid-column: 1 / -1;">
         <div style="display:flex;align-items:center;gap:10px;">
@@ -156,7 +195,7 @@ function openDetailModal(id) {
       <div style="margin-top:12px;font-size:0.84rem;color:var(--muted)">
         <div><b>해상도:</b> ${item.width} × ${item.height}px (${_escapeDetailHtml(item.format)})</div>
         <div><b>촬영시각:</b> ${_escapeDetailHtml(item.captured_at ? _formatCapturedAt(item.captured_at).replace(/^촬영 /, '') : '정보 없음')}</div>
-        <div><b>분석 모델:</b> ${_escapeDetailHtml(item.model)} · <b>분석시각:</b> ${_escapeDetailHtml(item.created_at)}</div>
+        <div><b>분석 모델:</b> <strong style="color:var(--text);">${_escapeDetailHtml(fmtModel(item.model))}</strong> <small>(${_escapeDetailHtml(item.model)})</small> · <b>분석시각:</b> ${_escapeDetailHtml(item.created_at)}</div>
         ${renderExifSummary(item.exif, item.detected_camera_settings)}
       </div>
 
@@ -217,7 +256,12 @@ function openDetailModal(id) {
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;">
         <div>
           <h2 style="margin:0;">${_escapeDetailHtml(item.filename)}</h2>
-          <span class="score-grade" style="font-size:0.86rem;padding:4px 12px;">${_escapeDetailHtml(item.grade)}</span>
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:6px;">
+            <span class="score-grade" style="font-size:0.86rem;padding:4px 12px;margin:0;">${_escapeDetailHtml(item.grade)}</span>
+            <span style="display:inline-flex;align-items:center;gap:4px;font-size:0.78rem;font-weight:700;color:#4f46e5;background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.3);padding:3px 10px;border-radius:999px;" title="적용된 평가 모델 ID: ${_escapeDetailHtml(item.model)}">
+              🤖 ${_escapeDetailHtml(fmtModel(item.model))}
+            </span>
+          </div>
         </div>
         <div style="text-align:right;">
           <div style="font-size:2.8rem;font-weight:900;color:var(--blue);line-height:1;">${item.final_score.toFixed(1)}</div>

@@ -224,6 +224,9 @@ function saveModelSettingsFromModal() {
   }
 
   // Sync any open inline selectors in detail modal
+  document.querySelectorAll('[id^="reanalyze-tier-"]').forEach(el => {
+    el.value = newSettings.photo_grading;
+  });
   document.querySelectorAll('[id^="lr-model-select-"]').forEach(el => {
     el.value = newSettings.lightroom_advice;
   });

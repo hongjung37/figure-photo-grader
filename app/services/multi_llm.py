@@ -20,13 +20,17 @@ from app.models.analysis import (
 )
 from app.models.crop import CropBox, CropSet, SNSAdvice, SNSCaptionAndTags
 from app.models.lightroom import LightroomAdvice
+import threading
+
 from app.services.gemini_client import (
     analyze_with_gemini,
+    clear_last_used_gemini_model,
     generate_all_sns_crops as generate_all_sns_crops_with_gemini,
     generate_lightroom_advice as generate_lightroom_advice_with_gemini,
     generate_single_sns_crop as generate_single_sns_crop_with_gemini,
     generate_sns_advice as generate_sns_advice_with_gemini,
     generate_sns_caption_and_tags as generate_sns_caption_and_tags_with_gemini,
+    get_last_used_gemini_model,
 )
 from app.services.image_processor import PreparedPhoto
 from app.services.openai_client import (
@@ -39,6 +43,19 @@ from app.services.openai_client import (
     suggest_lightroom_advice_with_openai,
 )
 
+_MULTI_THREAD_LOCAL = threading.local()
+
+
+def get_effective_analysis_model(requested_model: str) -> str:
+    """Return the actual model used during the most recent analyze_photo call in this thread."""
+    eff = getattr(_MULTI_THREAD_LOCAL, "effective_model", None)
+    return eff if eff else requested_model
+
+
+def clear_effective_analysis_model() -> None:
+    """Clear the thread-local effective model before invoking analyze_photo."""
+    _MULTI_THREAD_LOCAL.effective_model = None
+
 
 def resolve_task_model(model_spec: str | None = None, default_tier: str = "lite") -> tuple[str, str]:
     """Resolve a frontend/CLI model or tier specifier into (provider, resolved_model_id).
@@ -47,6 +64,7 @@ def resolve_task_model(model_spec: str | None = None, default_tier: str = "lite"
       - 'lite' -> ('gemini', 'gemini-3.1-flash-lite')
       - 'standard' -> ('gemini', 'gemini-3.5-flash-lite')
       - 'pro' -> ('gemini', 'gemini-3.8-flash')
+      - 'ensemble-pro' -> ('ensemble', 'ensemble(gemini-3.8-flash+gpt-6-luna)')
       - 'luna' / 'gpt-6-luna' -> ('openai', 'gpt-6-luna')
       - 'gpt-4o' -> ('openai', 'gpt-4o')
       - 'gpt-4o-mini' / 'mini' -> ('openai', 'gpt-4o-mini')
@@ -56,6 +74,10 @@ def resolve_task_model(model_spec: str | None = None, default_tier: str = "lite"
     if not lower:
         return ("gemini", MODEL_PRESETS.get(default_tier, DEFAULT_MODEL))
 
+    if lower.startswith("ensemble-"):
+        sub_tier = lower[len("ensemble-"):]
+        sub_gemini = MODEL_PRESETS.get(sub_tier, MODEL_PRESETS.get("standard", DEFAULT_MODEL))
+        return ("ensemble", f"ensemble({sub_gemini}+{DEFAULT_OPENAI_MODEL})")
     if lower == "ensemble" or lower.startswith("ensemble(") or lower.startswith("ensemble:"):
         resolved_ensemble = ALL_MODEL_PRESETS.get(lower, raw)
         return ("ensemble", resolved_ensemble)
@@ -110,6 +132,7 @@ def analyze_photo(
 ) -> PhotoAnalysis:
     """Unified entry point for photo evaluation with Gemini or Gemini+OpenAI Cross-Check Ensemble."""
     normalized_provider = (provider or "gemini").strip().lower()
+    clear_effective_analysis_model()
 
     if normalized_provider == "ensemble":
         target_openai_model = DEFAULT_OPENAI_MODEL
@@ -124,13 +147,22 @@ def analyze_photo(
             if len(parts) > 1 and parts[1]:
                 target_openai_model = parts[1]
 
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            gemini_fut = executor.submit(
-                analyze_with_gemini,
+        used_gemini_holder: list[str] = [target_gemini_model]
+
+        def _run_gemini() -> PhotoAnalysis:
+            clear_last_used_gemini_model()
+            res = analyze_with_gemini(
                 photo=photo,
                 model=target_gemini_model,
                 category_hint=category_hint,
             )
+            actual = get_last_used_gemini_model()
+            if actual:
+                used_gemini_holder[0] = actual
+            return res
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            gemini_fut = executor.submit(_run_gemini)
             openai_fut = executor.submit(
                 cross_check_with_openai,
                 photo=photo,
@@ -140,15 +172,20 @@ def analyze_photo(
             )
             gemini_res = gemini_fut.result()
             openai_res = openai_fut.result()
+            _MULTI_THREAD_LOCAL.effective_model = f"ensemble({used_gemini_holder[0]}+{target_openai_model})"
             return _merge_analyses(gemini_res, openai_res, model_name=target_openai_model)
 
     # Standalone evaluation is exclusively handled by Gemini (fallback to DEFAULT_MODEL if non-Gemini model name passed)
     target_model = model if (model and model.lower().startswith("gemini")) else DEFAULT_MODEL
-    return analyze_with_gemini(
+    clear_last_used_gemini_model()
+    res = analyze_with_gemini(
         photo=photo,
         model=target_model,
         category_hint=category_hint,
     )
+    actual_gemini = get_last_used_gemini_model() or target_model
+    _MULTI_THREAD_LOCAL.effective_model = actual_gemini
+    return res
 
 
 def suggest_lightroom_advice(

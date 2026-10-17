@@ -55,6 +55,17 @@ _CLIENT_CACHE: dict[str, Any] = {}
 MAX_CONCURRENT_GEMINI_CALLS = 3
 _GEMINI_SEMAPHORE = threading.BoundedSemaphore(MAX_CONCURRENT_GEMINI_CALLS)
 _USAGE_LOG_DB: Path | None = None
+_THREAD_LOCAL = threading.local()
+
+
+def get_last_used_gemini_model() -> str | None:
+    """Return the actual Gemini model used in the current thread's most recent call."""
+    return getattr(_THREAD_LOCAL, "last_used_model", None)
+
+
+def clear_last_used_gemini_model() -> None:
+    """Reset the thread-local last used Gemini model before starting an analysis."""
+    _THREAD_LOCAL.last_used_model = None
 
 
 def _get_client(api_key: str) -> genai.Client:
@@ -269,6 +280,7 @@ def _call_gemini_interaction(
             if not output_text:
                 raise RuntimeError(f"Gemini가 {task_desc} JSON 결과를 반환하지 않았습니다.")
             in_tok, out_tok = _extract_usage(interaction)
+            _THREAD_LOCAL.last_used_model = active_model
             _log_api_usage(task_desc, model, active_model, attempts, _elapsed_ms(), in_tok, out_tok, True, None)
             return output_text
         except Exception as exc:

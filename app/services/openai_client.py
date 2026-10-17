@@ -55,7 +55,7 @@ def _get_client(api_key: str, base_url: str | None = None) -> OpenAI:
     with _CLIENT_LOCK:
         client = _CLIENT_CACHE.get(cache_key)
         if client is None:
-            kwargs: dict[str, Any] = {"api_key": clean_key}
+            kwargs: dict[str, Any] = {"api_key": clean_key, "timeout": 35.0, "max_retries": 1}
             if resolved_base_url:
                 kwargs["base_url"] = resolved_base_url
             client = OpenAI(**kwargs)

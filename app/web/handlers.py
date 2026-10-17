@@ -69,6 +69,8 @@ from app.services.gemini_client import (
 )
 from app.services.multi_llm import (
     analyze_photo,
+    clear_effective_analysis_model,
+    get_effective_analysis_model,
     resolve_task_model,
     suggest_all_sns_crops,
     suggest_lightroom_advice as _multi_llm_suggest_lightroom_advice,
@@ -339,7 +341,7 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(html_bytes)))
-        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
         self.end_headers()
         self.wfile.write(html_bytes)
 
@@ -353,7 +355,7 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", mime)
             self.send_header("Content-Length", str(len(content)))
-            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
             self.end_headers()
             self.wfile.write(content)
             return
@@ -534,9 +536,12 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             analysis_dict["created_at"] = now_iso
         else:
             category_hint = category_param if category_param != "auto" else None
+            clear_effective_analysis_model()
             analysis = analyze_photo(prepared, provider=active_provider, model=model, category_hint=category_hint)
-            record_id = save_analysis(self.db_path, prepared, model, analysis)
+            effective_model = get_effective_analysis_model(model)
+            record_id = save_analysis(self.db_path, prepared, effective_model, analysis)
             analysis_dict = analysis.model_dump(mode="json")
+            analysis_dict["model"] = effective_model
             duplicate = False
 
         self._send_json_ok({
@@ -549,7 +554,7 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
     def _handle_post_reanalyze(self) -> None:
         data = self._read_json_body()
         record_id = int(data.get("id"))
-        mode = str(data.get("mode", "cross_check_only"))
+        mode = str(data.get("mode", "full"))
         tier = str(data.get("tier", "standard"))
         category_param = str(data.get("category", "auto"))
 
@@ -586,13 +591,15 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             updated_record = update_cross_check_opinion(self.db_path, record_id, opinion)
         else:
             active_provider, model = resolve_task_model(tier, default_tier="standard")
+            clear_effective_analysis_model()
             new_analysis = analyze_photo(
                 prepared,
                 provider=active_provider,
                 model=model,
                 category_hint=category_hint,
             )
-            updated_record = update_analysis(self.db_path, record_id, model, new_analysis)
+            effective_model = get_effective_analysis_model(model)
+            updated_record = update_analysis(self.db_path, record_id, effective_model, new_analysis)
 
         if not updated_record:
             raise RuntimeError("데이터베이스 갱신 후 분석 레코드를 불러오지 못했습니다.")
