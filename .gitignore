@@ -11,6 +11,10 @@ __pycache__/
 *.py[cod]
 
 # Local photo-analysis database may contain private metadata and model output.
+*.sqlite3
+*.sqlite3-*
+*.db
+*.db-*
 photo_analysis.sqlite3
 photo_analysis.sqlite3-shm
 photo_analysis.sqlite3-wal
