@@ -61,6 +61,7 @@ async function submitUserScore(id) {
         item.user_score = data.user_score;
       }
       if (typeof openDetailModal === 'function') openDetailModal(id);
+      if (typeof renderScoreDistPanel === 'function') renderScoreDistPanel();
       if (typeof renderGallery === 'function') renderGallery();
       if (typeof populateTagSelectorAndQuickTags === 'function') populateTagSelectorAndQuickTags();
       if (typeof currentView !== 'undefined' && currentView === 'insights' && typeof renderTagInsights === 'function') {

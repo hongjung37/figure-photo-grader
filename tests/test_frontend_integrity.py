@@ -85,7 +85,12 @@ const mockElements = {
   'comp-a-select': { options: [], innerHTML: '', value: '1' },
   'comp-b-select': { options: [], innerHTML: '', value: '2' },
   'compare-content': { innerHTML: '' },
-  'sort-select': { value: 'score_desc' }
+  'sort-select': { value: 'score_desc' },
+  'score-dist-panel': { style: {}, innerHTML: '' },
+  'active-bin-filter-badge': { style: {} },
+  'active-bin-filter-text': { textContent: '' },
+  'btn-toggle-score-dist': { classList: { toggle: () => {} } },
+  'score-dist-toggle-arrow': { textContent: '' }
 };
 
 const windowObj = { addEventListener: () => {} };
@@ -224,6 +229,26 @@ if (sortedName[0].filename !== 'a_item.jpg') {
 const cardHtml = vm.runInContext('renderGalleryCard(' + JSON.stringify(sampleItems[0]) + ')', ctx);
 if (!cardHtml.includes('card-delete-btn') || !cardHtml.includes('토너먼트 1위') || !cardHtml.includes('SNS크롭')) {
   throw new Error('renderGalleryCard missing delete button or badges');
+}
+
+// 5) 0.5-point Score Distribution & Interactive Bin Filtering (Option C)
+const distRes = vm.runInContext('computeScoreDistribution(' + JSON.stringify(sampleItems) + ', d => d.final_score)', ctx);
+if (distRes.total !== 2 || distRes.bins.length !== 9) {
+  throw new Error('computeScoreDistribution failed to compute 9 bins for 2 items');
+}
+const bin75 = distRes.bins.find(b => b.key === '7.5');
+const bin85 = distRes.bins.find(b => b.key === '8.5');
+if (!bin75 || bin75.count !== 1 || !bin85 || bin85.count !== 1) {
+  throw new Error('0.5-point bin counts mismatch');
+}
+const filteredByBin85 = vm.runInContext('selectScoreBin("8.5"); filterList(' + JSON.stringify(sampleItems) + ')', ctx);
+if (filteredByBin85.length !== 1 || filteredByBin85[0].id !== 1) {
+  throw new Error('selectScoreBin("8.5") failed to filter gallery items');
+}
+vm.runInContext('clearScoreBinFilter();', ctx);
+const insightsDistHtml = vm.runInContext('renderInsightsScoreDistSection(' + JSON.stringify(sampleItems) + ')', ctx);
+if (!insightsDistHtml.includes('0.5점 단위 종합 점수 분포') || !insightsDistHtml.includes('구도 (Composition)')) {
+  throw new Error('renderInsightsScoreDistSection missing expected sections');
 }
 
 process.stdout.write('OK');

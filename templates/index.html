@@ -40,13 +40,22 @@
 
 <main class="main-container">
   <div class="controls">
-    <div class="filter-group">
-      <span style="font-size:0.84rem;font-weight:700;color:var(--muted)">등급:</span>
-      <button class="filter-btn active" onclick="setFilter('all', this)">전체</button>
-      <button class="filter-btn" onclick="setFilter('pro', this)">프로작가급 (9.0+)</button>
-      <button class="filter-btn" onclick="setFilter('very_good', this)">매우 우수 (8.0+)</button>
-      <button class="filter-btn" onclick="setFilter('good', this)">우수 (7.0+)</button>
-      <button class="filter-btn" onclick="setFilter('normal', this)">보통 스냅 (5.0~6.9)</button>
+    <div class="filter-group" style="width:100%;justify-content:space-between;">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <span style="font-size:0.84rem;font-weight:700;color:var(--muted)">등급:</span>
+        <button class="filter-btn active" onclick="setFilter('all', this)">전체</button>
+        <button class="filter-btn" onclick="setFilter('pro', this)">프로작가급 (9.0+)</button>
+        <button class="filter-btn" onclick="setFilter('very_good', this)">매우 우수 (8.0+)</button>
+        <button class="filter-btn" onclick="setFilter('good', this)">우수 (7.0+)</button>
+        <button class="filter-btn" onclick="setFilter('normal', this)">보통 스냅 (5.0~6.9)</button>
+        <span id="active-bin-filter-badge" style="display:none;align-items:center;gap:6px;background:#e0f2fe;color:#0369a1;border:1px solid #bae6fd;padding:4px 10px;border-radius:999px;font-size:0.78rem;font-weight:800;">
+          <span id="active-bin-filter-text"></span>
+          <button type="button" onclick="clearScoreBinFilter()" style="border:none;background:transparent;color:#0369a1;font-weight:900;cursor:pointer;padding:0 2px;font-size:0.84rem;" title="구간 필터 해제">✕</button>
+        </span>
+      </div>
+      <button type="button" id="btn-toggle-score-dist" class="filter-btn active" onclick="toggleScoreDistPanel()" style="display:inline-flex;align-items:center;gap:5px;font-weight:700;">
+        📊 점수 분포표 <span id="score-dist-toggle-arrow">▴</span>
+      </button>
     </div>
     <div class="filter-group" style="margin-top:8px;">
       <span style="font-size:0.84rem;font-weight:700;color:var(--muted)">피규어 유형:</span>
@@ -117,6 +126,9 @@
       </div>
     </div>
   </div>
+
+  <!-- Interactive Score Distribution Panel (0.5-point bins, Option C) -->
+  <section id="score-dist-panel" class="score-dist-panel"></section>
 
   <!-- Gallery View -->
   <div class="grid" id="gallery-grid"></div>

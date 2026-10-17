@@ -61,6 +61,211 @@ let currentDetailId = null;
 let currentBurstDist = 15;
 let currentBurstFilter = 'all'; // 'all', 'best_only', 'stack'
 let expandedBurstGroups = new Set();
+let selectedScoreBin = null; // 0.5-point bin key (e.g., '8.0')
+let scoreDistMetric = 'ai'; // 'ai' | 'user' | 'overlay'
+let scoreDistCollapsed = false;
+
+// --- 0.5-Point Score Bins Definition ---
+const SCORE_BINS_05 = [
+  { key: 'le_5.0', label: '≤5.0', sub: '하위', min: -Infinity, max: 5.5, color: '#94a3b8' },
+  { key: '5.5',    label: '5.5',  sub: '5.5~5.9', min: 5.5, max: 6.0, color: '#64748b' },
+  { key: '6.0',    label: '6.0',  sub: '6.0~6.4', min: 6.0, max: 6.5, color: '#f97316' },
+  { key: '6.5',    label: '6.5',  sub: '6.5~6.9', min: 6.5, max: 7.0, color: '#f59e0b' },
+  { key: '7.0',    label: '7.0',  sub: '7.0~7.4', min: 7.0, max: 7.5, color: '#eab308' },
+  { key: '7.5',    label: '7.5',  sub: '7.5~7.9', min: 7.5, max: 8.0, color: '#10b981' },
+  { key: '8.0',    label: '8.0',  sub: '8.0~8.4', min: 8.0, max: 8.5, color: '#0d9488' },
+  { key: '8.5',    label: '8.5',  sub: '8.5~8.9', min: 8.5, max: 9.0, color: '#3b82f6' },
+  { key: 'ge_9.0', label: '9.0+', sub: '마스터피스', min: 9.0, max: Infinity, color: '#8b5cf6' }
+];
+window.SCORE_BINS_05 = SCORE_BINS_05;
+
+function matchScoreBin(score, binKey) {
+  if (score === null || score === undefined || Number.isNaN(Number(score))) return false;
+  const val = Number(score);
+  const bin = SCORE_BINS_05.find(b => b.key === binKey);
+  if (!bin) return true;
+  return val >= bin.min && val < bin.max;
+}
+
+function computeScoreDistribution(items, scoreGetter) {
+  const counts = SCORE_BINS_05.map(b => ({ ...b, count: 0, pct: 0 }));
+  const validScores = [];
+  (items || []).forEach(it => {
+    const s = scoreGetter(it);
+    if (s === null || s === undefined || Number.isNaN(Number(s))) return;
+    const val = Number(s);
+    validScores.push(val);
+    for (let i = 0; i < counts.length; i++) {
+      if (val >= counts[i].min && val < counts[i].max) {
+        counts[i].count += 1;
+        break;
+      }
+    }
+  });
+  const total = validScores.length;
+  let maxCount = 0;
+  counts.forEach(c => {
+    c.pct = total ? Math.round((c.count / total) * 100) : 0;
+    if (c.count > maxCount) maxCount = c.count;
+  });
+  validScores.sort((a, b) => a - b);
+  const mean = total ? (validScores.reduce((a, b) => a + b, 0) / total) : 0;
+  const median = total
+    ? (total % 2 === 1
+      ? validScores[Math.floor(total / 2)]
+      : (validScores[total / 2 - 1] + validScores[total / 2]) / 2)
+    : 0;
+  const top10Idx = total ? Math.max(0, Math.ceil(total * 0.9) - 1) : 0;
+  const top10Cutoff = total ? validScores[top10Idx] : 0;
+  const minScore = total ? validScores[0] : 0;
+  const maxScore = total ? validScores[total - 1] : 0;
+  return { bins: counts, total, maxCount, mean, median, top10Cutoff, minScore, maxScore };
+}
+window.computeScoreDistribution = computeScoreDistribution;
+
+function toggleScoreDistPanel() {
+  scoreDistCollapsed = !scoreDistCollapsed;
+  const panel = document.getElementById('score-dist-panel');
+  const btn = document.getElementById('btn-toggle-score-dist');
+  const arrow = document.getElementById('score-dist-toggle-arrow');
+  if (panel) panel.style.display = scoreDistCollapsed ? 'none' : 'block';
+  if (btn) btn.classList.toggle('active', !scoreDistCollapsed);
+  if (arrow) arrow.textContent = scoreDistCollapsed ? '▾' : '▴';
+}
+
+function setScoreDistMetric(mode) {
+  scoreDistMetric = mode;
+  renderScoreDistPanel();
+  if (selectedScoreBin) renderGallery();
+}
+
+function selectScoreBin(binKey) {
+  if (selectedScoreBin === binKey) {
+    selectedScoreBin = null;
+  } else {
+    selectedScoreBin = binKey;
+  }
+  updateScoreBinFilterBadge();
+  renderScoreDistPanel();
+  renderGallery();
+}
+
+function clearScoreBinFilter() {
+  selectedScoreBin = null;
+  updateScoreBinFilterBadge();
+  renderScoreDistPanel();
+  renderGallery();
+}
+
+function updateScoreBinFilterBadge() {
+  const badge = document.getElementById('active-bin-filter-badge');
+  const text = document.getElementById('active-bin-filter-text');
+  if (!badge || !text) return;
+  if (!selectedScoreBin) {
+    badge.style.display = 'none';
+    return;
+  }
+  const bin = SCORE_BINS_05.find(b => b.key === selectedScoreBin);
+  const modeLabel = scoreDistMetric === 'user' ? '내 점수' : 'AI 점수';
+  text.textContent = `📊 ${modeLabel} ${bin ? bin.label : selectedScoreBin} 구간 (${bin ? bin.sub : ''})`;
+  badge.style.display = 'inline-flex';
+}
+
+function renderScoreDistPanel() {
+  const panel = document.getElementById('score-dist-panel');
+  if (!panel) return;
+  if (typeof currentView !== 'undefined' && currentView !== 'gallery') {
+    panel.style.display = 'none';
+    return;
+  }
+  panel.style.display = scoreDistCollapsed ? 'none' : 'block';
+  if (!allData || !allData.length) {
+    panel.innerHTML = '';
+    return;
+  }
+
+  // Filter items by current category/tag/burst (excluding grade & bin filter so full distribution is visible)
+  const baseList = allData.filter(item => {
+    if (currentCatFilter !== 'all' && item.figure_category !== currentCatFilter) return false;
+    if (currentBurstFilter === 'burst_only' && !item.is_burst) return false;
+    if (currentBurstFilter === 'best_only' && item.is_burst && !item.is_best_pick) return false;
+    if (typeof selectedTags !== 'undefined' && selectedTags && selectedTags.size > 0 && typeof getAllTagsFromItem === 'function') {
+      const itemTags = getAllTagsFromItem(item);
+      if (typeof tagLogic !== 'undefined' && tagLogic === 'OR') {
+        if (!Array.from(selectedTags).some(t => itemTags.has(t))) return false;
+      } else {
+        if (!Array.from(selectedTags).every(t => itemTags.has(t))) return false;
+      }
+    }
+    return true;
+  });
+
+  const aiDist = computeScoreDistribution(baseList, d => d.final_score);
+  const userDist = computeScoreDistribution(baseList, d => d.user_score);
+  const activeDist = scoreDistMetric === 'user' ? userDist : aiDist;
+  const maxBar = scoreDistMetric === 'overlay'
+    ? Math.max(aiDist.maxCount, userDist.maxCount, 1)
+    : Math.max(activeDist.maxCount, 1);
+
+  panel.innerHTML = `
+    <div class="score-dist-header">
+      <div class="score-dist-title-group">
+        <span style="font-size:0.95rem;font-weight:800;color:var(--navy);display:flex;align-items:center;gap:6px;">
+          📊 0.5점 단위 점수 분포표
+        </span>
+        <span style="font-size:0.74rem;color:var(--muted);">막대를 클릭하면 해당 점수대 사진만 즉시 필터링됩니다</span>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <div class="score-dist-kpis">
+          <span class="score-dist-kpi-pill">표본 <strong>${activeDist.total}장</strong></span>
+          <span class="score-dist-kpi-pill">평균 <strong>${activeDist.mean.toFixed(2)}점</strong></span>
+          <span class="score-dist-kpi-pill">중앙값 <strong>${activeDist.median.toFixed(1)}점</strong></span>
+          <span class="score-dist-kpi-pill">상위 10% 컷 <strong>${activeDist.top10Cutoff.toFixed(1)}점+</strong></span>
+        </div>
+
+        <div style="display:inline-flex;background:var(--filter-btn-bg);border:1px solid var(--line);border-radius:9px;padding:2px;gap:2px;">
+          <button type="button" class="toggle-logic-btn ${scoreDistMetric === 'ai' ? 'active' : ''}" onclick="setScoreDistMetric('ai')">🤖 AI 점수</button>
+          <button type="button" class="toggle-logic-btn ${scoreDistMetric === 'user' ? 'active' : ''}" onclick="setScoreDistMetric('user')">👤 내 점수 (${userDist.total})</button>
+          <button type="button" class="toggle-logic-btn ${scoreDistMetric === 'overlay' ? 'active' : ''}" onclick="setScoreDistMetric('overlay')">⚖️ AI vs 내 점수 겹쳐보기</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="score-dist-bars">
+      ${SCORE_BINS_05.map((bin, idx) => {
+        const aiBin = aiDist.bins[idx];
+        const uBin = userDist.bins[idx];
+        const primaryBin = scoreDistMetric === 'user' ? uBin : aiBin;
+        const hPct = primaryBin.count > 0 ? Math.max(8, Math.round((primaryBin.count / maxBar) * 100)) : 4;
+        const uPct = uBin.count > 0 ? Math.max(8, Math.round((uBin.count / maxBar) * 100)) : 4;
+        const isSelected = selectedScoreBin === bin.key;
+        const isEmpty = scoreDistMetric === 'overlay' ? (aiBin.count === 0 && uBin.count === 0) : (primaryBin.count === 0);
+
+        return `
+          <div class="score-dist-col ${isSelected ? 'active' : ''} ${isEmpty ? 'empty' : ''}"
+               onclick="selectScoreBin('${bin.key}')"
+               title="${bin.label} 구간 (${bin.sub}) — AI: ${aiBin.count}장 (${aiBin.pct}%) / 내 점수: ${uBin.count}장 (${uBin.pct}%) | 클릭하여 필터링">
+            <div class="score-dist-count">
+              ${scoreDistMetric === 'overlay'
+                ? `<span style="color:${bin.color};">${aiBin.count}</span><span style="color:var(--muted);font-weight:500;">/</span><span style="color:#4f46e5;">${uBin.count}</span>`
+                : `${primaryBin.count}장 <span class="score-dist-pct">${primaryBin.pct}%</span>`
+              }
+            </div>
+            <div class="score-dist-bar-wrap">
+              <div class="score-dist-bar" style="height:${hPct}%;background:${bin.color};opacity:${primaryBin.count > 0 ? 1 : 0.25};"></div>
+              ${scoreDistMetric === 'overlay' ? `
+                <div class="score-dist-bar user-overlay-bar" style="height:${uPct}%;opacity:${uBin.count > 0 ? 0.95 : 0.2};"></div>
+              ` : ''}
+            </div>
+            <div class="score-dist-label">${bin.label}</div>
+            <div class="score-dist-sublabel">${bin.sub}</div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+}
 
 // --- Progressive Gallery Chunk Rendering ---
 const GALLERY_PAGE_SIZE = 40;
@@ -71,6 +276,7 @@ function setCatFilter(cat, btn) {
   currentCatFilter = cat;
   document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('active'));
   if (btn) btn.classList.add('active');
+  renderScoreDistPanel();
   renderGallery();
 }
 
@@ -82,6 +288,7 @@ async function loadData() {
   if (typeof populateCompareSelects === 'function') populateCompareSelects();
   if (typeof populateTagSelectorAndQuickTags === 'function') populateTagSelectorAndQuickTags();
   if (typeof updateTagFilterUI === 'function') updateTagFilterUI();
+  renderScoreDistPanel();
   renderGallery();
   if (typeof currentView !== 'undefined' && currentView === 'insights' && typeof renderTagInsights === 'function') {
     renderTagInsights();
@@ -115,6 +322,7 @@ function setBurstFilter(mode, btn) {
   currentBurstFilter = mode;
   document.querySelectorAll('.burst-btn, .burst-filter-btn').forEach(b => b.classList.remove('active'));
   if (btn) btn.classList.add('active');
+  renderScoreDistPanel();
   renderGallery();
 }
 
@@ -130,7 +338,12 @@ function toggleExpandBurstGroup(groupId, e) {
 
 function setFilter(filter, btn) {
   currentFilter = filter;
-  document.querySelectorAll('.filter-btn:not(.burst-btn):not(.cat-btn)').forEach(b => b.classList.remove('active'));
+  if (selectedScoreBin) {
+    selectedScoreBin = null;
+    updateScoreBinFilterBadge();
+    renderScoreDistPanel();
+  }
+  document.querySelectorAll('.filter-btn:not(.burst-btn):not(.cat-btn):not(#btn-toggle-score-dist)').forEach(b => b.classList.remove('active'));
   if (btn) btn.classList.add('active');
   renderGallery();
 }
@@ -142,6 +355,12 @@ function filterList(list) {
     if (currentFilter === 'very_good' && (item.final_score < 8.0 || item.final_score >= 9.0)) return false;
     if (currentFilter === 'good' && (item.final_score < 7.0 || item.final_score >= 8.0)) return false;
     if (currentFilter === 'normal' && (item.final_score < 5.0 || item.final_score >= 7.0)) return false;
+
+    // 1-b. Interactive 0.5-point Score Bin filter
+    if (selectedScoreBin) {
+      const targetScore = scoreDistMetric === 'user' ? item.user_score : item.final_score;
+      if (!matchScoreBin(targetScore, selectedScoreBin)) return false;
+    }
 
     // 2. Category filter
     if (currentCatFilter !== 'all' && item.figure_category !== currentCatFilter) return false;

@@ -27,6 +27,7 @@ function switchView(mode) {
   const galleryGrid = document.getElementById('gallery-grid');
   const compareView = document.getElementById('compare-view');
   const insightsView = document.getElementById('insights-view');
+  const scoreDistPanel = document.getElementById('score-dist-panel');
   const tabGallery = document.getElementById('tab-gallery');
   const tabCompare = document.getElementById('tab-compare');
   const tabInsights = document.getElementById('tab-insights');
@@ -39,16 +40,19 @@ function switchView(mode) {
     if (galleryGrid) galleryGrid.style.display = 'grid';
     if (compareView) compareView.style.display = 'none';
     if (insightsView) insightsView.style.display = 'none';
+    if (typeof renderScoreDistPanel === 'function') renderScoreDistPanel();
   } else if (mode === 'compare') {
     if (galleryGrid) galleryGrid.style.display = 'none';
     if (compareView) compareView.style.display = 'block';
     if (insightsView) insightsView.style.display = 'none';
+    if (scoreDistPanel) scoreDistPanel.style.display = 'none';
     populateCompareSelects();
     updateComparison();
   } else if (mode === 'insights') {
     if (galleryGrid) galleryGrid.style.display = 'none';
     if (compareView) compareView.style.display = 'none';
     if (insightsView) insightsView.style.display = 'block';
+    if (scoreDistPanel) scoreDistPanel.style.display = 'none';
     renderTagInsights();
   }
 }
@@ -190,6 +194,104 @@ function getScoreColor(score) {
   return '#e11d48';
 }
 
+function renderInsightsScoreDistSection(dataList) {
+  if (typeof computeScoreDistribution !== 'function' || typeof SCORE_BINS_05 === 'undefined') return '';
+
+  const aiDist = computeScoreDistribution(dataList, d => d.final_score);
+  const userDist = computeScoreDistribution(dataList, d => d.user_score);
+  const compDist = computeScoreDistribution(dataList, d => d.composition_score);
+  const lightDist = computeScoreDistribution(dataList, d => d.lighting_score);
+  const colorDist = computeScoreDistribution(dataList, d => d.color_score);
+  const techDist = computeScoreDistribution(dataList, d => d.technique_score);
+
+  const maxMain = Math.max(aiDist.maxCount, userDist.maxCount, 1);
+  const metrics = [
+    { label: '📐 구도 (Composition)', dist: compDist, accent: '#3b82f6' },
+    { label: '💡 조명 (Lighting)', dist: lightDist, accent: '#f59e0b' },
+    { label: '🎨 색감 (Color)', dist: colorDist, accent: '#ec4899' },
+    { label: '🎯 기술·초점 (Technique)', dist: techDist, accent: '#10b981' }
+  ];
+
+  return `
+    <div class="insights-score-section">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px;">
+        <div>
+          <h3 style="margin:0;font-size:1.08rem;font-weight:800;color:var(--navy);display:flex;align-items:center;gap:6px;">
+            📈 0.5점 단위 종합 점수 분포 & 4대 심사 영역 비교
+          </h3>
+          <span style="font-size:0.76rem;color:var(--muted);">
+            전체 사진(${aiDist.total}장)의 0.5점 구간별 밀집도와 구도·조명·색감·기술 영역별 체급을 비교합니다. (막대 클릭 시 해당 점수대 갤러리로 이동)
+          </span>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;font-size:0.75rem;">
+          <span class="score-dist-kpi-pill">🤖 AI 평균 <strong>${aiDist.mean.toFixed(2)}점</strong> (중앙값 ${aiDist.median.toFixed(1)})</span>
+          ${userDist.total > 0 ? `<span class="score-dist-kpi-pill">👤 내 점수 평균 <strong>${userDist.mean.toFixed(2)}점</strong> (${userDist.total}장)</span>` : ''}
+          <span class="score-dist-kpi-pill">🏆 상위 10% 컷 <strong>${aiDist.top10Cutoff.toFixed(1)}점+</strong></span>
+        </div>
+      </div>
+
+      <!-- Main AI vs User 0.5-point Histogram -->
+      <div class="score-dist-bars" style="height:145px;">
+        ${SCORE_BINS_05.map((bin, idx) => {
+          const aiBin = aiDist.bins[idx];
+          const uBin = userDist.bins[idx];
+          const hAi = aiBin.count > 0 ? Math.max(8, Math.round((aiBin.count / maxMain) * 100)) : 4;
+          const hUser = uBin.count > 0 ? Math.max(8, Math.round((uBin.count / maxMain) * 100)) : 4;
+          return `
+            <div class="score-dist-col ${aiBin.count === 0 && uBin.count === 0 ? 'empty' : ''}"
+                 onclick="switchView('gallery'); selectScoreBin('${bin.key}');"
+                 title="${bin.label} 구간 (${bin.sub}) — AI: ${aiBin.count}장 (${aiBin.pct}%) / 내 점수: ${uBin.count}장 (${uBin.pct}%) | 클릭 시 갤러리 이동">
+              <div class="score-dist-count">
+                <span style="color:${bin.color};">${aiBin.count}장</span>
+                ${userDist.total > 0 ? `<span class="score-dist-pct" style="color:#4f46e5;">👤 ${uBin.count}장</span>` : `<span class="score-dist-pct">${aiBin.pct}%</span>`}
+              </div>
+              <div class="score-dist-bar-wrap">
+                <div class="score-dist-bar" style="height:${hAi}%;background:${bin.color};opacity:${aiBin.count > 0 ? 1 : 0.25};"></div>
+                ${userDist.total > 0 ? `<div class="score-dist-bar user-overlay-bar" style="height:${hUser}%;opacity:${uBin.count > 0 ? 0.95 : 0.2};"></div>` : ''}
+              </div>
+              <div class="score-dist-label">${bin.label}</div>
+              <div class="score-dist-sublabel">${bin.sub}</div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+
+      <!-- 4 Evaluation Domains Mini Histograms -->
+      <div class="insights-4metrics-grid">
+        ${metrics.map(m => {
+          const mMax = Math.max(m.dist.maxCount, 1);
+          return `
+            <div class="metric-dist-card">
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <span style="font-size:0.82rem;font-weight:800;color:var(--navy);">${m.label}</span>
+                <strong style="font-size:0.95rem;color:${m.accent};">평균 ${m.dist.mean.toFixed(2)}점</strong>
+              </div>
+              <div style="display:flex;justify-content:space-between;font-size:0.7rem;color:var(--muted);margin-top:2px;">
+                <span>중앙값 ${m.dist.median.toFixed(1)}점</span>
+                <span>최고 ${m.dist.maxScore.toFixed(1)} / 최저 ${m.dist.minScore.toFixed(1)}</span>
+              </div>
+              <div class="metric-mini-bars">
+                ${SCORE_BINS_05.map((bin, idx) => {
+                  const b = m.dist.bins[idx];
+                  const h = b.count > 0 ? Math.max(10, Math.round((b.count / mMax) * 100)) : 4;
+                  return `
+                    <div style="display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;"
+                         title="${m.label} ${bin.label} (${bin.sub}): ${b.count}장 (${b.pct}%)">
+                      <span style="font-size:0.6rem;font-weight:700;color:var(--muted);margin-bottom:2px;">${b.count > 0 ? b.count : ''}</span>
+                      <div style="width:100%;height:${h}%;background:${m.accent};border-radius:3px 3px 1px 1px;opacity:${b.count > 0 ? 0.9 : 0.18};"></div>
+                      <span style="font-size:0.58rem;color:var(--muted);margin-top:2px;">${bin.label}</span>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
+  `;
+}
+
 function renderTagInsights() {
   const container = document.getElementById('insights-view');
   if (!container) return;
@@ -269,6 +371,8 @@ function renderTagInsights() {
         <div class="insights-kpi-sub">${stats.bestFavTag ? `AI 대비 +${stats.bestFavTag.score_diff.toFixed(1)}점 더 선호` : '직접 평가가 쌓이면 노출됩니다'}</div>
       </div>
     </div>
+
+    ${renderInsightsScoreDistSection(dataList)}
 
     <!-- Top 5 & Bottom 5 Rankings -->
     <div class="insights-rankings-grid">

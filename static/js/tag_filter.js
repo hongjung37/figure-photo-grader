@@ -33,6 +33,7 @@ function setTagLogic(mode) {
   const btnOr = document.getElementById('tag-logic-or');
   if (btnAnd) btnAnd.classList.toggle('active', mode === 'AND');
   if (btnOr) btnOr.classList.toggle('active', mode === 'OR');
+  if (typeof renderScoreDistPanel === 'function') renderScoreDistPanel();
   if (typeof renderGallery === 'function') renderGallery();
 }
 
@@ -46,12 +47,14 @@ function toggleTagFilter(tag) {
     switchView('gallery');
   }
   updateTagFilterUI();
+  if (typeof renderScoreDistPanel === 'function') renderScoreDistPanel();
   if (typeof renderGallery === 'function') renderGallery();
 }
 
 function clearAllSelectedTags() {
   selectedTags.clear();
   updateTagFilterUI();
+  if (typeof renderScoreDistPanel === 'function') renderScoreDistPanel();
   if (typeof renderGallery === 'function') renderGallery();
 }
 
@@ -64,6 +67,7 @@ function onTagSelectChange(sel) {
     switchView('gallery');
   }
   updateTagFilterUI();
+  if (typeof renderScoreDistPanel === 'function') renderScoreDistPanel();
   if (typeof renderGallery === 'function') renderGallery();
 }
 
