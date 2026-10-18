@@ -205,6 +205,48 @@ class OpenAIClientTests(unittest.TestCase):
             mock_cross.assert_called_once()
             self.assertEqual(mock_cross.call_args.kwargs.get("model"), "gpt-6-luna")
 
+    def test_ensemble_with_median_sampling(self) -> None:
+        from app.models.analysis import OpenAICrossCheck
+        from app.services.multi_llm import analyze_photo, get_last_sampled_scores
+
+        g1 = self._sample_analysis(6.0, "Gemini sample 1")
+        g2 = self._sample_analysis(7.0, "Gemini sample 2")
+        g3 = self._sample_analysis(6.5, "Gemini sample 3")
+        o_cross = OpenAICrossCheck(
+            score=7.8,
+            reason="OpenAI Luna 단독 평가",
+            strengths=["디테일 우수"],
+            improvements=["조명"],
+            composition_critique="[장점] 안정적",
+            lighting_critique="[장점] 자연광",
+        )
+
+        with patch("app.services.multi_llm.analyze_with_gemini", side_effect=[g1, g2, g3]) as mock_g, \
+             patch("app.services.multi_llm.cross_check_with_openai", return_value=o_cross) as mock_cross:
+
+            res = analyze_photo(
+                self.sample_photo,
+                provider="ensemble",
+                model="ensemble(gemini-3.5-flash-lite+gpt-6-luna)",
+                sample_count=3,
+            )
+
+            # Gemini sampled 3 times for median
+            self.assertEqual(mock_g.call_count, 3)
+            # Luna called exactly ONCE
+            self.assertEqual(mock_cross.call_count, 1)
+
+            # Median of [6.0, 6.5, 7.0] is 6.5
+            self.assertEqual(res.final_score, 6.5)
+            self.assertEqual(res.final_reason, "Gemini sample 3")
+            self.assertIsNotNone(res.cross_check_opinion)
+            self.assertEqual(res.cross_check_opinion.score, 7.8)
+
+            # Sampled scores retrieved via get_last_sampled_scores
+            sampled = get_last_sampled_scores()
+            self.assertIsNotNone(sampled)
+            self.assertEqual(sorted(sampled), [6.0, 6.5, 7.0])
+
     def test_resolve_task_model(self) -> None:
         from app.services.multi_llm import resolve_task_model
 
