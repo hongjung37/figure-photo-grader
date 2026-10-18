@@ -522,6 +522,14 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         active_spec = "ensemble" if (tier == "ensemble" or provider.lower() == "ensemble") else tier
         active_provider, model = resolve_task_model(active_spec, default_tier="standard")
 
+        sample_count_raw = form_data.get("sample_count", "1")
+        try:
+            sample_count = int(sample_count_raw)
+            if sample_count not in (1, 3, 5):
+                sample_count = 1
+        except (ValueError, TypeError):
+            sample_count = 1
+
         existing = None if force_reanalyze else find_existing_analysis(self.db_path, prepared.sha256, model=model)
         if existing is not None:
             record_id, analysis_dict = existing
@@ -537,7 +545,13 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         else:
             category_hint = category_param if category_param != "auto" else None
             clear_effective_analysis_model()
-            analysis = analyze_photo(prepared, provider=active_provider, model=model, category_hint=category_hint)
+            analysis = analyze_photo(
+                prepared,
+                provider=active_provider,
+                model=model,
+                category_hint=category_hint,
+                sample_count=sample_count,
+            )
             effective_model = get_effective_analysis_model(model)
             record_id = save_analysis(self.db_path, prepared, effective_model, analysis)
             analysis_dict = analysis.model_dump(mode="json")
@@ -557,6 +571,13 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         mode = str(data.get("mode", "full"))
         tier = str(data.get("tier", "standard"))
         category_param = str(data.get("category", "auto"))
+        sample_count_raw = data.get("sample_count", 1)
+        try:
+            sample_count = int(sample_count_raw)
+            if sample_count not in (1, 3, 5):
+                sample_count = 1
+        except (ValueError, TypeError):
+            sample_count = 1
 
         row = get_analysis_row_by_id(self.db_path, record_id)
         if not row:
@@ -597,6 +618,7 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 provider=active_provider,
                 model=model,
                 category_hint=category_hint,
+                sample_count=sample_count,
             )
             effective_model = get_effective_analysis_model(model)
             updated_record = update_analysis(self.db_path, record_id, effective_model, new_analysis)

@@ -4,7 +4,8 @@ const DEFAULT_AI_MODEL_SETTINGS = {
   photo_grading: 'standard',
   lightroom_advice: 'lite',
   sns_crop: 'lite',
-  sns_caption: 'lite'
+  sns_caption: 'lite',
+  median_sampling: 'false'
 };
 
 const TASK_MODEL_OPTIONS = [
@@ -24,7 +25,8 @@ const ModelSettings = {
         photo_grading: parsed.photo_grading || DEFAULT_AI_MODEL_SETTINGS.photo_grading,
         lightroom_advice: parsed.lightroom_advice || DEFAULT_AI_MODEL_SETTINGS.lightroom_advice,
         sns_crop: parsed.sns_crop || DEFAULT_AI_MODEL_SETTINGS.sns_crop,
-        sns_caption: parsed.sns_caption || DEFAULT_AI_MODEL_SETTINGS.sns_caption
+        sns_caption: parsed.sns_caption || DEFAULT_AI_MODEL_SETTINGS.sns_caption,
+        median_sampling: parsed.median_sampling != null ? String(parsed.median_sampling) : DEFAULT_AI_MODEL_SETTINGS.median_sampling
       };
     } catch (e) {
       return { ...DEFAULT_AI_MODEL_SETTINGS };
@@ -176,11 +178,11 @@ const API = {
     return await res.json();
   },
 
-  async reanalyzePhoto(id, mode = 'cross_check_only', tier = 'standard', category = 'auto') {
+  async reanalyzePhoto(id, mode = 'cross_check_only', tier = 'standard', category = 'auto', sampleCount = 1) {
     const res = await fetch('/api/reanalyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, mode, tier, category })
+      body: JSON.stringify({ id, mode, tier, category, sample_count: sampleCount })
     });
     return await res.json();
   }

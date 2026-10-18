@@ -131,6 +131,17 @@ function renderReanalyzePanel(item) {
         </select>
       </div>
 
+      <div id="reanalyze-sampling-wrap-${item.id}" class="reanalyze-sampling-wrap" style="margin-top: 10px; padding: 9px 12px; background: rgba(99,102,241,0.06); border: 1px dashed rgba(99,102,241,0.32); border-radius: 8px;">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:0.83rem;font-weight:600;color:var(--text);user-select:none;">
+          <input type="checkbox" id="reanalyze-median-${item.id}" ${(window.ModelSettings && window.ModelSettings.get('median_sampling') === 'true') ? 'checked' : ''} style="width:16px;height:16px;accent-color:#4f46e5;cursor:pointer;" onchange="if(window.ModelSettings) window.ModelSettings.set('median_sampling', this.checked ? 'true' : 'false');">
+          <span>🎯 3회 병렬 채점 후 중앙값(Median) 채택</span>
+          <span style="background:rgba(99,102,241,0.15);color:#4f46e5;padding:2px 6px;border-radius:4px;font-size:0.72rem;font-weight:700;">진동 0.1 이내 안정화</span>
+        </label>
+        <div style="font-size:0.75rem;color:var(--muted);margin-top:3px;padding-left:24px;line-height:1.4;">
+          동일 사진을 3회 동시 병렬 채점하여 단발성 튀는 점수(Outlier)를 배제하고 가장 신뢰도 높은 중앙값 분석을 저장합니다.
+        </div>
+      </div>
+
       <div class="reanalyze-actions">
         <button id="reanalyze-submit-btn-${item.id}" class="reanalyze-submit-btn" onclick="executeReanalyze(${item.id})">
           🚀 선택한 조건으로 재평가 시작
@@ -157,6 +168,9 @@ async function executeReanalyze(id) {
   const catSelect = document.getElementById(`reanalyze-category-${id}`);
   const category = catSelect ? catSelect.value : 'auto';
 
+  const medianCheckbox = document.getElementById(`reanalyze-median-${id}`);
+  const sampleCount = (medianCheckbox && medianCheckbox.checked) ? 3 : 1;
+
   const submitBtn = document.getElementById(`reanalyze-submit-btn-${id}`);
   const statusEl = document.getElementById(`reanalyze-status-${id}`);
 
@@ -177,11 +191,12 @@ async function executeReanalyze(id) {
     const modeName = mode === 'cross_check_only'
       ? 'OpenAI GPT-6 Luna 크로스체크 단독'
       : `AI 전체 재평가 (${_escapeReanalyzeHtml(chosenLabel)})`;
-    statusEl.innerHTML = `⏳ <b>${modeName}</b> 실행 중... (단독 모델 약 5~10초, 앙상블 약 10~25초 소요)`;
+    const samplingText = (sampleCount > 1 && mode === 'full') ? ' [🎯 3회 중앙값 정밀 채점]' : '';
+    statusEl.innerHTML = `⏳ <b>${modeName}${samplingText}</b> 실행 중... (단독 모델 약 5~10초, 앙상블 약 10~25초 소요)`;
   }
 
   try {
-    const res = await API.reanalyzePhoto(id, mode, tier, category);
+    const res = await API.reanalyzePhoto(id, mode, tier, category, sampleCount);
     if (!res || !res.success) {
       throw new Error((res && res.error) || '알 수 없는 오류');
     }

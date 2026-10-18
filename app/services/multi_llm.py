@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+import sys
 from typing import Any
 
 from app.config import (
@@ -129,10 +130,62 @@ def analyze_photo(
     model: str | None = None,
     category_hint: str | None = None,
     api_key: str | None = None,
+    sample_count: int = 1,
 ) -> PhotoAnalysis:
-    """Unified entry point for photo evaluation with Gemini or Gemini+OpenAI Cross-Check Ensemble."""
+    """Unified entry point for photo evaluation with Gemini or Gemini+OpenAI Cross-Check Ensemble.
+
+    If sample_count > 1 (e.g. 3), runs multiple independent evaluations concurrently and returns
+    the analysis corresponding to the median final_score, filtering out transient evaluation outliers.
+    """
     normalized_provider = (provider or "gemini").strip().lower()
     clear_effective_analysis_model()
+
+    if sample_count > 1:
+        used_model_holder: list[str] = []
+
+        def _single_sample() -> PhotoAnalysis:
+            sub_res = analyze_photo(
+                photo=photo,
+                provider=provider,
+                model=model,
+                category_hint=category_hint,
+                api_key=api_key,
+                sample_count=1,
+            )
+            eff = get_effective_analysis_model(model or DEFAULT_MODEL)
+            used_model_holder.append(eff)
+            return sub_res
+
+        with ThreadPoolExecutor(max_workers=min(sample_count, 6)) as executor:
+            futures = [executor.submit(_single_sample) for _ in range(sample_count)]
+            results: list[PhotoAnalysis] = []
+            exceptions: list[Exception] = []
+            for f in futures:
+                try:
+                    res = f.result()
+                    if isinstance(res, PhotoAnalysis):
+                        results.append(res)
+                except Exception as exc:
+                    exceptions.append(exc)
+
+        if not results:
+            if exceptions:
+                raise exceptions[-1]
+            raise RuntimeError(f"다중 채점({sample_count}회) 중 모든 분석이 실패했습니다.")
+
+        results.sort(key=lambda a: float(a.final_score))
+        median_idx = len(results) // 2
+        median_analysis = results[median_idx]
+
+        if used_model_holder:
+            _MULTI_THREAD_LOCAL.effective_model = used_model_holder[0]
+
+        scores_str = [round(float(a.final_score), 2) for a in results]
+        print(
+            f"[Sampling] {sample_count}회 병렬 채점 완료: {scores_str} -> 중앙값 {median_analysis.final_score}점 채택",
+            file=sys.stderr,
+        )
+        return median_analysis
 
     if normalized_provider == "ensemble":
         target_openai_model = DEFAULT_OPENAI_MODEL

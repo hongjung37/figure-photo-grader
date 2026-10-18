@@ -52,7 +52,7 @@ from app.services.image_processor import PreparedPhoto
 
 _CLIENT_LOCK = threading.Lock()
 _CLIENT_CACHE: dict[str, Any] = {}
-MAX_CONCURRENT_GEMINI_CALLS = 3
+MAX_CONCURRENT_GEMINI_CALLS = 6
 _GEMINI_SEMAPHORE = threading.BoundedSemaphore(MAX_CONCURRENT_GEMINI_CALLS)
 _USAGE_LOG_DB: Path | None = None
 _THREAD_LOCAL = threading.local()

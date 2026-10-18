@@ -180,12 +180,13 @@ class ReanalyzeFeatureTests(unittest.TestCase):
 
             # 2. Test mode="full" with new model
             new_gemini_analysis = _make_dummy_analysis(score=9.5)
-            with patch("app.web.handlers.analyze_photo", return_value=new_gemini_analysis):
+            with patch("app.web.handlers.analyze_photo", return_value=new_gemini_analysis) as mock_analyze:
                 req_data = json.dumps({
                     "id": record_id,
                     "mode": "full",
                     "tier": "pro",
                     "category": "macro",
+                    "sample_count": 3,
                 }).encode("utf-8")
                 req = urllib.request.Request(
                     f"http://127.0.0.1:{port}/api/reanalyze",
@@ -200,9 +201,29 @@ class ReanalyzeFeatureTests(unittest.TestCase):
                     analysis = body["analysis"]
                     self.assertEqual(analysis["final_score"], 9.5)
                     self.assertEqual(analysis["model"], "gemini-3.8-flash")
+                    # Verify sample_count=3 was passed through to analyze_photo
+                    mock_analyze.assert_called_once()
+                    self.assertEqual(mock_analyze.call_args[1].get("sample_count"), 3)
         finally:
             server.shutdown()
             server.server_close()
+
+    def test_multi_llm_median_sampling(self):
+        from app.services.multi_llm import analyze_photo
+        dummy_photo = _make_dummy_photo()
+
+        # Simulate 3 runs returning scores 8.1, 8.8, 8.4
+        analyses = [
+            _make_dummy_analysis(score=8.1),
+            _make_dummy_analysis(score=8.8),
+            _make_dummy_analysis(score=8.4),
+        ]
+        side_effects = iter(analyses)
+
+        with patch("app.services.multi_llm.analyze_with_gemini", side_effect=lambda **kw: next(side_effects)):
+            result = analyze_photo(dummy_photo, provider="gemini", model="gemini-3.5-flash-lite", sample_count=3)
+            # The median score among [8.1, 8.4, 8.8] is 8.4
+            self.assertEqual(result.final_score, 8.4)
 
     def test_ui_and_css_integrity(self):
         js_path = PROJECT_ROOT / "static/dashboard.js"
