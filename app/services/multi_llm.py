@@ -151,6 +151,55 @@ def analyze_photo(
     normalized_provider = (provider or "gemini").strip().lower()
     clear_effective_analysis_model()
 
+    if normalized_provider == "ensemble":
+        target_openai_model = DEFAULT_OPENAI_MODEL
+        target_gemini_model = MODEL_PRESETS.get("standard", "gemini-3.5-flash-lite")
+        if model and not model.startswith("ensemble"):
+            target_gemini_model = model
+        elif model and model.startswith("ensemble(") and "+" in model:
+            inner = model[len("ensemble("):-1]
+            parts = inner.split("+", 1)
+            if parts[0] and parts[0] != "gemini":
+                target_gemini_model = parts[0]
+            if len(parts) > 1 and parts[1]:
+                target_openai_model = parts[1]
+
+        used_gemini_holder: list[str] = [target_gemini_model]
+        sampled_scores_holder: list[list[float]] = []
+
+        def _run_gemini() -> PhotoAnalysis:
+            clear_last_used_gemini_model()
+            res = analyze_photo(
+                photo=photo,
+                provider="gemini",
+                model=target_gemini_model,
+                category_hint=category_hint,
+                sample_count=sample_count,
+            )
+            actual = get_last_used_gemini_model()
+            if actual:
+                used_gemini_holder[0] = actual
+            gemini_samples = get_last_sampled_scores()
+            if gemini_samples:
+                sampled_scores_holder.append(gemini_samples)
+            return res
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            gemini_fut = executor.submit(_run_gemini)
+            openai_fut = executor.submit(
+                cross_check_with_openai,
+                photo=photo,
+                model=target_openai_model,
+                category_hint=category_hint,
+                api_key=api_key,
+            )
+            gemini_res = gemini_fut.result()
+            openai_res = openai_fut.result()
+            _MULTI_THREAD_LOCAL.effective_model = f"ensemble({used_gemini_holder[0]}+{target_openai_model})"
+            if sampled_scores_holder:
+                _MULTI_THREAD_LOCAL.sampled_scores = sampled_scores_holder[0]
+            return _merge_analyses(gemini_res, openai_res, model_name=target_openai_model)
+
     if sample_count > 1:
         used_model_holder: list[str] = []
 
@@ -199,47 +248,6 @@ def analyze_photo(
             file=sys.stderr,
         )
         return median_analysis
-
-    if normalized_provider == "ensemble":
-        target_openai_model = DEFAULT_OPENAI_MODEL
-        target_gemini_model = MODEL_PRESETS.get("standard", "gemini-3.5-flash-lite")
-        if model and not model.startswith("ensemble"):
-            target_gemini_model = model
-        elif model and model.startswith("ensemble(") and "+" in model:
-            inner = model[len("ensemble("):-1]
-            parts = inner.split("+", 1)
-            if parts[0] and parts[0] != "gemini":
-                target_gemini_model = parts[0]
-            if len(parts) > 1 and parts[1]:
-                target_openai_model = parts[1]
-
-        used_gemini_holder: list[str] = [target_gemini_model]
-
-        def _run_gemini() -> PhotoAnalysis:
-            clear_last_used_gemini_model()
-            res = analyze_with_gemini(
-                photo=photo,
-                model=target_gemini_model,
-                category_hint=category_hint,
-            )
-            actual = get_last_used_gemini_model()
-            if actual:
-                used_gemini_holder[0] = actual
-            return res
-
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            gemini_fut = executor.submit(_run_gemini)
-            openai_fut = executor.submit(
-                cross_check_with_openai,
-                photo=photo,
-                model=target_openai_model,
-                category_hint=category_hint,
-                api_key=api_key,
-            )
-            gemini_res = gemini_fut.result()
-            openai_res = openai_fut.result()
-            _MULTI_THREAD_LOCAL.effective_model = f"ensemble({used_gemini_holder[0]}+{target_openai_model})"
-            return _merge_analyses(gemini_res, openai_res, model_name=target_openai_model)
 
     # Standalone evaluation is exclusively handled by Gemini (fallback to DEFAULT_MODEL if non-Gemini model name passed)
     target_model = model if (model and model.lower().startswith("gemini")) else DEFAULT_MODEL

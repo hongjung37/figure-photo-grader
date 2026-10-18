@@ -50,6 +50,10 @@ function selectReanalyzeMode(id, mode) {
   if (tierWrap) {
     tierWrap.style.display = (mode === 'full') ? 'block' : 'none';
   }
+  const samplingWrap = document.getElementById(`reanalyze-sampling-wrap-${id}`);
+  if (samplingWrap) {
+    samplingWrap.style.display = (mode === 'full') ? 'block' : 'none';
+  }
 }
 
 function renderReanalyzePanel(item) {
@@ -169,7 +173,7 @@ async function executeReanalyze(id) {
   const category = catSelect ? catSelect.value : 'auto';
 
   const medianCheckbox = document.getElementById(`reanalyze-median-${id}`);
-  const sampleCount = (medianCheckbox && medianCheckbox.checked) ? 3 : 1;
+  const sampleCount = (medianCheckbox && medianCheckbox.checked && mode === 'full') ? 3 : 1;
 
   const submitBtn = document.getElementById(`reanalyze-submit-btn-${id}`);
   const statusEl = document.getElementById(`reanalyze-status-${id}`);
