@@ -21,7 +21,7 @@ def build_grader_prompt(
     category_hint: str | None = None,
     compact_tags: bool = False,
 ) -> str:
-    """Build the prompt for figure photo evaluation."""
+    """Build the prompt for figure photo evaluation in concise, token-efficient English."""
     safe_exif = getattr(photo, "safe_exif", {})
     camera_settings = json.dumps(safe_exif, ensure_ascii=False, sort_keys=True)
     if not safe_exif:
@@ -29,13 +29,11 @@ def build_grader_prompt(
 
     if compact_tags:
         tag_section = (
-            "viewpoint(시점), composition_space(구도·공간), pose_gaze(포즈·시선), mood(분위기), "
-            "subject_background(피사체-배경), light_expression(빛 표현), color_impression(색조 인상), "
-            "narrative_implication(이야기 암시)의 8개 범주에 대해, "
-            "응답 JSON 스키마(aesthetic_tags)에 정의된 허용 어휘 목록 중에서 적합한 태그를 0~3개(필수 항목은 1~3개) 정확히 선택하세요."
+            "Select 0-3 appropriate tags (1-3 for required categories) from the allowed vocabulary defined in the JSON schema "
+            "for the 8 categories: viewpoint, composition_space, pose_gaze, mood, subject_background, light_expression, color_impression, narrative_implication."
         )
     else:
-        tag_section = "키와 허용 어휘는 다음과 같습니다:\n" + "\n".join(
+        tag_section = "Allowed Korean vocabulary for aesthetic_tags:\n" + "\n".join(
             f"- {category_key} ({AESTHETIC_TAG_CATEGORIES[category_key]}): {', '.join(options)}"
             for category_key, options in AESTHETIC_TAG_OPTIONS.items()
         )
@@ -44,95 +42,72 @@ def build_grader_prompt(
     if category_hint and category_hint in FIGURE_CATEGORIES:
         cat_info = FIGURE_CATEGORIES[category_hint]
         category_instruction = f"""[지정된 피규어 촬영 유형: {cat_info['label']}]
-이 사진은 사용자가 '{cat_info['label']}'({cat_info['description']}) 유형으로 지정했습니다.
-figure_category 값에 반드시 '{cat_info['label']}'을 입력하고, 아래 특화 심사 기준을 최우선 잣대로 적용하세요:
-- 특화 심사 포인트: {cat_info['focus']}
-"""
+User specified '{cat_info['label']}' ({cat_info['description']}).
+Set figure_category to exactly '{cat_info['label']}'. Primary focus: {cat_info['focus']}"""
     else:
-        category_instruction = """[피규어 촬영 세부 유형 자동 판별 및 분기 심사]
-먼저 사진을 분석하여 다음 4가지 피규어 촬영 유형 중 가장 부합하는 하나를 판별하여 figure_category에 정확히 입력하고, 해당 유형의 특화 기준을 엄격하게 적용하여 심사하세요:
-1. '접사/디테일' (피규어 얼굴, 눈동자, 무기 등 세부 조형/도색 초근접 촬영)
-   → 중점 기준: 눈동자 데칼의 초정밀 칼초점, 코/귀/머리카락 등 주요 조형이 날아가지 않는 적절한 매크로 심도(너무 얕아서 조형이 뭉개지면 감점), 미세 먼지/마감 관리, 번들거리는 반사광(핫스팟) 억제
-2. '일상/야외 스냅' (자연광 야외 출사, 여행 동행, 카페 등 실제 일상 환경과 상호작용)
-   → 중점 기준: 자연광(역광/측광)의 창의적 활용, 실제 환경과 피규어의 자연스러운 스케일 조화, 계절감 및 일상적 스토리텔링, 자연스러운 여백과 수평
-3. '스튜디오 연출/디오라마' (배경지, 다각도 조명 세팅, 디오라마 세트, 이펙트 파츠 활용)
-   → 중점 기준: 다각도 조명(키/필/림라이트)의 드라마틱한 입체감과 명암비, 디오라마와 피규어의 정교한 스케일 일치, 역동적인 포징, 클리어/이펙트 파츠 투과광
-4. '일반 피규어 촬영' (피규어 본체 전신 또는 상반신을 중심으로 단정하게 담아낸 스탠다드 포토)
-   → 중점 기준: 피규어 원형의 왜곡 없는 렌즈 화각과 프레이밍, 단정한 배경 분리, 자연스러운 광택 및 피부톤 밸런스
-"""
+        category_instruction = """[피규어 촬영 세부 유형 자동 판별 및 분기 심사] (Figure Photography Category Classification)
+Analyze the photo and classify into exactly one of the following 4 categories for figure_category:
+1. '접사/디테일' (Macro/Detail: face, eye decals, fine paint, close-up)
+   Focus: 눈동자 데칼(eye decals) pin-sharp focus, appropriate macro depth of field (avoid blurring key facial contours), dust/blemish control, specular hotspot control.
+2. '일상/야외 스냅' (Daily/Outdoor Snap: natural outdoor lighting, café, travel companion)
+   Focus: 자연광(natural light: backlight/sidelight) creative use, believable scale harmony with real environment, seasonal storytelling, natural framing/horizon.
+3. '스튜디오 연출/디오라마' (Studio Diorama: backdrops, multi-point lighting, diorama props, effect parts)
+   Focus: dimensional lighting (key/fill/rim), scale consistency between diorama and figure, dynamic posing, translucent/effect lighting.
+4. '일반 피규어 촬영' (Standard Figure: clean full-body or upper-body portrait)
+   Focus: distortion-free focal length and framing, clean background separation, natural skin tone and plastic finish balance."""
 
-    return f"""당신은 피규어 및 캐릭터 모델 사진(Figure Photography)의 완성도를 균형 잡힌 시각으로 심사하는 전문 피규어 사진 비평가입니다. 첨부 이미지에서 직접 관찰되는 시각적·광학적 근거를 바탕으로 객관적으로 평가하세요.
+    return f"""You are an expert photography critic evaluating figure and character model photography (피규어 및 캐릭터 모델 사진(Figure Photography)).
+Provide an objective, nuanced critique based purely on observed visual and optical evidence.
 
 {category_instruction}
 
-[핵심 심사 원칙: 객관적 변별력 및 스타일 중립성]
-1. 억지 칭찬도, 억지 트집 잡기(Nitpicking)도 지양하세요:
-   - 평범하거나 결함이 있는 사진에 후한 점수를 주는 것을 경계하되, 반대로 완성도가 높은 사진에서 점수를 깎기 위해 사소한 요소를 억지로 결함처럼 부풀리지 마세요.
-2. 스타일 중립성 (연출 의도와 기술적 결함의 구분):
-   - 하이키(밝은 톤)와 로우키(어두운 톤), 깊은 심도와 얕은 심도(보케), 여유 있는 여백과 타이트한 클로즈업, 전경 소품 활용은 우열이 없는 '연출 스타일의 선택'입니다.
-   - 특정 연출 기법을 사용했다는 이유만으로 가산점을 주지도 말고, 반대로 '주변부가 어둡다', '배경/소품 끝이 흐리다', '피규어 고정용 베이스/지주대가 보인다'는 현상 자체를 기계적인 결함으로 감점하지도 마세요.
-   - 선택한 연출이 주 피사체(피규어)의 조형미와 주제 전달력을 얼마나 효과적으로 살렸는지를 중심으로 평가하세요.
-3. 세부 영역 간 독립적 평가 (후광 효과 유의):
-   - 카메라 화질·칼초점·보케(기술)나 색감이 뛰어나다는 첫인상이 구도(프레이밍, 신체 말단/관절 크롭 위치, 여백 균형)나 조명(빛의 입체적 방향성과 깊이) 점수까지 덩달아 끌어올리는 후광 효과(Halo Effect)가 생기지 않도록, 4개 영역을 각각의 기준에 맞춰 독립적으로 살피세요.
-4. 세부 평가 메모 작성 형식:
-   - 각 세부 평가 메모(composition_notes, lighting_notes, color_notes, technique_notes)는 반드시 '[장점]'과 '[단점]'을 명확히 구분하여 서술하세요.
-   - 단, 해당 영역의 완성도가 매우 높아 실질적인 결함이 없다면 억지로 단점을 지어내지 말고 '[단점] 감점할 만한 뚜렷한 결함 없음 (대안적 연출 제안 수준)'으로 표기하세요.
-  예시 형식:
-  [장점] 피사체의 배치와 시선 처리가 안정적임
-  [단점] 배경 요소가 산만하여 시선을 분산시키고 상단 여백이 과도하게 남음
+[핵심 심사 원칙: 객관적 변별력 및 스타일 중립성] (Core Evaluation Principles):
+1. 억지 칭찬도, 억지 트집 잡기(Nitpicking)도 지양하세요 (Objective Discrimination without Nitpicking):
+   - Avoid score inflation on mediocre snapshots, but do not invent trivial flaws just to lower scores on genuinely accomplished shots.
+2. 스타일 중립성 (Style Neutrality: Intentional Aesthetics vs Technical Flaws):
+   - High-key/low-key, shallow/deep depth of field (bokeh), generous negative space/tight crop, and foreground layering are creative stylistic choices.
+   - Judge whether the chosen aesthetic effectively showcases the figure's sculptural beauty and storytelling. Do not treat visible figure support stands or darkened peripheries as automatic defects.
+3. 세부 영역 간 독립적 평가 (Prevent Halo Effect):
+   - Evaluate Composition, Lighting, Color, and Technique independently. Excellent lens sharpness, bokeh, or clean colors (technique) must not artificially inflate composition (framing, limb cropping, headroom) or lighting (dimensionality, contrast control).
+4. 세부 평가 메모 작성 형식 (Notes Format Requirement):
+   - All critique notes (composition, lighting, color, technique) MUST be written in Korean using the format:
+     [장점] <strengths in Korean>
+     [단점] <shortcomings in Korean, or '감점할 만한 뚜렷한 결함 없음' if practically flawless>
 
-[점수 평가 기준 (10점 만점 척도 - 변별력 있는 구간 활용)]:
-- 9.0 ~ 10.0: [프로사진작가 및 전문가급] - 상업 화보, 사진전시회 또는 전문 포트폴리오 수준의 탁월한 완성도. 광학적 기본기(초점·노출)뿐만 아니라 구도·빛의 입체적 설계·공간감 및 서사적 연출까지 4박자가 고루 조화를 이룬 작품.
-  (단순히 카메라 화질과 배경 흐림만 깔끔한 스탠다드 샷보다는 기획력과 시각적 밀도가 함께 뒷받침된 작품에 적합하며, 반대로 완성도가 충분한 작품이라면 대안적 제안 사항이 있다는 이유만으로 점수를 아끼지 마세요.)
-- 8.0 ~ 8.9: [매우 우수] - 상급 사진가 및 준전문가 수준. 주제가 명확하고 시각적 호소력이 뛰어남.
-  (8.0~8.4: 초점·보케·색감 등 광학적 기본기가 탄탄하고 깔끔하게 담긴 상급 A컷 / 8.5~8.9: 탄탄한 기본기 위에 조명 설계나 구도·배경의 연출력이 더해져 화보급에 가까우나, 프레이밍 등 일부 영역에서 약간의 아쉬움이 남는 수작)
-- 7.0 ~ 7.9: [우수] - 기본기가 갖춰진 준수한 사진이나, 평면적인 조명, 아쉬운 신체 크롭/구도, 배경 정리 미흡 등 개선 여지가 공존함.
-- 5.0 ~ 6.9: [보통 (일반 스냅)] - 단순 기록용 인증샷이나 일상 스냅 수준. 구도 불안정, 노출 과부족, 배경 산만함, 초점 아쉬움 등 일반적인 한계가 뚜렷함.
-- 5.0 미만: [개선 필요 (기초 미흡)] - 핵심 피사체 초점 이탈, 흔들림, 노출 실패 등 기초적인 기술적 결함이 큰 사진.
+[점수 평가 기준 (10점 만점 척도)]:
+- 9.0 ~ 10.0: [프로사진작가 및 전문가급] - Commercial portfolio or exhibition quality. Flawless harmony of optics, lighting design, framing, and narrative depth.
+- 8.0 ~ 8.9: [매우 우수] - Skilled photographer level.
+  * 8.0~8.4: Solid, well-executed A-cut with strong optical fundamentals.
+  * 8.5~8.9: Near-commercial excellence with thoughtful staging, but with a minor imperfection in one area.
+- 7.0 ~ 7.9: [우수] - Solid fundamentals, but with clear room for improvement (e.g., flat lighting, awkward limb cropping, distracting background).
+- 5.0 ~ 6.9: [보통 (일반 스냅)] - Casual record shot. Flat lighting, cluttered background, or composition imbalance.
+- < 5.0: [개선 필요 (기초 미흡)] - Critical flaws (missed focus, camera shake, severe exposure failure).
 
-* 점수 인플레이션과 특정 구간(7점대 후반~8점대 초반) 쏠림을 함께 경계하세요. 평범한 스냅이나 아쉬움이 있는 사진은 5~7점대로, 광학 기본기가 훌륭한 깔끔한 A컷은 8점대 초중반으로, 기획과 연출의 깊이까지 겸비한 작품은 8점대 후반~9점대로 자연스러운 변별력을 유지하세요.
-
-평가 항목:
-- composition: 프레이밍, 시선 유도, 균형, 여백, 주제 배치 ([장점]과 [단점] 구분)
-- lighting: 빛의 방향과 질, 노출, 하이라이트/그림자 디테일 ([장점]과 [단점] 구분)
-- color: 색조, 채도, 색 조화와 분위기 ([장점]과 [단점] 구분)
-- technique: 초점/선명도, 흔들림, 심도, 그리고 아래 EXIF 촬영 설정의 적절성 ([장점]과 [단점] 구분)
+Evaluation Fields:
+- composition: Framing, leading lines, balance, negative space ([장점] and [단점] in Korean)
+- lighting: Direction, quality, exposure, highlights/shadows ([장점] and [단점] in Korean)
+- color: Hue, saturation, harmony, mood ([장점] and [단점] in Korean)
+- technique: Sharpness, focus, depth of field, camera settings ([장점] and [단점] in Korean)
 - focus_status: 피규어 눈동자(아이 데칼) 및 안면 조형의 초점 정밀 상태 ('완벽 칼초점', '미세 앞핀', '미세 뒤핀', '초점 이탈', '판별 불가' 중 택1)
-  * 완벽 칼초점: 눈동자 데칼의 경계면과 반사광이 타협 없이 극도로 선명함
-  * 미세 앞핀: 눈동자보다 앞쪽(앞머리 끝, 코끝, 무기)에 초점이 맺힘
-  * 미세 뒤핀: 눈동자보다 뒤쪽(귀, 머리 뒤편, 어깨)에 초점이 맺힘
-  * 초점 이탈: 피규어 얼굴 전반에 핀이 맞지 않거나 흔들림
-- focus_notes: 초점이 맞은 위치와 심도 상태에 대한 1줄 직관적 판정 근거
-- final_score: 위 점수 기준 척도(7: 우수, 8: 매우 우수, 9: 프로/전문가급)를 반영한 종합 점수
-- final_reason: 최종 점수의 객관적 근거 (장점과 단점을 균형 있게 종합하여 점수 이유 서술)
-- strengths: 사진의 주요 장점 목록 (실제 돋보이는 핵심 강점 2~3개)
-- improvements: 사진의 실제 기술적 약점 또는 다음 촬영 시 시도해 볼 만한 발전적 제안 목록 (1~3개, 억지 결함 부풀리기 지양)
+- focus_notes: One-line concise rationale in Korean
+- composition_score, lighting_score, color_score, technique_score: 0.0 ~ 10.0
+- final_score: Holistic score (0.0 ~ 10.0) reflecting overall artistic and technical accomplishment
+- final_reason: Comprehensive summary in Korean explaining the score
+- strengths: 2-3 key strengths in Korean
+- improvements: 1-3 actionable suggestions in Korean
 
 미학 태깅(aesthetic_tags):
 - 아래 8개 범주별로 이미지에서 직접 확인되는 태그를 0~3개 선택하세요.
-- ★미학적 분위기/온도감 필수 판별 규칙:
-  1) mood(분위기): 사진의 정서적 무드와 온도감을 면밀히 분석하여 '차가움', '따뜻함', '청량함', '화사함', '몽환적', '다크·누아르', '시네마틱' 등에서 반드시 1~3개를 필수로 선택하세요 (빈 배열 금지).
-  2) color_impression(색조 인상): 피규어 조명과 피부톤의 색온도를 판별하여 '따뜻한 톤', '차가운 톤', '쿨톤(차가움)', '웜톤(따뜻함)', '파스텔', '비비드 컬러' 등에서 반드시 1~3개를 필수로 선택하세요 (빈 배열 금지).
-  3) light_expression(빛 표현): '자연광', '스튜디오 조명', '확산광', '역광', '부드러운 그림자', '강한 명암' 등에서 반드시 1~3개를 필수로 선택하세요.
-- 허용된 태그 문구를 그대로 사용하고, 문장이나 새 태그를 임의로 만들지 마세요.
-- viewpoint(시점)는 촬영 방향을 판별할 수 있을 때 정면·측면·후면·사선 등을 선택하고, 높이/시점도 함께 표현할 수 있습니다.
-- pose_gaze(포즈·시선)는 인물이나 동물 등 해당 피사체가 보일 때만 적용하세요.
-- narrative_implication(이야기 암시)은 보이는 단서에 한정하고 인물의 신원·관계·사건을 단정하지 마세요.
-- 모든 키를 포함한 객체로 반환하세요.
+- Required categories: mood (1-3 tags), color_impression (1-3 tags), light_expression (1-3 tags).
 {tag_section}
 
-모든 점수는 0.0~10.0 범위의 숫자로 작성하세요. 최종 점수는 네 항목을 기계적으로 단순 산술평균하지 말고 전체 인상과 완성도를 위 점수 기준에 맞춰 반영하세요. EXIF가 없거나 불완전하면 추정하지 말고 이미지에서 확인되는 내용만 평가하세요. 답변의 텍스트 값은 한국어로 작성하세요.
+[시각적 워터마크/하단 프레임 촬영 설정 감지 지침] (Detected Camera Settings / Watermark):
+- If camera settings (body, lens, aperture, shutter speed, ISO) are visually printed in the photo border/watermark, extract them into detected_camera_settings. If absent, set to null.
+- Do not penalize aesthetic margins/letterboxes as composition defects.
 
-[시각적 워터마크/하단 프레임 촬영 설정 감지 지침]
-- WebP 변환 등으로 인해 파일 자체의 EXIF가 비어있더라도, 사진 하단 테두리/여백/워터마크에 카메라 모델명 및 촬영 파라미터(조리개 F값, 셔터스피드, ISO, 초점거리, 렌즈명 등)가 시각적으로 인쇄되어 있는 경우가 있습니다.
-- 만약 해당 텍스트가 사진 내에 명백하게 시각적으로 존재한다면:
-  1. 이를 촬영 기술(technique_notes) 평가의 객관적 근거로 참고하세요.
-  2. detected_camera_settings 필드에 감지된 설정들을 키-값 객체(예: {{"Camera": "SONY A7M4", "Lens": "FE 50mm F1.2 GM", "FNumber": "F/1.4", "ExposureTime": "1/250s", "ISO": "100"}})로 추출하세요.
-  3. 주의: 작가 서명, SNS 아이디, 캐릭터명, 제작사 로고 등은 제외하고 순수 광학 촬영 정보만 추출하세요.
-- 만약 사진에 그러한 인쇄 텍스트가 전혀 없거나 불확실하면 절대로 지어내지 말고 detected_camera_settings를 반드시 null로 두세요.
-- 주의: 하단 프레임/레터박스나 워터마크 영역 자체는 의도된 레이아웃 디자인이므로 구도상 불필요한 여백이나 시선 분산 요소로 간주하여 감점하지 마세요.
+IMPORTANT: All user-facing critique texts (notes, reasons, strengths, improvements) MUST be written in natural, fluent Korean.
 
-촬영 관련 안전 EXIF (GPS, 촬영 시각, 소유자/일련번호 등은 제외됨):
+Safe EXIF Data:
 {camera_settings}
 """
 
@@ -141,70 +116,54 @@ def build_cross_check_prompt(
     photo: Any,
     category_hint: str | None = None,
 ) -> str:
-    """Build figure photo critique prompt for OpenAI cross-check aligned with Gemini's grading standards."""
+    """Build figure photo critique prompt for OpenAI cross-check in concise English with Korean output."""
     safe_exif = getattr(photo, "safe_exif", {})
     camera_settings = json.dumps(safe_exif, ensure_ascii=False, sort_keys=True)
     if not safe_exif:
-        camera_settings = "{} (사용 가능한 안전한 EXIF 촬영 설정 없음)"
+        camera_settings = "{} (No safe EXIF camera settings available)"
 
     if category_hint and category_hint in FIGURE_CATEGORIES:
         cat_info = FIGURE_CATEGORIES[category_hint]
-        category_instruction = f"""[지정된 피규어 촬영 유형: {cat_info['label']}]
-이 사진은 '{cat_info['label']}'({cat_info['description']}) 유형입니다. 아래 특화 심사 기준을 최우선 잣대로 적용하세요:
-- 특화 심사 포인트: {cat_info['focus']}"""
+        category_instruction = f"""[Category: {cat_info['label']}] ({cat_info['description']}). Focus: {cat_info['focus']}"""
     else:
-        category_instruction = """[피규어 촬영 세부 유형 자동 판별 및 분기 심사]
-먼저 사진을 분석하여 다음 4가지 피규어 촬영 유형 중 가장 부합하는 하나를 기준으로 삼고, 해당 유형의 특화 기준을 엄격하게 적용하여 심사하세요:
-1. '접사/디테일' (피규어 얼굴, 눈동자, 무기 등 세부 조형/도색 초근접 촬영)
-   → 중점 기준: 눈동자 데칼의 초정밀 칼초점, 코/귀/머리카락 등 주요 조형이 날아가지 않는 적절한 매크로 심도(너무 얕아서 조형이 뭉개지면 감점), 미세 먼지/마감 관리, 번들거리는 반사광(핫스팟) 억제
-2. '일상/야외 스냅' (자연광 야외 출사, 여행 동행, 카페 등 실제 일상 환경과 상호작용)
-   → 중점 기준: 자연광(역광/측광)의 창의적 활용, 실제 환경과 피규어의 자연스러운 스케일 조화, 계절감 및 일상적 스토리텔링, 자연스러운 여백과 수평
-3. '스튜디오 연출/디오라마' (배경지, 다각도 조명 세팅, 디오라마 세트, 이펙트 파츠 활용)
-   → 중점 기준: 다각도 조명(키/필/림라이트)의 드라마틱한 입체감과 명암비, 디오라마와 피규어의 정교한 스케일 일치, 역동적인 포징, 클리어/이펙트 파츠 투과광
-4. '일반 피규어 촬영' (피규어 본체 전신 또는 상반신을 중심으로 단정하게 담아낸 스탠다드 포토)
-   → 중점 기준: 피규어 원형의 왜곡 없는 렌즈 화각과 프레이밍, 단정한 배경 분리, 자연스러운 광택 및 피부톤 밸런스"""
+        category_instruction = """[Figure Photography Category Classification]
+Analyze the photo and classify into one of the following 4 categories:
+1. '접사/디테일' (Macro/Detail: face, eye decals, fine paint, close-up)
+   Focus: pin-sharp eye decals, appropriate macro depth of field (avoid blurring key facial contours), dust/blemish control, specular hotspot control.
+2. '일상/야외 스냅' (Daily/Outdoor Snap: natural outdoor lighting, café, travel companion)
+   Focus: creative use of natural light (backlight/sidelight), believable scale harmony with real environment, seasonal storytelling, natural framing/horizon.
+3. '스튜디오 연출/디오라마' (Studio Diorama: backdrops, multi-point lighting, diorama props, effect parts)
+   Focus: dimensional lighting (key/fill/rim), scale consistency between diorama and figure, dynamic posing, translucent/effect lighting.
+4. '일반 피규어 촬영' (Standard Figure: clean full-body or upper-body portrait)
+   Focus: distortion-free focal length and framing, clean background separation, natural skin tone and plastic finish balance."""
 
-    return f"""당신은 피규어 및 캐릭터 모델 사진(Figure Photography)의 조형미와 광학적 기술 완성도를 공정하고 정밀하게 진단하는 전문 사진 큐레이터입니다.
-첨부된 이미지에서 직접 관찰되는 시각적·광학적 사실을 바탕으로 편향 없는 균형 잡힌 시각으로 평가하세요.
+    return f"""You are a professional figure photography curator and visual critic.
+Provide an objective, balanced critique based strictly on observed visual and optical facts.
 
 {category_instruction}
 
-[★핵심 심사 원칙: 객관적 변별력 및 스타일 중립성]
-- 과도한 아부도, 인위적인 단점 찾아내기(Nitpicking)도 모두 배제하세요.
-- 하이키/로우키, 얕은 심도/깊은 심도, 타이트 크롭/전경 소품 레이어링은 우열이 없는 '연출 스타일의 선택'입니다. 특정 기법 자체에 가산점이나 감점을 주지 말고, 오직 선택한 연출이 피규어의 조형미와 주제 전달력을 효과적으로 살렸는지, 아니면 시선을 방해했는지로만 평가하세요.
-- 각 비평 항목(composition_critique, lighting_critique)은 반드시 '[장점]'과 '[아쉬운 점]'을 명확히 구분하여 서술하세요. (실질적 결함이 없다면 '[아쉬운 점] 감점할 만한 뚜렷한 결함 없음'으로 표기 가능)
+[Core Principles]:
+- Avoid excessive flattery and artificial nitpicking.
+- Distinguish artistic intent from technical flaws. High-key/low-key, shallow/deep DoF, and tight/wide framing are stylistic choices.
+- In composition_critique and lighting_critique, strictly use the '[장점] ... [아쉬운 점] ...' format in Korean. If an area has no significant flaw, write '[아쉬운 점] 감점할 만한 뚜렷한 결함 없음'.
 
-[사고 흐름 4단계 심사 프로세스]:
-1단계 (구도 및 공간 진단):
-- 프레이밍, 시선 유도, 여백의 균형, 배경 분리 및 공간적 깊이감(3D 입체감 vs 2D 평면감)을 분석하여 composition_critique에 [장점]과 [아쉬운 점]으로 작성하세요.
-2단계 (조명 및 명암 진단):
-- 빛의 방향과 질, 조형의 입체감, 노출 적절성, 번들거림(플라스틱 핫스팟) 제어 및 그림자 디테일을 분석하여 lighting_critique에 [장점]과 [아쉬운 점]으로 작성하세요.
-  ※ 단, 바니슈트/메카닉/클리어 파츠 등 소재 자체의 유광 스펙큘러는 훌륭한 질감 표현이므로 플라스틱 번들거림으로 오판하지 마세요.
-3단계 (색감 및 기술적 정확도 검증):
-- 색조의 조화, 색온도, 그리고 눈동자(아이 데칼)의 초점 핀 정확도(완벽 칼초점 여부) 및 광학 해상력을 검증하세요. (의도된 소품/무기 포커싱 샷은 해당 초점 부위를 기준으로 평가)
-4단계 (종합 척도 판정):
-- 위 4가지 분석 결과를 종합하여 사진의 실제 완성도에 부합하는 [10점 만점 척도]에 따라 최종 score와 reason을 도출하세요.
+[4-Stage Thought Process]:
+1. Composition & Framing: Framing, eye flow, balance, background separation, 3D depth vs 2D flatness.
+2. Lighting & Exposure: Light direction/quality, sculptural dimensionality, exposure, plastic hotspot control, shadow detail. (Glossy materials like bunny suits/mecha/clear parts have natural specular highlights; do not misjudge them as plastic hotspots.)
+3. Color & Optical Sharpness: Color harmony, white balance, eye decal focus sharpness, and optical resolving power.
+4. Holistic Score: Derive final score (0.0 - 10.0) reflecting overall artistic and technical accomplishment.
 
-[점수 평가 기준 (10점 만점 척도 - 변별력 있는 구간 활용)]:
-- 9.0 ~ 10.0: [프로 및 전문가급] - 상업 화보 또는 전문 포트폴리오 수준의 탁월한 완성도. 초점·빛·구도·색감의 통제가 뛰어나며 시각적 몰입감과 연출 완성도가 압도적인 작품. (improvements에 사소한 대안 아이디어를 적었다는 이유만으로 9점대 작품을 8.3~8.5점에 묶어두지 마세요.)
-- 8.0 ~ 8.9: [매우 우수] - 상급 사진가 수준. 주제가 명확하고 완성도가 높으며 시각적 매력이 뛰어남. (8.0~8.4: 탄탄한 상급 A컷 / 8.5~8.9: 화보급에 준하는 수작이나 한 가지 영역에서 미세한 아쉬움이 남는 경우)
-- 7.0 ~ 7.9: [우수] - 기본기가 탄탄하고 잘 찍힌 준수한 사진이나, 평면적인 조명, 평범한 구도, 배경 정리 미흡 등 분명한 개선 여지가 공존함.
-- 5.0 ~ 6.9: [보통 (일반 스냅)] - 단순 기록용 인증샷이나 일상적인 스냅사진 수준. 평면적 조명, 배경 분산, 초점의 아쉬움 등 일반적인 한계가 뚜렷함.
-- 5.0 미만: [개선 필요] - 초점 이탈, 심각한 흔들림, 노출 실패 등 기초적인 기술적 결함이 큰 사진.
+[Scoring Rubric (10-Point Scale)]:
+- 9.0 ~ 10.0: [Professional / Masterpiece] - Commercial portfolio or gallery quality. Masterful control of focus, light, composition, and mood. (Do not cap scores at 8.3~8.5 merely because minor alternative suggestions exist in improvements.)
+- 8.0 ~ 8.9: [Very Good] - Advanced photographer level. Clear subject, high execution. (8.0~8.4: Solid A-cut / 8.5~8.9: Near-commercial excellence with minor shortcoming in one aspect).
+- 7.0 ~ 7.9: [Good / Competent] - Solid fundamentals, but noticeable room for improvement (flat lighting, awkward crop, cluttered background).
+- 5.0 ~ 6.9: [Average Snapshot] - Casual record shot with common snapshot limitations.
+- < 5.0: [Needs Improvement] - Significant technical defects (missed focus, severe shake, blown exposure).
 
-[평가 항목 작성 가이드]:
-- composition_critique: 구도, 여백, 배경 분리에 대해 반드시 '[장점] ... [아쉬운 점] ...' 형식으로 작성
-- lighting_critique: 빛의 방향, 노출, 명암, 입체감에 대해 반드시 '[장점] ... [아쉬운 점] ...' 형식으로 작성
-- score: 위 척도를 공정하게 적용한 최종 종합 점수 (0.0~10.0)
-- reason: 구도·조명·색감·기술의 장점과 개선점을 종합하여 해당 점수를 부여한 명확한 총평 및 이유
-- strengths: 사진에서 실제로 돋보이는 핵심 강점 목록 (1~3개)
-- improvements: 사진의 실제 기술적 약점 또는 다음 촬영 시 시도해 볼 만한 발전적 제안 목록 (1~3개, 억지 결함 부풀리기 지양)
+[Output Language Requirement]:
+- All critique texts (composition_critique, lighting_critique, reason, strengths, improvements) MUST be written in natural, fluent Korean only. Do NOT output Japanese or English in these fields.
 
-[시각적 워터마크/하단 EXIF 프레임 주의사항]:
-- 사진 하단 테두리/여백에 카메라 모델명 및 촬영 파라미터가 인쇄된 'EXIF 정보 프레임(레터박스)'이 있을 수 있습니다.
-- 인쇄된 촬영 정보가 있다면 기술 평가의 근거로 참고하되, 하단 프레임이나 텍스트 자체를 구도 방해 요소나 불필요한 여백으로 간주하여 감점하지 마세요.
-
-촬영 관련 안전 EXIF:
+Safe EXIF Data:
 {camera_settings}
 """
 
