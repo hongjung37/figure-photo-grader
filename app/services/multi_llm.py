@@ -54,8 +54,19 @@ def get_effective_analysis_model(requested_model: str) -> str:
 
 
 def clear_effective_analysis_model() -> None:
-    """Clear the thread-local effective model before invoking analyze_photo."""
+    """Clear the thread-local effective model and sampled scores before invoking analyze_photo."""
     _MULTI_THREAD_LOCAL.effective_model = None
+    _MULTI_THREAD_LOCAL.sampled_scores = None
+
+
+def get_last_sampled_scores() -> list[float] | None:
+    """Return the list of sampled scores from the most recent multi-sample evaluation, if any."""
+    return getattr(_MULTI_THREAD_LOCAL, "sampled_scores", None)
+
+
+def clear_last_sampled_scores() -> None:
+    """Clear the thread-local sampled scores."""
+    _MULTI_THREAD_LOCAL.sampled_scores = None
 
 
 def resolve_task_model(model_spec: str | None = None, default_tier: str = "lite") -> tuple[str, str]:
@@ -179,6 +190,8 @@ def analyze_photo(
 
         if used_model_holder:
             _MULTI_THREAD_LOCAL.effective_model = used_model_holder[0]
+
+        _MULTI_THREAD_LOCAL.sampled_scores = [round(float(a.final_score), 1) for a in results]
 
         scores_str = [round(float(a.final_score), 2) for a in results]
         print(

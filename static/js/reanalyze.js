@@ -231,6 +231,8 @@ async function executeReanalyze(id) {
       newLunaScore: (updatedAnalysis.cross_check_opinion && updatedAnalysis.cross_check_opinion.score != null)
         ? Number(updatedAnalysis.cross_check_opinion.score)
         : null,
+      sampledScores: (Array.isArray(res.sampled_scores) && res.sampled_scores.length) ? res.sampled_scores : null,
+      medianScore: res.median_score != null ? Number(res.median_score) : null,
       timestamp: Date.now()
     };
 

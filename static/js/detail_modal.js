@@ -144,14 +144,43 @@ function openDetailModal(id) {
       const diffColor = diffVal > 0 ? '#059669' : (diffVal < 0 ? '#e11d48' : '#64748b');
       const pModel = fmtModel(reanalyzeDiff.prevModel);
       const nModel = fmtModel(item.model);
-      reanalyzeBannerHtml = `
-        <div style="grid-column: 1 / -1; background: rgba(16,185,129,0.12); border: 1px solid #34d399; border-radius: 10px; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap;">
-          <div style="font-size: 0.86rem; color: var(--text); display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-            <span>✅ <strong>전면 재평가 반영 완료!</strong></span>
-            <span>📊 <b>종합 점수:</b> ${pScore.toFixed(1)}점 → <strong style="color:${diffColor};font-size:0.95rem;">${nScore.toFixed(1)}점 (${diffSign}점)</strong></span>
-            <span>🤖 <b>평가 모델:</b> ${_escapeDetailHtml(pModel)} → <strong style="color:#4f46e5;">${_escapeDetailHtml(nModel)}</strong> <small style="color:var(--muted);">(${_escapeDetailHtml(item.model)})</small></span>
+
+      let samplingRowHtml = '';
+      if (reanalyzeDiff.sampledScores && Array.isArray(reanalyzeDiff.sampledScores) && reanalyzeDiff.sampledScores.length > 1) {
+        const targetChosen = Number(reanalyzeDiff.medianScore != null ? reanalyzeDiff.medianScore : nScore).toFixed(1);
+        let chosenFound = false;
+        const scoreBadges = reanalyzeDiff.sampledScores.map((s, idx) => {
+          const sVal = Number(s).toFixed(1);
+          const isChosen = (!chosenFound && (sVal === targetChosen || idx === Math.floor(reanalyzeDiff.sampledScores.length / 2)));
+          if (isChosen) {
+            chosenFound = true;
+            return `<span style="background:#4f46e5;color:#ffffff;padding:2px 9px;border-radius:6px;font-weight:800;font-size:0.81rem;box-shadow:0 1px 4px rgba(79,70,229,0.35);letter-spacing:0.2px;">🎯 ${sVal}점 (선택)</span>`;
+          }
+          return `<span style="background:rgba(99,102,241,0.12);color:#4338ca;padding:2px 7px;border-radius:6px;font-size:0.78rem;font-weight:600;">${sVal}점</span>`;
+        }).join(' ');
+
+        samplingRowHtml = `
+          <div style="width: 100%; margin-top: 6px; padding-top: 6px; border-top: 1px dashed rgba(52,211,153,0.5); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 0.81rem;">
+            <span>🎯 <b>3회 샘플링 결과:</b></span>
+            <div style="display:inline-flex; gap:6px; align-items:center;">
+              ${scoreBadges}
+            </div>
+            <span style="color:var(--muted); font-size:0.75rem; margin-left:4px;">(단발성 튐을 걸러내고 중앙값을 최종 채택함)</span>
           </div>
-          <button type="button" class="filter-btn" style="padding:2px 8px;font-size:0.74rem;" onclick="window._lastReanalyzeDiff=null; this.parentElement.remove();">확인 ✕</button>
+        `;
+      }
+
+      reanalyzeBannerHtml = `
+        <div class="reanalyze-banner" style="grid-column: 1 / -1; background: rgba(16,185,129,0.12); border: 1px solid #34d399; border-radius: 10px; padding: 10px 14px; display: flex; flex-direction: column; gap: 4px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; width:100%; flex-wrap:wrap; gap:8px;">
+            <div style="font-size: 0.86rem; color: var(--text); display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+              <span>✅ <strong>전면 재평가 반영 완료!</strong></span>
+              <span>📊 <b>종합 점수:</b> ${pScore.toFixed(1)}점 → <strong style="color:${diffColor};font-size:0.95rem;">${nScore.toFixed(1)}점 (${diffSign}점)</strong></span>
+              <span>🤖 <b>평가 모델:</b> ${_escapeDetailHtml(pModel)} → <strong style="color:#4f46e5;">${_escapeDetailHtml(nModel)}</strong> <small style="color:var(--muted);">(${_escapeDetailHtml(item.model)})</small></span>
+            </div>
+            <button type="button" class="filter-btn" style="padding:2px 8px;font-size:0.74rem;" onclick="window._lastReanalyzeDiff=null; this.closest('.reanalyze-banner').remove();">확인 ✕</button>
+          </div>
+          ${samplingRowHtml}
         </div>
       `;
     }

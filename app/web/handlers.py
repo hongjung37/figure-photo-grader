@@ -71,6 +71,7 @@ from app.services.multi_llm import (
     analyze_photo,
     clear_effective_analysis_model,
     get_effective_analysis_model,
+    get_last_sampled_scores,
     resolve_task_model,
     suggest_all_sns_crops,
     suggest_lightroom_advice as _multi_llm_suggest_lightroom_advice,
@@ -558,12 +559,17 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             analysis_dict["model"] = effective_model
             duplicate = False
 
-        self._send_json_ok({
+        sampled_scores = get_last_sampled_scores()
+        res_data = {
             "success": True,
             "record_id": record_id,
             "analysis": analysis_dict,
             "duplicate": duplicate,
-        })
+        }
+        if sampled_scores:
+            res_data["sampled_scores"] = sampled_scores
+            res_data["median_score"] = analysis_dict.get("final_score")
+        self._send_json_ok(res_data)
 
     def _handle_post_reanalyze(self) -> None:
         data = self._read_json_body()
@@ -626,7 +632,12 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         if not updated_record:
             raise RuntimeError("데이터베이스 갱신 후 분석 레코드를 불러오지 못했습니다.")
 
-        self._send_json_ok({"success": True, "analysis": updated_record})
+        sampled_scores = get_last_sampled_scores()
+        res_payload = {"success": True, "analysis": updated_record}
+        if sampled_scores:
+            res_payload["sampled_scores"] = sampled_scores
+            res_payload["median_score"] = updated_record.get("final_score")
+        self._send_json_ok(res_payload)
 
     def _handle_post_update_status(self) -> None:
         data = self._read_json_body()
