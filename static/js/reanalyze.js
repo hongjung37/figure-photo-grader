@@ -96,7 +96,8 @@ function renderReanalyzePanel(item) {
             <div id="reanalyze-tier-wrap-${item.id}" class="reanalyze-tier-select-wrap" onclick="event.stopPropagation()">
               <label class="reanalyze-sublabel" for="reanalyze-tier-${item.id}">적용할 분석 모델 선택:</label>
               <select id="reanalyze-tier-${item.id}" class="select-input reanalyze-select" onclick="event.stopPropagation()" onchange="event.stopPropagation(); if(window.ModelSettings) window.ModelSettings.set('photo_grading', this.value);">
-                <option value="standard" ${savedTier === 'standard' ? 'selected' : ''}>🔍 Gemini Flash-Lite 3.5 (균형 잡힌 표준 화질 평가 - 권장)</option>
+                <option value="luna" ${savedTier === 'luna' ? 'selected' : ''}>🌙 OpenAI GPT-6 Luna (최고 정확도 엄격 심사 - 추천)</option>
+                <option value="standard" ${savedTier === 'standard' ? 'selected' : ''}>🔍 Gemini Flash-Lite 3.5 (균형 잡힌 표준 화질 평가)</option>
                 <option value="lite" ${savedTier === 'lite' ? 'selected' : ''}>⚡ Gemini Flash-Lite 3.1 (초고속 스크리닝)</option>
                 <option value="flash-3.6" ${savedTier === 'flash-3.6' ? 'selected' : ''}>🧪 Gemini Flash 3.6 (실험적 고성능)</option>
                 <option value="flash-3.7" ${savedTier === 'flash-3.7' ? 'selected' : ''}>🚀 Gemini Flash 3.7 (차세대 고속 비평)</option>

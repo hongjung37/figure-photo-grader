@@ -149,7 +149,7 @@ function openModelSettingsModal() {
   const modal = document.getElementById('model-settings-modal');
   if (!modal) return;
   const s = window.ModelSettings ? window.ModelSettings.load() : {
-    photo_grading: 'standard',
+    photo_grading: 'luna',
     lightroom_advice: 'lite',
     sns_crop: 'lite',
     sns_caption: 'lite'
@@ -160,7 +160,7 @@ function openModelSettingsModal() {
   const capEl = document.getElementById('setting-model-caption');
   const statusEl = document.getElementById('model-settings-status');
 
-  if (gEl) gEl.value = s.photo_grading || 'standard';
+  if (gEl) gEl.value = s.photo_grading || 'luna';
   if (lrEl) lrEl.value = s.lightroom_advice || 'lite';
   if (cropEl) cropEl.value = s.sns_crop || 'lite';
   if (capEl) capEl.value = s.sns_caption || 'lite';

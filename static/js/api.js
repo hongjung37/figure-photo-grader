@@ -1,7 +1,7 @@
 // --- API Client Module (static/js/api.js) ---
 
 const DEFAULT_AI_MODEL_SETTINGS = {
-  photo_grading: 'standard',
+  photo_grading: 'luna',
   lightroom_advice: 'lite',
   sns_crop: 'lite',
   sns_caption: 'lite',

@@ -249,7 +249,19 @@ def analyze_photo(
         )
         return median_analysis
 
-    # Standalone evaluation is exclusively handled by Gemini (fallback to DEFAULT_MODEL if non-Gemini model name passed)
+    # Standalone evaluation: dispatch to OpenAI or Gemini based on provider
+    if normalized_provider == "openai" or (model and (model.lower().startswith("gpt") or "luna" in model.lower())):
+        target_openai = OPENAI_MODEL_PRESETS.get((model or "").lower(), model or DEFAULT_OPENAI_MODEL)
+        res = analyze_with_openai(
+            photo=photo,
+            model=target_openai,
+            category_hint=category_hint,
+            api_key=api_key,
+        )
+        _MULTI_THREAD_LOCAL.effective_model = target_openai
+        return res
+
+    # Gemini evaluation (fallback to DEFAULT_MODEL if non-Gemini model name passed)
     target_model = model if (model and model.lower().startswith("gemini")) else DEFAULT_MODEL
     clear_last_used_gemini_model()
     res = analyze_with_gemini(

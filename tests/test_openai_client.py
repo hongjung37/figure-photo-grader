@@ -153,6 +153,7 @@ class OpenAIClientTests(unittest.TestCase):
     def test_analyze_photo_router_provider_dispatch(self) -> None:
         from app.models.analysis import OpenAICrossCheck
         g_res = self._sample_analysis(8.0, "Gemini")
+        o_res = self._sample_analysis(8.4, "OpenAI")
         o_cross = OpenAICrossCheck(
             score=8.4,
             reason="OpenAI",
@@ -163,21 +164,24 @@ class OpenAIClientTests(unittest.TestCase):
         )
 
         with patch("app.services.multi_llm.analyze_with_gemini", return_value=g_res) as mock_g, \
-             patch("app.services.multi_llm.cross_check_with_openai", return_value=o_cross) as mock_cross:
+             patch("app.services.multi_llm.cross_check_with_openai", return_value=o_cross) as mock_cross, \
+             patch("app.services.multi_llm.analyze_with_openai", return_value=o_res) as mock_o:
 
             # Provider: gemini
             res1 = analyze_photo(self.sample_photo, provider="gemini")
             self.assertEqual(res1.final_reason, "Gemini")
             mock_g.assert_called_once()
             mock_cross.assert_not_called()
+            mock_o.assert_not_called()
 
-            # Provider: openai -> routes to Gemini because solo OpenAI is removed
+            # Provider: openai -> routes to analyze_with_openai (Luna standalone supported)
             mock_g.reset_mock()
             mock_cross.reset_mock()
+            mock_o.reset_mock()
             res2 = analyze_photo(self.sample_photo, provider="openai")
-            self.assertEqual(res2.final_reason, "Gemini")
-            mock_g.assert_called_once()
-            mock_cross.assert_not_called()
+            self.assertEqual(res2.final_reason, "OpenAI")
+            mock_g.assert_not_called()
+            mock_o.assert_called_once()
 
             # Provider: ensemble -> preserves Gemini 8.0, attaches OpenAI 8.4 cross-check
             mock_g.reset_mock()
@@ -478,15 +482,15 @@ class OpenAIClientTests(unittest.TestCase):
             mock_batch_analyze.assert_called_once_with(self.sample_photo, provider="ensemble", model=ALL_MODEL_PRESETS["ensemble"], category_hint=None)
 
     def test_multi_llm_analyze_photo_non_gemini_model_fallback(self) -> None:
-        """Verify that when a non-Gemini model is passed for standalone photo grading, it safely falls back to DEFAULT_MODEL."""
+        """Verify that when an unsupported non-Gemini model is passed to provider=gemini, it safely falls back to DEFAULT_MODEL."""
         from app.config import DEFAULT_MODEL
         from app.services.multi_llm import analyze_photo
 
         sample_res = self._sample_analysis(8.0, "Good")
 
-        # Non-gemini model string (e.g. gpt-6-luna from --tier luna): safely falls back to DEFAULT_MODEL avoiding 404
+        # Unsupported non-gemini model string to provider=gemini: safely falls back to DEFAULT_MODEL avoiding 404
         with patch("app.services.multi_llm.analyze_with_gemini", return_value=sample_res) as mock_gemini:
-            res = analyze_photo(self.sample_photo, provider="gemini", model="gpt-6-luna")
+            res = analyze_photo(self.sample_photo, provider="gemini", model="unsupported-claude-model")
             self.assertEqual(res.final_score, 8.0)
             mock_gemini.assert_called_once_with(
                 photo=self.sample_photo,
@@ -494,14 +498,15 @@ class OpenAIClientTests(unittest.TestCase):
                 category_hint=None,
             )
 
-        # Provider: openai without ensemble: also routes safely to Gemini DEFAULT_MODEL
-        with patch("app.services.multi_llm.analyze_with_gemini", return_value=sample_res) as mock_gemini:
+        # Provider: openai with luna: routes to analyze_with_openai
+        with patch("app.services.multi_llm.analyze_with_openai", return_value=sample_res) as mock_openai:
             res2 = analyze_photo(self.sample_photo, provider="openai", model="gpt-6-luna")
             self.assertEqual(res2.final_score, 8.0)
-            mock_gemini.assert_called_once_with(
+            mock_openai.assert_called_once_with(
                 photo=self.sample_photo,
-                model=DEFAULT_MODEL,
+                model="gpt-6-luna",
                 category_hint=None,
+                api_key=None,
             )
 
 
