@@ -48,6 +48,44 @@ def compute_dhash_from_bytes(image_bytes: bytes, hash_size: int = 8) -> int:
         return diff
 
 
+def compute_color_sig_from_bytes(image_bytes: bytes) -> int:
+    """Compute 48-bit 2-zone RGB signature (24-bit center 50% crop RGB + 24-bit full image RGB)."""
+    with Image.open(BytesIO(image_bytes)) as img:
+        rgb = img.convert("RGB").resize((16, 16), Image.Resampling.BILINEAR)
+        raw = rgb.tobytes()
+        fr = fg = fb = 0
+        cr = cg = cb = 0
+        for r in range(16):
+            for c in range(16):
+                idx = (r * 16 + c) * 3
+                rv, gv, bv = raw[idx], raw[idx + 1], raw[idx + 2]
+                fr += rv
+                fg += gv
+                fb += bv
+                if 4 <= r < 12 and 4 <= c < 12:
+                    cr += rv
+                    cg += gv
+                    cb += bv
+        fr //= 256
+        fg //= 256
+        fb //= 256
+        cr //= 64
+        cg //= 64
+        cb //= 64
+        return (cr << 40) | (cg << 32) | (cb << 24) | (fr << 16) | (fg << 8) | fb
+
+
+def color_sig_distance(sig1: int, sig2: int) -> tuple[float, float]:
+    """Return Euclidean RGB distance for (center_crop, full_image) between two 48-bit color signatures."""
+    cr1, cg1, cb1 = (sig1 >> 40) & 0xFF, (sig1 >> 32) & 0xFF, (sig1 >> 24) & 0xFF
+    fr1, fg1, fb1 = (sig1 >> 16) & 0xFF, (sig1 >> 8) & 0xFF, sig1 & 0xFF
+    cr2, cg2, cb2 = (sig2 >> 40) & 0xFF, (sig2 >> 32) & 0xFF, (sig2 >> 24) & 0xFF
+    fr2, fg2, fb2 = (sig2 >> 16) & 0xFF, (sig2 >> 8) & 0xFF, sig2 & 0xFF
+    c_dist = math.sqrt((cr1 - cr2) ** 2 + (cg1 - cg2) ** 2 + (cb1 - cb2) ** 2)
+    f_dist = math.sqrt((fr1 - fr2) ** 2 + (fg1 - fg2) ** 2 + (fb1 - fb2) ** 2)
+    return c_dist, f_dist
+
+
 def hamming_distance(h1: int, h2: int) -> int:
     """Compute Hamming distance between two 64-bit perceptual hashes."""
     return bin((int(h1) ^ int(h2)) & 0xFFFFFFFFFFFFFFFF).count("1")
@@ -83,6 +121,7 @@ class PreparedPhoto:
     thumbnail_bytes: bytes | None = None
     dhash: int | None = None
     captured_at: str | None = None
+    color_sig: int | None = None
 
 
 def make_thumbnail_bytes(image_path_or_bytes: Path | bytes | str, max_dim: int = 800, quality: int = 82) -> bytes:
@@ -319,6 +358,7 @@ def prepare_photo_from_bytes(data: bytes, filename: str) -> PreparedPhoto:
         thumb_img.save(thumb_buf, format="WEBP", quality=82)
         thumbnail_bytes = thumb_buf.getvalue()
         dhash_val = compute_dhash_from_bytes(thumbnail_bytes)
+        color_sig_val = compute_color_sig_from_bytes(thumbnail_bytes)
 
     return PreparedPhoto(
         source_filename=filename,
@@ -332,6 +372,7 @@ def prepare_photo_from_bytes(data: bytes, filename: str) -> PreparedPhoto:
         thumbnail_bytes=thumbnail_bytes,
         dhash=dhash_val,
         captured_at=captured_at,
+        color_sig=color_sig_val,
     )
 
 

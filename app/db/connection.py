@@ -125,6 +125,8 @@ def ensure_db_columns(db_path: Path | str, force: bool = False) -> None:
             conn.execute("ALTER TABLE photo_analyses ADD COLUMN user_score REAL")
         if "captured_at" not in cols:
             conn.execute("ALTER TABLE photo_analyses ADD COLUMN captured_at TEXT")
+        if "color_sig" not in cols:
+            conn.execute("ALTER TABLE photo_analyses ADD COLUMN color_sig INTEGER")
 
         missing_capture_times = []
         if {"sha256", "image_format", "captured_at"} <= set(cols):
@@ -169,6 +171,18 @@ def ensure_db_columns(db_path: Path | str, force: bool = False) -> None:
                 try:
                     dh = compute_dhash_from_bytes(mthumb)
                     conn.execute("UPDATE photo_analyses SET dhash = ? WHERE id = ?", (dhash_to_sqlite(dh), mid))
+                except Exception:
+                    pass
+
+        missing_csig = conn.execute(
+            "SELECT id, thumbnail FROM photo_analyses WHERE color_sig IS NULL AND thumbnail IS NOT NULL"
+        ).fetchall()
+        if missing_csig:
+            from app.services.image_processor import compute_color_sig_from_bytes
+            for mid, mthumb in missing_csig:
+                try:
+                    csig = compute_color_sig_from_bytes(mthumb)
+                    conn.execute("UPDATE photo_analyses SET color_sig = ? WHERE id = ?", (csig, mid))
                 except Exception:
                     pass
     try:

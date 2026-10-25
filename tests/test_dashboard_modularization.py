@@ -19,6 +19,9 @@ class DashboardModularizationTests(unittest.TestCase):
         # 1. are_filenames_sequential
         self.assertTrue(burst_clustering.are_filenames_sequential("IMG_0100.jpg", "IMG_0101.jpg"))
         self.assertTrue(burst_clustering.are_filenames_sequential("sample (1).png", "sample.png"))
+        self.assertFalse(burst_clustering.are_filenames_sequential("IMG_0118.jpg", "IMG_0121.jpg"))
+        self.assertFalse(burst_clustering.are_filenames_sequential("IMG_0118.jpg", "IMG_0120.jpg"))
+        self.assertFalse(burst_clustering.are_filenames_sequential("photo_01.jpg", "photo_50.jpg"))
         self.assertFalse(burst_clustering.are_filenames_sequential("foo.jpg", "bar.jpg"))
 
         # 2. re-export in photo_dashboard
@@ -26,6 +29,50 @@ class DashboardModularizationTests(unittest.TestCase):
         self.assertIs(photo_dashboard.cluster_burst_groups, burst_clustering.cluster_burst_groups)
         self.assertIs(photo_dashboard.are_burst_pair, burst_clustering.are_burst_pair)
         self.assertIs(photo_dashboard.parse_photo_time, burst_clustering.parse_photo_time)
+
+    def test_burst_supplements_1_2_3_vetoes_and_complete_linkage(self):
+        # Supplement 2: parse_photo_time ignores created_at fallback
+        self.assertIsNone(burst_clustering.parse_photo_time({"created_at": "2026-10-14T10:00:00+00:00"}))
+        self.assertIsNotNone(burst_clustering.parse_photo_time({"captured_at": "2026-10-14T10:00:00"}))
+
+        # Supplement 2: EXIF time gap > 10 min vetoes even if dhash is identical
+        p_t1 = {"id": 1, "filename": "A.jpg", "dhash": 0x1111, "captured_at": "2026-10-14T10:00:00"}
+        p_t2 = {"id": 2, "filename": "B.jpg", "dhash": 0x1111, "captured_at": "2026-10-14T10:30:00"}
+        self.assertFalse(burst_clustering.are_burst_pair(p_t1, p_t2, base_max_dist=15))
+
+        # Supplement 2: FocalLength gap > 20% vetoes
+        p_fl1 = {"id": 1, "filename": "A.jpg", "dhash": 0x1111, "exif": {"FocalLength": 50.0}}
+        p_fl2 = {"id": 2, "filename": "B.jpg", "dhash": 0x1111, "exif": {"FocalLength": 70.0}}
+        self.assertFalse(burst_clustering.are_burst_pair(p_fl1, p_fl2, base_max_dist=15))
+
+        # Supplement 2: Same camera prefix with large shutter number gap (> 10) vetoes
+        p_cam1 = {"id": 1, "filename": "SG_02692.jpg", "dhash": 0x1111}
+        p_cam2 = {"id": 2, "filename": "SG_02715.jpg", "dhash": 0x1111}
+        self.assertFalse(burst_clustering.are_burst_pair(p_cam1, p_cam2, base_max_dist=15))
+
+        # Supplement 3: Orientation mismatch (Landscape vs Portrait) vetoes
+        p_land = {"id": 1, "filename": "A.jpg", "dhash": 0x1111, "width": 4000, "height": 3000}
+        p_port = {"id": 2, "filename": "B.jpg", "dhash": 0x1111, "width": 3000, "height": 4000}
+        self.assertFalse(burst_clustering.are_burst_pair(p_land, p_port, base_max_dist=15))
+
+        # Supplement 3: Color signature mismatch vetoes
+        sig_red = (220 << 40) | (20 << 32) | (20 << 24) | (200 << 16) | (20 << 8) | 20
+        sig_blue = (20 << 40) | (20 << 32) | (220 << 24) | (20 << 16) | (20 << 8) | 200
+        p_red = {"id": 1, "filename": "A.jpg", "dhash": 0x1111, "color_sig": sig_red}
+        p_blue = {"id": 2, "filename": "B.jpg", "dhash": 0x1111, "color_sig": sig_blue}
+        self.assertFalse(burst_clustering.are_burst_pair(p_red, p_blue, base_max_dist=15))
+
+        # Supplement 1: Complete-Linkage prevents A-B-C transitive chaining when dist(A, C) > threshold
+        # A = 0, B = 10 bits set (dist(A,B)=10 <= 12), C = 20 bits set (dist(B,C)=10 <= 12, dist(A,C)=20 > 12)
+        items = [
+            {"id": 1, "filename": "X.jpg", "dhash": 0, "final_score": 8.0},
+            {"id": 2, "filename": "Y.jpg", "dhash": (1 << 10) - 1, "final_score": 8.2},
+            {"id": 3, "filename": "Z.jpg", "dhash": (1 << 20) - 1, "final_score": 7.9},
+        ]
+        clustered = burst_clustering.cluster_burst_groups(items, max_hamming_dist=12)
+        # Only 2 items can form a group, the 3rd must not be chained into a 3-item group
+        burst_totals = [it["burst_total"] for it in clustered]
+        self.assertNotIn(3, burst_totals)
 
     def test_darkroom_theme_and_static_files(self):
         css_path = PROJECT_ROOT / "static/dashboard.css"

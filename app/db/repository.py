@@ -18,6 +18,7 @@ from app.db.connection import (
 from app.models.analysis import AESTHETIC_TAG_CATEGORIES, CrossCheckOpinion, PhotoAnalysis, get_score_grade
 from app.services.image_processor import (
     PreparedPhoto,
+    compute_color_sig_from_bytes,
     compute_dhash_from_bytes,
     dhash_from_sqlite,
     dhash_to_sqlite,
@@ -62,7 +63,8 @@ def save_analysis(
             ("sns_advice_json", "TEXT"),
             ("dhash", "INTEGER"),
             ("user_score", "REAL"),
-                ("captured_at", "TEXT"),
+            ("captured_at", "TEXT"),
+            ("color_sig", "INTEGER"),
         ):
             if col_name not in existing_cols:
                 try:
@@ -81,11 +83,18 @@ def save_analysis(
             except Exception:
                 dhash_to_save = None
 
+        color_sig_to_save = getattr(photo, "color_sig", None)
+        if color_sig_to_save is None and thumb_data:
+            try:
+                color_sig_to_save = compute_color_sig_from_bytes(thumb_data)
+            except Exception:
+                color_sig_to_save = None
+
         cursor = connection.execute(
             """INSERT INTO photo_analyses (
                 sha256, source_filename, width, height, image_format,
-                model, exif_json, analysis_json, created_at, thumbnail, dhash, captured_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                model, exif_json, analysis_json, created_at, thumbnail, dhash, captured_at, color_sig
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 photo.sha256,
                 photo.source_filename,
@@ -99,6 +108,7 @@ def save_analysis(
                 thumb_data,
                 dhash_to_sqlite(dhash_to_save),
                 photo.captured_at,
+                color_sig_to_save,
             ),
         )
         record_id = int(cursor.lastrowid)
@@ -144,7 +154,7 @@ def get_all_analyses(db_path: Path, max_hamming_dist: int = 15) -> list[dict]:
             """SELECT id, sha256, source_filename, width, height, image_format,
                       model, exif_json, analysis_json, created_at,
                       lr_advice_json, sns_advice_json, review_status,
-                      user_notes, dhash, user_score, captured_at
+                      user_notes, dhash, user_score, captured_at, color_sig
                FROM photo_analyses ORDER BY id DESC"""
         ).fetchall()
 
@@ -236,6 +246,13 @@ def _format_analysis_row(
         except Exception:
             dhash_val = None
 
+    color_sig_val = int(row["color_sig"]) if "color_sig" in row.keys() and row["color_sig"] is not None else None
+    if color_sig_val is None and "thumbnail" in row.keys() and row["thumbnail"]:
+        try:
+            color_sig_val = compute_color_sig_from_bytes(row["thumbnail"])
+        except Exception:
+            color_sig_val = None
+
     final_score = float(analysis_data.get("final_score", 0))
     tags = tags_dict if tags_dict is not None else analysis_data.get("aesthetic_tags", {})
     return {
@@ -274,6 +291,7 @@ def _format_analysis_row(
         "sns_advice": sns_advice,
         "exif": exif_data,
         "dhash": dhash_val,
+        "color_sig": color_sig_val,
     }
 
 
