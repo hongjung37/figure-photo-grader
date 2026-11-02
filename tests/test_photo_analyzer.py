@@ -1623,6 +1623,101 @@ class PhotoAnalyzerTests(unittest.TestCase):
             self.assertEqual(saved_row["analysis_mode"], "fast")
             self.assertEqual(saved_row["final_score"], 8.5)
 
+    def test_date_scoped_filtering_and_stats(self) -> None:
+        from app.db.repository import filter_analyses_by_date, get_focal_stats, get_tag_stats
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            db_path = Path(temporary_directory) / "date_scope.sqlite3"
+            img1 = Path(temporary_directory) / "d1.jpg"
+            img2 = Path(temporary_directory) / "d2.jpg"
+            self._make_jpeg(img1, with_exif=True)
+            self._make_jpeg(img2, with_exif=False)
+            p1 = prepare_photo(img1)
+            p2 = prepare_photo(img2)
+            object.__setattr__(p1, "captured_at", "2026-10-10T14:00:00")
+            object.__setattr__(p2, "captured_at", None)
+
+            a1 = self._valid_analysis().model_copy(update={"final_score": 9.0})
+            a2 = self._valid_analysis().model_copy(update={"final_score": 7.0})
+            save_analysis(db_path, p1, "gpt-6-luna", a1)
+            save_analysis(db_path, p2, "gpt-6-luna", a2)
+
+            tag_oct = get_tag_stats(db_path, min_count=1, date_basis="captured", date_from="2026-10-01", date_to="2026-10-31")
+            self.assertEqual(tag_oct["total_photos"], 1)
+
+            tag_missing = get_tag_stats(db_path, min_count=1, date_basis="captured_missing")
+            self.assertEqual(tag_missing["total_photos"], 1)
+
+            focal_oct = get_focal_stats(db_path, min_count=1, date_basis="captured", date_from="2026-10-10", date_to="2026-10-10")
+            self.assertEqual(focal_oct["total_photos"], 1)
+
+            items = [
+                {"id": 1, "captured_at": "2026-09-26T12:00:00", "created_at": "2026-10-18T10:00:00+00:00"},
+                {"id": 2, "captured_at": None, "created_at": "2026-11-02T05:00:00+00:00"},
+            ]
+            self.assertEqual(len(filter_analyses_by_date(items, "captured", "2026-09-01", "2026-09-30")), 1)
+            self.assertEqual(len(filter_analyses_by_date(items, "captured_missing")), 1)
+
+    def test_collections_crud_and_scoped_stats(self) -> None:
+        from app.db.repository import (
+            create_collection,
+            delete_collection,
+            filter_analyses_by_collection,
+            get_all_analyses,
+            get_all_collections,
+            get_focal_stats,
+            get_tag_stats,
+            rename_collection,
+            update_collection_items,
+        )
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            db_path = Path(temporary_directory) / "collections.sqlite3"
+            img1 = Path(temporary_directory) / "c1.jpg"
+            img2 = Path(temporary_directory) / "c2.jpg"
+            self._make_jpeg(img1, with_exif=True)
+            self._make_jpeg(img2, with_exif=True)
+            p1 = prepare_photo(img1)
+            p2 = prepare_photo(img2)
+
+            a1 = self._valid_analysis().model_copy(update={"final_score": 9.2})
+            a2 = self._valid_analysis().model_copy(update={"final_score": 7.4})
+            id1 = save_analysis(db_path, p1, "gpt-6-luna", a1)
+            id2 = save_analysis(db_path, p2, "gpt-6-luna", a2)
+
+            col = create_collection(db_path, "2026 가을 원페")
+            col_id = col["id"]
+            self.assertEqual(col["name"], "2026 가을 원페")
+
+            res_add = update_collection_items(db_path, col_id, [id1], action="add")
+            self.assertIsNotNone(res_add)
+            self.assertEqual(res_add["count"], 1)
+
+            cols = get_all_collections(db_path)
+            self.assertEqual(len(cols), 1)
+            self.assertEqual(cols[0]["count"], 1)
+
+            all_rows = get_all_analyses(db_path)
+            by_id = {r["id"]: r for r in all_rows}
+            self.assertEqual(by_id[id1]["collection_ids"], [col_id])
+            self.assertEqual(by_id[id2]["collection_ids"], [])
+
+            self.assertEqual(len(filter_analyses_by_collection(all_rows, str(col_id))), 1)
+            self.assertEqual(len(filter_analyses_by_collection(all_rows, "uncollected")), 1)
+
+            scoped_tags = get_tag_stats(db_path, min_count=1, collection_id=str(col_id))
+            self.assertEqual(scoped_tags["total_photos"], 1)
+            self.assertAlmostEqual(scoped_tags["top_ai_tags"][0]["avg_ai_score"], 9.2, places=1)
+
+            scoped_focal = get_focal_stats(db_path, min_count=1, collection_id="uncollected")
+            self.assertEqual(scoped_focal["total_photos"], 1)
+
+            self.assertTrue(rename_collection(db_path, col_id, "원페 A컷 앨범"))
+            self.assertEqual(get_all_collections(db_path)[0]["name"], "원페 A컷 앨범")
+
+            self.assertTrue(delete_collection(db_path, col_id))
+            self.assertEqual(len(get_all_collections(db_path)), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

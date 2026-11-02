@@ -94,7 +94,26 @@ const mockElements = {
   'upload-analysis-mode': { value: 'full' },
   'upload-mode-full-btn': { style: {} },
   'upload-mode-fast-btn': { style: {} },
-  'upload-mode-hint': { innerHTML: '' }
+  'upload-mode-hint': { innerHTML: '' },
+  'date-scope-panel': { style: {} },
+  'date-scope-from': { value: '' },
+  'date-scope-to': { value: '' },
+  'btn-clear-date-scope': { style: {} },
+  'date-session-chips': { innerHTML: '' },
+  'active-date-scope-summary': { style: {}, textContent: '' },
+  'date-basis-smart': { classList: { toggle: () => {} } },
+  'date-basis-captured': { classList: { toggle: () => {} } },
+  'date-basis-created': { classList: { toggle: () => {} } },
+  'collection-scope-chips': { innerHTML: '' },
+  'collection-manage-btns': { style: {} },
+  'batch-select-bar': { style: {} },
+  'batch-selected-count': { textContent: '' },
+  'batch-target-collection': { innerHTML: '', value: '' },
+  'btn-batch-remove-from-col': { style: {} },
+  'btn-toggle-batch-select': { style: {}, textContent: '' },
+  'upload-collection-select': { innerHTML: '', value: '' },
+  'upload-new-collection-name': { style: {}, value: '', focus: () => {} },
+  'upload-auto-folder-collection': { checked: true }
 };
 
 const windowObj = { addEventListener: () => {} };
@@ -313,6 +332,38 @@ const fastCardHtml = vm.runInContext('renderGalleryCard(' + JSON.stringify(fastI
 if (!fastCardHtml.includes('⚡ 경량')) {
   throw new Error('renderGalleryCard did not render ⚡ 경량 badge for fast item');
 }
+
+// 8) Date Scope (Phase 1) filtering & Scoped Insights
+vm.runInContext('allData = ' + JSON.stringify(sampleItems) + '; window.allData = allData;', ctx);
+vm.runInContext('setDateBasis("captured"); selectDateSession("2026-10-10");', ctx);
+const scopedCaptured = vm.runInContext('getScopedData()', ctx);
+if (scopedCaptured.length !== 1 || scopedCaptured[0].id !== 1) {
+  throw new Error('selectDateSession("2026-10-10") with captured basis failed to scope to item 1');
+}
+const scopedFocalStats = vm.runInContext('computeClientFocalStats(1)', ctx);
+if (scopedFocalStats.totalPhotos !== 1 || !scopedFocalStats.bestBand || scopedFocalStats.bestBand.band_key !== 'portrait_85') {
+  throw new Error('computeClientFocalStats failed to respect active date scope');
+}
+vm.runInContext('clearDateScope(); setDateBasis("smart");', ctx);
+if (vm.runInContext('getScopedData().length', ctx) !== 2) {
+  throw new Error('clearDateScope() failed to restore full dataset');
+}
+
+// 9) Phase 2: Virtual Collections (Many-to-Many Albums) & Scoped Stats
+const itemsWithCols = sampleItems.map((it, idx) => Object.assign({}, it, { collection_ids: idx === 0 ? [10] : [] }));
+vm.runInContext('allData = ' + JSON.stringify(itemsWithCols) + '; window.allData = allData;', ctx);
+vm.runInContext('allCollections = [{id: 10, name: "아키하바라 출사", count: 1}]; window.allCollections = allCollections;', ctx);
+vm.runInContext('renderCollectionChips(); setCollectionFilter("10");', ctx);
+const scopedCol10 = vm.runInContext('getScopedData()', ctx);
+if (scopedCol10.length !== 1 || scopedCol10[0].id !== 1) {
+  throw new Error('setCollectionFilter("10") failed to scope to collection #10');
+}
+vm.runInContext('setCollectionFilter("uncollected");', ctx);
+const scopedUncollected = vm.runInContext('getScopedData()', ctx);
+if (scopedUncollected.length !== 1 || scopedUncollected[0].id !== 2) {
+  throw new Error('setCollectionFilter("uncollected") failed to scope to uncollected item #2');
+}
+vm.runInContext('setCollectionFilter("all");', ctx);
 
 process.stdout.write('OK');
 """

@@ -54,9 +54,17 @@ function updateThemeButton(isDark) {
 
 // --- Core State ---
 let allData = (typeof window !== 'undefined' && window.allData) || [];
+let allCollections = (typeof window !== 'undefined' && window.allCollections) || [];
+let currentCollectionFilter = 'all'; // 'all' | 'unassigned' | '<collection_id>'
+let isBatchSelectMode = false;
+let selectedBatchIds = new Set();
 let currentFilter = 'all';
 let currentCatFilter = 'all';
 let currentFocalFilter = 'all'; // 'all' | 'wide_24' | 'semi_wide_35' | 'standard_50' | 'portrait_85' | 'tele_100' | 'unknown' | 'mm:<int>'
+let currentDateBasis = 'smart'; // 'smart' | 'captured' | 'created'
+let currentDatePreset = 'all';  // 'all' | 'today' | '7d' | '30d' | 'this_month' | 'missing_exif' | 'custom' | 'session'
+let currentDateFrom = '';       // 'YYYY-MM-DD'
+let currentDateTo = '';         // 'YYYY-MM-DD'
 let currentSort = 'score_desc';
 let currentDetailId = null;
 let currentBurstDist = 15;
@@ -66,6 +74,571 @@ let selectedScoreBin = null; // 0.5-point or 0.1-point bin key (e.g., '8.0' or '
 let scoreDistMetric = 'ai'; // 'ai' | 'user' | 'overlay'
 let scoreDistStep = '0.5'; // '0.5' | '0.1'
 let scoreDistCollapsed = false;
+
+window.allCollections = allCollections;
+window.currentCollectionFilter = currentCollectionFilter;
+
+// --- Collection Scope & Batch Selection Helpers (Phase 2) ---
+function isCollectionScopeActive() {
+  return Boolean(currentCollectionFilter && currentCollectionFilter !== 'all');
+}
+window.isCollectionScopeActive = isCollectionScopeActive;
+
+function matchCollectionScope(item) {
+  if (!item) return false;
+  if (!currentCollectionFilter || currentCollectionFilter === 'all') return true;
+  const cids = Array.isArray(item.collection_ids) ? item.collection_ids.map(Number) : [];
+  if (currentCollectionFilter === 'unassigned' || currentCollectionFilter === 'uncollected') {
+    return cids.length === 0;
+  }
+  const targetId = parseInt(currentCollectionFilter, 10);
+  if (Number.isNaN(targetId)) return true;
+  return cids.includes(targetId);
+}
+window.matchCollectionScope = matchCollectionScope;
+
+function getCollectionNameById(cid) {
+  const num = Number(cid);
+  const found = (allCollections || []).find(c => Number(c.id) === num);
+  return found ? found.name : `컬렉션 #${cid}`;
+}
+window.getCollectionNameById = getCollectionNameById;
+
+// --- Date Scope Helpers (Phase 1) ---
+function toLocalDateStr(isoStr) {
+  if (!isoStr) return null;
+  const s = String(isoStr).trim();
+  if (!s) return null;
+  // Naive ISO date/datetime (like EXIF DateTimeOriginal '2026-11-01T14:23:05') is already camera local date
+  if (/^\d{4}-\d{2}-\d{2}/.test(s) && !/(Z|[+-]\d{2}:?\d{2})$/.test(s.slice(10))) {
+    return s.slice(0, 10);
+  }
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) {
+    return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : null;
+  }
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function getItemDateStr(item, basis) {
+  if (!item) return null;
+  const b = basis || currentDateBasis || 'smart';
+  const cap = toLocalDateStr(item.captured_at);
+  const cre = toLocalDateStr(item.created_at);
+  if (b === 'captured') return cap;
+  if (b === 'created') return cre;
+  return cap || cre;
+}
+window.getItemDateStr = getItemDateStr;
+
+function isDateOnlyScopeActive() {
+  return currentDatePreset !== 'all' || Boolean(currentDateFrom) || Boolean(currentDateTo);
+}
+
+function isDateScopeActive() {
+  return isCollectionScopeActive() || isDateOnlyScopeActive();
+}
+window.isDateScopeActive = isDateScopeActive;
+
+function matchDateScope(item) {
+  if (!item) return false;
+  if (currentDatePreset === 'missing_exif') {
+    return !toLocalDateStr(item.captured_at);
+  }
+  if (!isDateOnlyScopeActive()) return true;
+  const dStr = getItemDateStr(item, currentDateBasis);
+  if (!dStr) return false;
+  if (currentDateFrom && dStr < currentDateFrom) return false;
+  if (currentDateTo && dStr > currentDateTo) return false;
+  return true;
+}
+window.matchDateScope = matchDateScope;
+
+function matchGlobalScope(item) {
+  return matchCollectionScope(item) && matchDateScope(item);
+}
+window.matchGlobalScope = matchGlobalScope;
+
+function getScopedData(sourceList) {
+  const src = Array.isArray(sourceList) ? sourceList : (Array.isArray(allData) ? allData : []);
+  if (!isDateScopeActive()) return src;
+  return src.filter(matchGlobalScope);
+}
+window.getScopedData = getScopedData;
+
+function getDateScopeLabel() {
+  const parts = [];
+  if (isCollectionScopeActive()) {
+    if (currentCollectionFilter === 'unassigned') {
+      parts.push('🗂️ 미분류 사진');
+    } else {
+      parts.push(`🗂️ 컬렉션: ${getCollectionNameById(currentCollectionFilter)}`);
+    }
+  }
+  if (isDateOnlyScopeActive()) {
+    const basisLabel = currentDateBasis === 'captured' ? '촬영일' : (currentDateBasis === 'created' ? '분석일' : '스마트');
+    if (currentDatePreset === 'missing_exif') {
+      parts.push('EXIF 촬영일 미기록');
+    } else if (currentDateFrom && currentDateTo && currentDateFrom === currentDateTo) {
+      parts.push(`${basisLabel}: ${currentDateFrom} 단일 세션`);
+    } else if (currentDateFrom && currentDateTo) {
+      parts.push(`${basisLabel}: ${currentDateFrom} ~ ${currentDateTo}`);
+    } else if (currentDateFrom) {
+      parts.push(`${basisLabel}: ${currentDateFrom} 이후`);
+    } else if (currentDateTo) {
+      parts.push(`${basisLabel}: ~ ${currentDateTo} 이전`);
+    }
+  }
+  return parts.length ? parts.join(' · ') : '전체 기간';
+}
+window.getDateScopeLabel = getDateScopeLabel;
+
+function formatTodayOffset(daysAgo) {
+  const d = new Date();
+  d.setDate(d.getDate() - (daysAgo || 0));
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function setDateBasis(basis) {
+  currentDateBasis = (basis === 'captured' || basis === 'created') ? basis : 'smart';
+  window.currentDateBasis = currentDateBasis;
+  ['smart', 'captured', 'created'].forEach(k => {
+    const btn = document.getElementById(`date-basis-${k}`);
+    if (btn) btn.classList.toggle('active', k === currentDateBasis);
+  });
+  applyDateScopeChange();
+}
+window.setDateBasis = setDateBasis;
+
+function setDatePreset(preset, btn) {
+  currentDatePreset = preset || 'all';
+  window.currentDatePreset = currentDatePreset;
+  const today = formatTodayOffset(0);
+  if (currentDatePreset === 'all' || currentDatePreset === 'missing_exif') {
+    currentDateFrom = '';
+    currentDateTo = '';
+  } else if (currentDatePreset === 'today') {
+    currentDateFrom = today;
+    currentDateTo = today;
+  } else if (currentDatePreset === '7d') {
+    currentDateFrom = formatTodayOffset(6);
+    currentDateTo = today;
+  } else if (currentDatePreset === '30d') {
+    currentDateFrom = formatTodayOffset(29);
+    currentDateTo = today;
+  } else if (currentDatePreset === 'this_month') {
+    currentDateFrom = `${today.slice(0, 7)}-01`;
+    currentDateTo = today;
+  }
+  const fromEl = document.getElementById('date-scope-from');
+  const toEl = document.getElementById('date-scope-to');
+  if (fromEl) fromEl.value = currentDateFrom;
+  if (toEl) toEl.value = currentDateTo;
+  applyDateScopeChange();
+}
+window.setDatePreset = setDatePreset;
+
+function onCustomDateRangeChange() {
+  const fromEl = document.getElementById('date-scope-from');
+  const toEl = document.getElementById('date-scope-to');
+  currentDateFrom = fromEl ? (fromEl.value || '').trim() : '';
+  currentDateTo = toEl ? (toEl.value || '').trim() : '';
+  if (!currentDateFrom && !currentDateTo) {
+    currentDatePreset = 'all';
+  } else if (currentDateFrom && currentDateTo && currentDateFrom === currentDateTo) {
+    currentDatePreset = 'session';
+  } else {
+    currentDatePreset = 'custom';
+  }
+  applyDateScopeChange();
+}
+window.onCustomDateRangeChange = onCustomDateRangeChange;
+
+function selectDateSession(dateStr) {
+  if (!dateStr) return;
+  if (currentDatePreset === 'session' && currentDateFrom === dateStr && currentDateTo === dateStr) {
+    clearDateScope();
+    return;
+  }
+  currentDatePreset = 'session';
+  currentDateFrom = dateStr;
+  currentDateTo = dateStr;
+  const fromEl = document.getElementById('date-scope-from');
+  const toEl = document.getElementById('date-scope-to');
+  if (fromEl) fromEl.value = dateStr;
+  if (toEl) toEl.value = dateStr;
+  applyDateScopeChange();
+}
+window.selectDateSession = selectDateSession;
+
+function clearDateScope() {
+  currentCollectionFilter = 'all';
+  window.currentCollectionFilter = 'all';
+  setDatePreset('all');
+}
+window.clearDateScope = clearDateScope;
+
+function setCollectionFilter(colKey) {
+  const nextVal = String(colKey || 'all');
+  if (nextVal !== 'all' && currentCollectionFilter === nextVal) {
+    currentCollectionFilter = 'all';
+  } else {
+    currentCollectionFilter = nextVal;
+  }
+  window.currentCollectionFilter = currentCollectionFilter;
+  applyDateScopeChange();
+}
+window.setCollectionFilter = setCollectionFilter;
+
+function renderCollectionChips() {
+  const container = document.getElementById('collection-scope-chips');
+  const manageBtns = document.getElementById('collection-manage-btns');
+  const batchSelectEl = document.getElementById('batch-target-collection');
+  const removeBtn = document.getElementById('btn-batch-remove-from-col');
+
+  const items = Array.isArray(allData) ? allData : [];
+  const cols = Array.isArray(allCollections) ? allCollections : [];
+  const unassignedCount = items.filter(it => !Array.isArray(it.collection_ids) || it.collection_ids.length === 0).length;
+
+  const isAll = !currentCollectionFilter || currentCollectionFilter === 'all';
+  const isUnassigned = currentCollectionFilter === 'unassigned';
+  const isSpecificCol = !isAll && !isUnassigned && /^\d+$/.test(String(currentCollectionFilter));
+
+  if (manageBtns) {
+    manageBtns.style.display = isSpecificCol ? 'inline-flex' : 'none';
+  }
+  if (removeBtn) {
+    removeBtn.style.display = isSpecificCol ? 'inline-block' : 'none';
+  }
+
+  if (batchSelectEl) {
+    const prevVal = batchSelectEl.value;
+    let optHtml = '<option value="">담을 컬렉션 선택...</option>';
+    cols.forEach(c => {
+      optHtml += `<option value="${c.id}">🗂️ ${escapeHtml(c.name)} (${c.count || 0}장)</option>`;
+    });
+    optHtml += '<option value="__new__">+ 새 컬렉션 만들어 담기...</option>';
+    batchSelectEl.innerHTML = optHtml;
+    if (prevVal && Array.from(batchSelectEl.options || []).some(o => o.value === prevVal)) {
+      batchSelectEl.value = prevVal;
+    } else if (isSpecificCol) {
+      batchSelectEl.value = String(currentCollectionFilter);
+    }
+  }
+
+  if (!container) return;
+
+  let html = `
+    <button type="button"
+            class="filter-btn collection-chip-btn ${isAll ? 'active' : ''}"
+            onclick="setCollectionFilter('all')"
+            style="padding:3px 10px;font-size:0.75rem;border-radius:999px;">
+      전체 사진 (${items.length})
+    </button>
+    <button type="button"
+            class="filter-btn collection-chip-btn ${isUnassigned ? 'active' : ''}"
+            onclick="setCollectionFilter('unassigned')"
+            style="padding:3px 10px;font-size:0.75rem;border-radius:999px;"
+            title="어느 컬렉션에도 속하지 않은 미분류 사진">
+      미분류 (${unassignedCount})
+    </button>
+  `;
+
+  cols.forEach(c => {
+    const cid = Number(c.id);
+    const colItems = items.filter(it => Array.isArray(it.collection_ids) && it.collection_ids.map(Number).includes(cid));
+    const cnt = colItems.length;
+    const avg = cnt > 0 ? (colItems.reduce((acc, cur) => acc + Number(cur.final_score || 0), 0) / cnt).toFixed(1) : '-';
+    const active = String(currentCollectionFilter) === String(cid);
+    html += `
+      <button type="button"
+              class="filter-btn collection-chip-btn ${active ? 'active' : ''}"
+              onclick="setCollectionFilter('${cid}')"
+              style="padding:3px 10px;font-size:0.75rem;border-radius:999px;${active ? 'background:#4f46e5;color:#fff;border-color:#4f46e5;font-weight:800;' : ''}"
+              title="컬렉션 '${escapeHtml(c.name)}' (${cnt}장 · 평균 ${avg}점) — 클릭 시 이 컬렉션 내부 사진과 통계만 표시">
+        📁 ${escapeHtml(c.name)} <span style="opacity:0.86;">(${cnt}장${cnt > 0 ? ` · ★${avg}` : ''})</span>
+      </button>
+    `;
+  });
+
+  container.innerHTML = html;
+}
+window.renderCollectionChips = renderCollectionChips;
+
+async function createNewCollectionPrompt(initialIds = []) {
+  const name = prompt('새 컬렉션(앨범) 이름을 입력하세요:\n(예: 2026-11 스튜디오A, 50mm 베스트컷, 야외출사 후보)');
+  if (!name || !name.trim()) return null;
+  try {
+    const res = await API.createCollection(name.trim(), '#4f46e5', initialIds);
+    if (res && res.success && res.collection) {
+      allCollections = Array.isArray(res.collections) ? res.collections : allCollections;
+      window.allCollections = allCollections;
+      currentCollectionFilter = String(res.collection.id);
+      window.currentCollectionFilter = currentCollectionFilter;
+      await loadData();
+      return res.collection;
+    } else {
+      alert(res.error || '컬렉션 생성에 실패했습니다.');
+    }
+  } catch (err) {
+    alert(`컬렉션 생성 오류: ${err.message}`);
+  }
+  return null;
+}
+window.createNewCollectionPrompt = createNewCollectionPrompt;
+
+async function renameActiveCollectionPrompt() {
+  if (!currentCollectionFilter || !/^\d+$/.test(String(currentCollectionFilter))) return;
+  const cid = parseInt(currentCollectionFilter, 10);
+  const curName = getCollectionNameById(cid);
+  const newName = prompt('변경할 컬렉션 이름을 입력하세요:', curName);
+  if (!newName || !newName.trim() || newName.trim() === curName) return;
+  try {
+    const res = await API.renameCollection(cid, newName.trim());
+    if (res && res.success) {
+      allCollections = Array.isArray(res.collections) ? res.collections : allCollections;
+      window.allCollections = allCollections;
+      renderCollectionChips();
+      updateStats();
+      if (typeof currentView !== 'undefined' && currentView === 'insights' && typeof renderTagInsights === 'function') {
+        renderTagInsights();
+      }
+    } else {
+      alert(res.error || '이름 변경에 실패했습니다.');
+    }
+  } catch (err) {
+    alert(`컬렉션 이름 변경 오류: ${err.message}`);
+  }
+}
+window.renameActiveCollectionPrompt = renameActiveCollectionPrompt;
+
+async function deleteActiveCollectionConfirm() {
+  if (!currentCollectionFilter || !/^\d+$/.test(String(currentCollectionFilter))) return;
+  const cid = parseInt(currentCollectionFilter, 10);
+  const curName = getCollectionNameById(cid);
+  if (!confirm(`컬렉션 '${curName}'을(를) 삭제하시겠습니까?\n\n※ 컬렉션(앨범) 묶음만 해제되며, 원본 사진과 AI 분석 기록은 삭제되지 않습니다.`)) {
+    return;
+  }
+  try {
+    const res = await API.deleteCollection(cid);
+    if (res && res.success) {
+      currentCollectionFilter = 'all';
+      window.currentCollectionFilter = 'all';
+      await loadData();
+    } else {
+      alert(res.error || '컬렉션 삭제 실패');
+    }
+  } catch (err) {
+    alert(`컬렉션 삭제 오류: ${err.message}`);
+  }
+}
+window.deleteActiveCollectionConfirm = deleteActiveCollectionConfirm;
+
+// --- Batch Photo Selection & Organize (Phase 2) ---
+function updateBatchSelectBarUI() {
+  const bar = document.getElementById('batch-select-bar');
+  const toggleBtn = document.getElementById('btn-toggle-batch-select');
+  const countEl = document.getElementById('batch-selected-count');
+  if (bar) bar.style.display = isBatchSelectMode ? 'flex' : 'none';
+  if (toggleBtn) {
+    toggleBtn.classList.toggle('active', isBatchSelectMode);
+    toggleBtn.textContent = isBatchSelectMode ? `☑️ 선택 모드 중 (${selectedBatchIds.size}장)` : '☑️ 사진 선택·컬렉션 정리';
+  }
+  if (countEl) countEl.textContent = String(selectedBatchIds.size);
+}
+
+function toggleBatchSelectMode(forceState) {
+  isBatchSelectMode = (typeof forceState === 'boolean') ? forceState : !isBatchSelectMode;
+  if (!isBatchSelectMode) {
+    selectedBatchIds.clear();
+  }
+  updateBatchSelectBarUI();
+  renderGallery(false);
+}
+window.toggleBatchSelectMode = toggleBatchSelectMode;
+
+function toggleBatchSelectPhoto(id, e) {
+  if (e) e.stopPropagation();
+  const numId = Number(id);
+  if (selectedBatchIds.has(numId)) {
+    selectedBatchIds.delete(numId);
+  } else {
+    selectedBatchIds.add(numId);
+  }
+  updateBatchSelectBarUI();
+  renderGallery(false);
+}
+window.toggleBatchSelectPhoto = toggleBatchSelectPhoto;
+
+function onGalleryCardClick(id, e) {
+  if (isBatchSelectMode) {
+    toggleBatchSelectPhoto(id, e);
+    return;
+  }
+  openDetailModal(id);
+}
+window.onGalleryCardClick = onGalleryCardClick;
+
+function selectAllFilteredPhotos() {
+  const filtered = filterList(allData);
+  filtered.forEach(it => selectedBatchIds.add(Number(it.id)));
+  updateBatchSelectBarUI();
+  renderGallery(false);
+}
+window.selectAllFilteredPhotos = selectAllFilteredPhotos;
+
+function clearBatchSelection() {
+  selectedBatchIds.clear();
+  updateBatchSelectBarUI();
+  renderGallery(false);
+}
+window.clearBatchSelection = clearBatchSelection;
+
+async function applyBatchAddToCollection() {
+  if (selectedBatchIds.size === 0) {
+    alert('먼저 컬렉션에 담을 사진을 1장 이상 선택해 주세요.');
+    return;
+  }
+  const sel = document.getElementById('batch-target-collection');
+  const targetVal = sel ? sel.value : '';
+  const ids = Array.from(selectedBatchIds);
+
+  if (!targetVal) {
+    alert('담을 컬렉션을 드롭다운에서 선택해 주세요.');
+    return;
+  }
+  if (targetVal === '__new__') {
+    const created = await createNewCollectionPrompt(ids);
+    if (created) {
+      selectedBatchIds.clear();
+      updateBatchSelectBarUI();
+    }
+    return;
+  }
+  try {
+    const res = await API.updateCollectionItems(parseInt(targetVal, 10), ids, 'add');
+    if (res && res.success) {
+      selectedBatchIds.clear();
+      updateBatchSelectBarUI();
+      await loadData();
+    } else {
+      alert(res.error || '컬렉션에 사진을 추가하지 못했습니다.');
+    }
+  } catch (err) {
+    alert(`컬렉션 담기 오류: ${err.message}`);
+  }
+}
+window.applyBatchAddToCollection = applyBatchAddToCollection;
+
+async function applyBatchRemoveFromCurrentCollection() {
+  if (!currentCollectionFilter || !/^\d+$/.test(String(currentCollectionFilter))) return;
+  if (selectedBatchIds.size === 0) {
+    alert('현재 컬렉션에서 제외할 사진을 선택해 주세요.');
+    return;
+  }
+  const cid = parseInt(currentCollectionFilter, 10);
+  const ids = Array.from(selectedBatchIds);
+  try {
+    const res = await API.updateCollectionItems(cid, ids, 'remove');
+    if (res && res.success) {
+      selectedBatchIds.clear();
+      updateBatchSelectBarUI();
+      await loadData();
+    } else {
+      alert(res.error || '컬렉션에서 제외하지 못했습니다.');
+    }
+  } catch (err) {
+    alert(`컬렉션 제외 오류: ${err.message}`);
+  }
+}
+window.applyBatchRemoveFromCurrentCollection = applyBatchRemoveFromCurrentCollection;
+
+function renderDateSessionChips() {
+  const container = document.getElementById('date-session-chips');
+  if (!container) return;
+  const sourceItems = (Array.isArray(allData) ? allData : []).filter(matchCollectionScope);
+  if (!sourceItems.length) {
+    container.innerHTML = '<span style="font-size:0.74rem;color:var(--muted);">데이터 없음</span>';
+    return;
+  }
+
+  const buckets = {};
+  let missingCount = 0;
+  sourceItems.forEach(item => {
+    const dStr = getItemDateStr(item, currentDateBasis);
+    if (!dStr) {
+      missingCount += 1;
+      return;
+    }
+    if (!buckets[dStr]) {
+      buckets[dStr] = { date: dStr, count: 0, scoreSum: 0 };
+    }
+    buckets[dStr].count += 1;
+    buckets[dStr].scoreSum += Number(item.final_score || 0);
+  });
+
+  const sortedDates = Object.values(buckets)
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .slice(0, 10);
+
+  if (!sortedDates.length) {
+    container.innerHTML = '<span style="font-size:0.74rem;color:var(--muted);">해당 기준의 날짜 기록이 없습니다</span>';
+    return;
+  }
+
+  container.innerHTML = sortedDates.map(b => {
+    const avg = (b.scoreSum / b.count).toFixed(1);
+    const shortDate = b.date.slice(5).replace('-', '/'); // MM/DD
+    const isActive = (currentDateFrom === b.date && currentDateTo === b.date && currentDatePreset !== 'missing_exif');
+    return `
+      <button type="button"
+              class="filter-btn date-session-chip ${isActive ? 'active' : ''}"
+              onclick="selectDateSession('${b.date}')"
+              style="padding:2px 8px;font-size:0.73rem;border-radius:999px;${isActive ? 'background:#4f46e5;color:#fff;border-color:#4f46e5;font-weight:800;' : ''}"
+              title="${b.date} 세션 (${b.count}장 · 평균 ${avg}점) — 클릭 시 이 날짜만 분석/필터링">
+        📅 ${shortDate} <span style="opacity:0.85;">(${b.count}장 · ★${avg})</span>
+      </button>
+    `;
+  }).join('');
+}
+
+function updateDateScopeUI() {
+  const dateActive = isDateOnlyScopeActive();
+  const anyActive = isDateScopeActive();
+  document.querySelectorAll('.date-preset-btn[data-date-preset]').forEach(btn => {
+    const p = btn.getAttribute('data-date-preset');
+    btn.classList.toggle('active', p === currentDatePreset);
+  });
+  const clearBtn = document.getElementById('btn-clear-date-scope');
+  if (clearBtn) clearBtn.style.display = dateActive ? 'inline-flex' : 'none';
+
+  const panelEl = document.getElementById('date-scope-panel');
+  if (panelEl) {
+    panelEl.style.borderColor = anyActive ? '#818cf8' : 'var(--line, #e2e8f0)';
+    panelEl.style.boxShadow = anyActive ? '0 0 0 2px rgba(99,102,241,0.12)' : 'none';
+  }
+}
+
+function applyDateScopeChange() {
+  renderCollectionChips();
+  updateDateScopeUI();
+  renderDateSessionChips();
+  updateStats();
+  if (typeof populateCompareSelects === 'function') populateCompareSelects();
+  if (typeof populateTagSelectorAndQuickTags === 'function') populateTagSelectorAndQuickTags();
+  renderScoreDistPanel();
+  renderGallery();
+  if (typeof currentView !== 'undefined' && currentView === 'insights' && typeof renderTagInsights === 'function') {
+    renderTagInsights();
+  }
+}
+window.applyDateScopeChange = applyDateScopeChange;
 
 // --- 0.5-Point & 0.1-Point Score Bins Definition ---
 const SCORE_BINS_05 = [
@@ -269,8 +842,9 @@ function renderScoreDistPanel() {
     return;
   }
 
-  // Filter items by current category/focal/tag/burst (excluding grade & bin filter so full distribution is visible)
+  // Filter items by current global scope (collection + date) + category/focal/tag/burst (excluding grade & bin filter so full distribution is visible)
   const baseList = allData.filter(item => {
+    if (!matchGlobalScope(item)) return false;
     if (currentCatFilter !== 'all' && item.figure_category !== currentCatFilter) return false;
     if (currentFocalFilter !== 'all' && !matchFocalFilter(item, currentFocalFilter)) return false;
     if (currentBurstFilter === 'burst_only' && !item.is_burst) return false;
@@ -464,6 +1038,19 @@ async function loadData() {
   const data = await API.fetchAnalyses(currentBurstDist);
   allData = Array.isArray(data) ? data : [];
   window.allData = allData;
+  if (API && typeof API.fetchCollections === 'function') {
+    try {
+      const cols = await API.fetchCollections();
+      allCollections = Array.isArray(cols) ? cols : [];
+      window.allCollections = allCollections;
+    } catch (e) {
+      allCollections = [];
+      window.allCollections = [];
+    }
+  }
+  renderCollectionChips();
+  updateDateScopeUI();
+  renderDateSessionChips();
   updateStats();
   if (typeof populateCompareSelects === 'function') populateCompareSelects();
   if (typeof populateTagSelectorAndQuickTags === 'function') populateTagSelectorAndQuickTags();
@@ -486,16 +1073,44 @@ function updateStats() {
   const totalEl = document.getElementById('total-count');
   const avgEl = document.getElementById('avg-score');
   const goodEl = document.getElementById('good-count');
-  if (totalEl) totalEl.textContent = allData.length;
-  if (!allData.length) {
+  const summaryEl = document.getElementById('active-date-scope-summary');
+
+  const scoped = getScopedData(allData);
+  const activeScope = isDateScopeActive();
+
+  if (totalEl) {
+    totalEl.textContent = activeScope ? `${scoped.length} / ${allData.length}` : String(allData.length);
+  }
+  if (!scoped.length) {
     if (avgEl) avgEl.textContent = '0.0';
     if (goodEl) goodEl.textContent = '0';
+    if (summaryEl) {
+      if (activeScope) {
+        summaryEl.style.display = 'inline';
+        summaryEl.textContent = `🎯 [${getDateScopeLabel()}] 해당 기간 사진 0장`;
+      } else {
+        summaryEl.style.display = 'none';
+      }
+    }
     return;
   }
-  const avg = (allData.reduce((acc, cur) => acc + cur.final_score, 0) / allData.length).toFixed(1);
-  const good = allData.filter(d => d.final_score >= 7.0).length;
+  const avgNum = scoped.reduce((acc, cur) => acc + cur.final_score, 0) / scoped.length;
+  const avg = avgNum.toFixed(1);
+  const good = scoped.filter(d => d.final_score >= 7.0).length;
   if (avgEl) avgEl.textContent = avg;
-  if (goodEl) goodEl.textContent = good;
+  if (goodEl) goodEl.textContent = String(good);
+
+  if (summaryEl) {
+    if (activeScope && allData.length > 0) {
+      const globalAvg = allData.reduce((acc, cur) => acc + cur.final_score, 0) / allData.length;
+      const diff = avgNum - globalAvg;
+      const diffSign = diff >= 0 ? `+${diff.toFixed(2)}▲` : `${diff.toFixed(2)}▼`;
+      summaryEl.style.display = 'inline';
+      summaryEl.textContent = `🎯 [${getDateScopeLabel()}] ${scoped.length}장 · 평균 ${avgNum.toFixed(2)}점 (전체 대비 ${diffSign})`;
+    } else {
+      summaryEl.style.display = 'none';
+    }
+  }
 }
 
 function setBurstFilter(mode, btn) {
@@ -523,13 +1138,16 @@ function setFilter(filter, btn) {
     updateScoreBinFilterBadge();
     renderScoreDistPanel();
   }
-  document.querySelectorAll('.filter-btn:not(.burst-btn):not(.cat-btn):not(.focal-btn):not(#btn-toggle-score-dist)').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.filter-btn:not(.burst-btn):not(.cat-btn):not(.focal-btn):not(.date-preset-btn):not(.date-session-chip):not(.collection-chip-btn):not(#btn-toggle-score-dist)').forEach(b => b.classList.remove('active'));
   if (btn) btn.classList.add('active');
   renderGallery();
 }
 
 function filterList(list) {
   return list.filter(item => {
+    // 0. Global Scope filter (Collection + Date)
+    if (!matchGlobalScope(item)) return false;
+
     // 1. Grade filter
     if (currentFilter === 'pro' && item.final_score < 9.0) return false;
     if (currentFilter === 'very_good' && (item.final_score < 8.0 || item.final_score >= 9.0)) return false;
@@ -644,8 +1262,23 @@ function renderGalleryCard(item) {
   const focalMm = getItemFocalMm(item);
   const isFast = isFastAnalysisItem(item);
   const tagPillsHtml = typeof renderTagPills === 'function' ? renderTagPills(item.aesthetic_tags) : '';
+  const isBatchChecked = isBatchSelectMode && selectedBatchIds.has(Number(item.id));
+  const itemColIds = Array.isArray(item.collection_ids) ? item.collection_ids.map(Number) : [];
+  const itemColBadgesHtml = itemColIds.map(cid => {
+    const col = (allCollections || []).find(c => Number(c.id) === cid);
+    if (!col) return '';
+    return `<span style="display:inline-block;margin-top:4px;margin-left:4px;font-size:0.72rem;font-weight:800;color:#0f766e;background:#f0fdfa;border:1px solid #99f6e4;padding:1px 7px;border-radius:6px;" title="소속 컬렉션: ${escapeHtml(col.name)}">📁 ${escapeHtml(col.name)}</span>`;
+  }).join('');
   return `
-    <article class="card" onclick="openDetailModal(${item.id})">
+    <article class="card" style="${isBatchChecked ? 'box-shadow:0 0 0 3px #0d9488;border-color:#0d9488;' : ''}" onclick="onGalleryCardClick(${item.id}, event)">
+      ${isBatchSelectMode ? `
+        <div style="position:absolute;top:10px;left:10px;z-index:6;display:flex;align-items:center;gap:6px;">
+          <span style="background:${isBatchChecked ? '#0d9488' : 'rgba(15,23,42,0.75)'};color:white;padding:4px 9px;border-radius:8px;font-size:0.75rem;font-weight:800;box-shadow:0 2px 6px rgba(0,0,0,0.25);">
+            ${isBatchChecked ? '☑️ 선택됨' : '⬜ 선택'}
+          </span>
+          <button type="button" class="filter-btn" style="padding:3px 7px;font-size:0.7rem;background:rgba(255,255,255,0.92);color:#0f172a;border:1px solid #cbd5e1;" onclick="event.stopPropagation(); openDetailModal(${item.id})">🔍 상세</button>
+        </div>
+      ` : ''}
       <button class="card-delete-btn" title="이 분석 기록 삭제" onclick="event.stopPropagation(); deleteAnalysisRecord(${item.id})">🗑️</button>
       <img class="card-thumb" src="/api/image/${item.id}" alt="${escapeHtml(item.filename)}" loading="lazy">
       <div class="card-body">
@@ -658,6 +1291,7 @@ function renderGalleryCard(item) {
             ${focalMm !== null ? `<span style="display:inline-block;margin-top:4px;margin-left:4px;font-size:0.74rem;font-weight:700;color:#0369a1;background:#e0f2fe;border:1px solid #bae6fd;padding:1px 7px;border-radius:6px;" title="촬영 화각(초점거리): ${focalMm}mm">🔭 ${Math.round(focalMm)}mm</span>` : ''}
             ${modelBadgeText ? `<span style="display:inline-block;margin-top:4px;margin-left:4px;font-size:0.73rem;font-weight:700;color:#334155;background:rgba(148,163,184,0.16);border:1px solid rgba(148,163,184,0.35);padding:1px 7px;border-radius:6px;" title="평가 모델: ${escapeHtml(item.model)}">🤖 ${escapeHtml(modelBadgeText)}</span>` : ''}
             ${isFast ? `<span style="display:inline-block;margin-top:4px;margin-left:4px;font-size:0.73rem;font-weight:800;color:#b45309;background:#fef3c7;border:1px solid #fde68a;padding:1px 7px;border-radius:6px;" title="대량 선별용 경량 분석 모드 (상세 비평·미학 태그 생략)">⚡ 경량</span>` : ''}
+            ${itemColBadgesHtml}
             ${item.is_burst ? (item.is_best_pick ?
               `<span class="badge-best-pick" style="display:inline-block;margin-top:4px;margin-left:4px;">👑 Best Pick (${item.burst_total}장 1위)</span>` :
               `<span class="badge-b-cut" style="display:inline-block;margin-top:4px;margin-left:4px;" title="${escapeHtml(item.drop_reason)}">⚠️ B컷 (${escapeHtml(item.drop_reason)})</span>`

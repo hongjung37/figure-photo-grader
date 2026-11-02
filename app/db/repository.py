@@ -170,6 +170,16 @@ def get_all_analyses(db_path: Path, max_hamming_dist: int = 15) -> list[dict]:
             tag = str(r["tag"])
             tags_by_id.setdefault(aid, {}).setdefault(ckey, []).append(tag)
 
+        collections_by_id: dict[int, list[int]] = {}
+        try:
+            col_rows = conn.execute(
+                "SELECT analysis_id, collection_id FROM photo_collection_items ORDER BY collection_id ASC"
+            ).fetchall()
+            for cr in col_rows:
+                collections_by_id.setdefault(int(cr["analysis_id"]), []).append(int(cr["collection_id"]))
+        except sqlite3.OperationalError:
+            pass
+
         missing_dhash_ids = [int(r["id"]) for r in rows if r["dhash"] is None]
         dhash_overrides: dict[int, int] = {}
         if missing_dhash_ids:
@@ -202,6 +212,7 @@ def get_all_analyses(db_path: Path, max_hamming_dist: int = 15) -> list[dict]:
             row,
             tags_by_id.get(aid),
             dhash_override=dhash_overrides.get(aid),
+            collection_ids=collections_by_id.get(aid, []),
         )
         if formatted:
             results.append(formatted)
@@ -334,6 +345,7 @@ def _format_analysis_row(
     row: sqlite3.Row | dict[str, Any],
     tags_dict: dict[str, list[str]] | None = None,
     dhash_override: int | None = None,
+    collection_ids: list[int] | None = None,
 ) -> dict[str, Any] | None:
     """Format a raw database row into the standardized analysis record dictionary."""
     aid = int(row["id"])
@@ -435,6 +447,7 @@ def _format_analysis_row(
         "exif": exif_data,
         "dhash": dhash_val,
         "color_sig": color_sig_val,
+        "collection_ids": list(collection_ids) if collection_ids is not None else [],
     }
 
 
@@ -452,6 +465,14 @@ def get_analysis_by_id(db_path: Path, record_id: int) -> dict[str, Any] | None:
             "SELECT category_key, tag FROM photo_analysis_tags WHERE analysis_id = ?",
             (record_id,),
         ).fetchall()
+        try:
+            col_rows = conn.execute(
+                "SELECT collection_id FROM photo_collection_items WHERE analysis_id = ? ORDER BY collection_id ASC",
+                (record_id,),
+            ).fetchall()
+            collection_ids = [int(r["collection_id"]) for r in col_rows]
+        except sqlite3.OperationalError:
+            collection_ids = []
 
     tags_dict: dict[str, list[str]] = {}
     for r in tag_rows:
@@ -459,7 +480,7 @@ def get_analysis_by_id(db_path: Path, record_id: int) -> dict[str, Any] | None:
         tag = str(r["tag"])
         tags_dict.setdefault(ckey, []).append(tag)
 
-    return _format_analysis_row(row, tags_dict)
+    return _format_analysis_row(row, tags_dict, collection_ids=collection_ids)
 
 
 def update_analysis(
@@ -510,11 +531,104 @@ def update_cross_check_opinion(
     return get_analysis_by_id(database, record_id)
 
 
+def _iso_to_local_date_str(iso_str: str | None) -> str | None:
+    """Convert an ISO timestamp string into a local YYYY-MM-DD date string."""
+    if not iso_str:
+        return None
+    s = str(iso_str).strip()
+    if not s:
+        return None
+    # Naive ISO date/datetime (like EXIF DateTimeOriginal '2026-11-01T14:23:05') is already camera local time
+    if len(s) >= 10 and re.match(r"^\d{4}-\d{2}-\d{2}", s):
+        tail = s[10:]
+        if not re.search(r"(Z|[+-]\d{2}:?\d{2})$", tail):
+            return s[:10]
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if dt.tzinfo is not None:
+            dt = dt.astimezone()
+        return dt.strftime("%Y-%m-%d")
+    except ValueError:
+        return s[:10] if len(s) >= 10 and re.match(r"^\d{4}-\d{2}-\d{2}", s) else None
 
-def get_tag_stats(db_path: Path, min_count: int = 1) -> dict:
-    """Aggregate statistics by aesthetic tag, including AI scores and user ratings."""
+
+def extract_item_date_str(
+    item: dict[str, Any],
+    date_basis: str = "smart",
+) -> str | None:
+    """Return YYYY-MM-DD date string for an analysis item based on date_basis ('smart'|'captured'|'created')."""
+    basis = (date_basis or "smart").strip().lower()
+    cap_date = _iso_to_local_date_str(item.get("captured_at"))
+    cre_date = _iso_to_local_date_str(item.get("created_at"))
+    if basis == "captured":
+        return cap_date
+    if basis == "created":
+        return cre_date
+    return cap_date or cre_date
+
+
+def filter_analyses_by_date(
+    analyses: list[dict[str, Any]],
+    date_basis: str = "smart",
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> list[dict[str, Any]]:
+    """Filter analysis items by date range (inclusive YYYY-MM-DD) or missing capture date."""
+    basis = (date_basis or "smart").strip().lower()
+    d_from = (date_from or "").strip() or None
+    d_to = (date_to or "").strip() or None
+
+    if basis == "captured_missing":
+        return [a for a in analyses if not _iso_to_local_date_str(a.get("captured_at"))]
+
+    if not d_from and not d_to and basis != "captured_only":
+        return analyses
+
+    filtered: list[dict[str, Any]] = []
+    for a in analyses:
+        d_str = extract_item_date_str(a, "captured" if basis == "captured_only" else basis)
+        if not d_str:
+            continue
+        if d_from and d_str < d_from:
+            continue
+        if d_to and d_str > d_to:
+            continue
+        filtered.append(a)
+    return filtered
+
+
+def filter_analyses_by_collection(
+    analyses: list[dict[str, Any]],
+    collection_id: int | str | None = None,
+) -> list[dict[str, Any]]:
+    """Filter analysis items by collection_id ('all'/None, 'unassigned', or integer collection ID)."""
+    if collection_id is None:
+        return analyses
+    s = str(collection_id).strip().lower()
+    if not s or s == "all":
+        return analyses
+    if s in ("unassigned", "uncollected"):
+        return [a for a in analyses if not a.get("collection_ids")]
+    try:
+        cid = int(s)
+    except ValueError:
+        return analyses
+    return [a for a in analyses if cid in (a.get("collection_ids") or [])]
+
+
+def get_tag_stats(
+    db_path: Path,
+    min_count: int = 1,
+    date_basis: str = "smart",
+    date_from: str | None = None,
+    date_to: str | None = None,
+    collection_id: int | str | None = None,
+) -> dict:
+    """Aggregate statistics by aesthetic tag, including AI scores and user ratings, optionally scoped by date and collection."""
     ensure_db_columns(db_path)
-    analyses = get_all_analyses(db_path)
+    all_analyses = get_all_analyses(db_path)
+    analyses = filter_analyses_by_collection(all_analyses, collection_id=collection_id)
+    analyses = filter_analyses_by_date(analyses, date_basis=date_basis, date_from=date_from, date_to=date_to)
 
     total_photos = len(analyses)
     user_rated_photos = sum(1 for a in analyses if a.get("user_score") is not None)
@@ -651,10 +765,19 @@ def _summarize_feedback_themes(
     return results[:top_n]
 
 
-def get_focal_stats(db_path: Path, min_count: int = 1) -> dict[str, Any]:
-    """Aggregate statistics, strengths, and weaknesses by focal length band and exact mm."""
+def get_focal_stats(
+    db_path: Path,
+    min_count: int = 1,
+    date_basis: str = "smart",
+    date_from: str | None = None,
+    date_to: str | None = None,
+    collection_id: int | str | None = None,
+) -> dict[str, Any]:
+    """Aggregate statistics, strengths, and weaknesses by focal length band and exact mm, optionally scoped by date and collection."""
     ensure_db_columns(db_path)
-    analyses = get_all_analyses(db_path)
+    all_analyses = get_all_analyses(db_path)
+    analyses = filter_analyses_by_collection(all_analyses, collection_id=collection_id)
+    analyses = filter_analyses_by_date(analyses, date_basis=date_basis, date_from=date_from, date_to=date_to)
 
     total_photos = len(analyses)
     identified_photos = sum(1 for a in analyses if a.get("focal_length_mm") is not None)
@@ -902,6 +1025,10 @@ def delete_analyses(db_path: Path, record_ids: list[int]) -> list[int]:
                 ).fetchall()
             )
             conn.execute(f"DELETE FROM photo_analysis_tags WHERE analysis_id IN ({placeholders})", chunk)
+            try:
+                conn.execute(f"DELETE FROM photo_collection_items WHERE analysis_id IN ({placeholders})", chunk)
+            except sqlite3.OperationalError:
+                pass
             conn.execute(f"DELETE FROM photo_analyses WHERE id IN ({placeholders})", chunk)
         remaining_hashes = {
             row[0]
@@ -956,3 +1083,200 @@ def get_analyses_and_tags_for_export(db_path: Path) -> tuple[list[dict[str, Any]
     for r in tag_rows:
         tags_by_id.setdefault(int(r["analysis_id"]), []).append(str(r["tag"]))
     return rows, tags_by_id
+
+
+# --- Lightroom-style Virtual Collections CRUD (Phase 2) ---
+
+def get_all_collections(db_path: Path | str) -> list[dict[str, Any]]:
+    """Retrieve all virtual collections with their member analysis IDs and count."""
+    database = Path(db_path).expanduser()
+    if not database.is_file():
+        return []
+    ensure_db_columns(database)
+    with closing(get_db_connection(database)) as conn:
+        conn.row_factory = sqlite3.Row
+        from app.db.connection import ensure_collection_tables
+        ensure_collection_tables(conn)
+        col_rows = conn.execute(
+            "SELECT id, name, color, created_at FROM photo_collections ORDER BY id ASC"
+        ).fetchall()
+        item_rows = conn.execute(
+            "SELECT collection_id, analysis_id FROM photo_collection_items ORDER BY analysis_id DESC"
+        ).fetchall()
+
+    items_by_col: dict[int, list[int]] = {}
+    for ir in item_rows:
+        items_by_col.setdefault(int(ir["collection_id"]), []).append(int(ir["analysis_id"]))
+
+    result: list[dict[str, Any]] = []
+    for r in col_rows:
+        cid = int(r["id"])
+        aids = items_by_col.get(cid, [])
+        result.append({
+            "id": cid,
+            "name": str(r["name"]),
+            "color": str(r["color"] or "#4f46e5"),
+            "created_at": str(r["created_at"]),
+            "count": len(aids),
+            "analysis_ids": aids,
+        })
+    return result
+
+
+def create_collection(
+    db_path: Path | str,
+    name: str,
+    color: str = "#4f46e5",
+) -> dict[str, Any]:
+    """Create a new virtual collection (or return existing one if name matches case-insensitively)."""
+    clean_name = (name or "").strip()
+    if not clean_name:
+        raise ValueError("컬렉션 이름을 입력해 주세요.")
+    clean_color = (color or "#4f46e5").strip() or "#4f46e5"
+    database = Path(db_path).expanduser()
+    database.parent.mkdir(parents=True, exist_ok=True)
+    ensure_db_columns(database)
+    now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with closing(get_db_connection(database)) as conn, conn:
+        conn.row_factory = sqlite3.Row
+        from app.db.connection import ensure_collection_tables
+        ensure_collection_tables(conn)
+        existing = conn.execute(
+            "SELECT id, name, color, created_at FROM photo_collections WHERE name = ? COLLATE NOCASE",
+            (clean_name,),
+        ).fetchone()
+        if existing:
+            cid = int(existing["id"])
+            item_rows = conn.execute(
+                "SELECT analysis_id FROM photo_collection_items WHERE collection_id = ? ORDER BY analysis_id DESC",
+                (cid,),
+            ).fetchall()
+            aids = [int(ir[0]) for ir in item_rows]
+            return {
+                "id": cid,
+                "name": str(existing["name"]),
+                "color": str(existing["color"] or "#4f46e5"),
+                "created_at": str(existing["created_at"]),
+                "count": len(aids),
+                "analysis_ids": aids,
+                "existing": True,
+            }
+        cursor = conn.execute(
+            "INSERT INTO photo_collections (name, color, created_at) VALUES (?, ?, ?)",
+            (clean_name, clean_color, now_iso),
+        )
+        cid = int(cursor.lastrowid)
+        return {
+            "id": cid,
+            "name": clean_name,
+            "color": clean_color,
+            "created_at": now_iso,
+            "count": 0,
+            "analysis_ids": [],
+            "existing": False,
+        }
+
+
+def rename_collection(
+    db_path: Path | str,
+    collection_id: int,
+    new_name: str,
+    color: str | None = None,
+) -> dict[str, Any] | None:
+    """Rename an existing collection and optionally update its color."""
+    clean_name = (new_name or "").strip()
+    if not clean_name:
+        raise ValueError("새 컬렉션 이름을 입력해 주세요.")
+    database = Path(db_path).expanduser()
+    if not database.is_file():
+        return None
+    ensure_db_columns(database)
+    with closing(get_db_connection(database)) as conn, conn:
+        conn.row_factory = sqlite3.Row
+        from app.db.connection import ensure_collection_tables
+        ensure_collection_tables(conn)
+        dup = conn.execute(
+            "SELECT id FROM photo_collections WHERE name = ? COLLATE NOCASE AND id != ?",
+            (clean_name, int(collection_id)),
+        ).fetchone()
+        if dup:
+            raise ValueError(f"이미 '{clean_name}' 이름의 컬렉션이 존재합니다.")
+        if color is not None:
+            cursor = conn.execute(
+                "UPDATE photo_collections SET name = ?, color = ? WHERE id = ?",
+                (clean_name, color.strip() or "#4f46e5", int(collection_id)),
+            )
+        else:
+            cursor = conn.execute(
+                "UPDATE photo_collections SET name = ? WHERE id = ?",
+                (clean_name, int(collection_id)),
+            )
+        if cursor.rowcount == 0:
+            return None
+    all_cols = get_all_collections(database)
+    return next((c for c in all_cols if c["id"] == int(collection_id)), None)
+
+
+def delete_collection(db_path: Path | str, collection_id: int) -> bool:
+    """Delete a virtual collection without deleting the underlying photo analyses."""
+    database = Path(db_path).expanduser()
+    if not database.is_file():
+        return False
+    ensure_db_columns(database)
+    with closing(get_db_connection(database)) as conn, conn:
+        conn.execute("PRAGMA foreign_keys = ON")
+        from app.db.connection import ensure_collection_tables
+        ensure_collection_tables(conn)
+        conn.execute("DELETE FROM photo_collection_items WHERE collection_id = ?", (int(collection_id),))
+        cursor = conn.execute("DELETE FROM photo_collections WHERE id = ?", (int(collection_id),))
+        return cursor.rowcount > 0
+
+
+def update_collection_items(
+    db_path: Path | str,
+    collection_id: int,
+    analysis_ids: list[int],
+    action: str = "add",
+) -> dict[str, Any] | None:
+    """Add, remove, or set photo analysis IDs in a collection ('add' | 'remove' | 'set')."""
+    database = Path(db_path).expanduser()
+    if not database.is_file():
+        return None
+    ensure_db_columns(database)
+    clean_ids = [int(aid) for aid in (analysis_ids or []) if str(aid).lstrip("-").isdigit()]
+    act = (action or "add").strip().lower()
+    now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    cid = int(collection_id)
+
+    with closing(get_db_connection(database)) as conn, conn:
+        conn.execute("PRAGMA foreign_keys = ON")
+        from app.db.connection import ensure_collection_tables
+        ensure_collection_tables(conn)
+        col_row = conn.execute("SELECT id FROM photo_collections WHERE id = ?", (cid,)).fetchone()
+        if not col_row:
+            return None
+
+        if act == "set":
+            conn.execute("DELETE FROM photo_collection_items WHERE collection_id = ?", (cid,))
+            if clean_ids:
+                conn.executemany(
+                    "INSERT OR IGNORE INTO photo_collection_items (collection_id, analysis_id, added_at) VALUES (?, ?, ?)",
+                    [(cid, aid, now_iso) for aid in clean_ids],
+                )
+        elif act == "remove":
+            if clean_ids:
+                placeholders = ",".join("?" for _ in clean_ids)
+                conn.execute(
+                    f"DELETE FROM photo_collection_items WHERE collection_id = ? AND analysis_id IN ({placeholders})",
+                    [cid, *clean_ids],
+                )
+        else:  # 'add'
+            if clean_ids:
+                conn.executemany(
+                    "INSERT OR IGNORE INTO photo_collection_items (collection_id, analysis_id, added_at) VALUES (?, ?, ?)",
+                    [(cid, aid, now_iso) for aid in clean_ids],
+                )
+
+    all_cols = get_all_collections(database)
+    return next((c for c in all_cols if c["id"] == cid), None)
+

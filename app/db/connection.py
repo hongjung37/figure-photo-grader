@@ -48,6 +48,31 @@ def ensure_tag_tables(connection: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_photo_analysis_tags_category_tag "
         "ON photo_analysis_tags (category_key, tag)"
     )
+    ensure_collection_tables(connection)
+
+
+def ensure_collection_tables(connection: sqlite3.Connection) -> None:
+    """Create Lightroom-style virtual collection tables (many-to-many with photo_analyses)."""
+    connection.execute(
+        """CREATE TABLE IF NOT EXISTS photo_collections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+            color TEXT NOT NULL DEFAULT '#4f46e5',
+            created_at TEXT NOT NULL
+        )"""
+    )
+    connection.execute(
+        """CREATE TABLE IF NOT EXISTS photo_collection_items (
+            collection_id INTEGER NOT NULL REFERENCES photo_collections(id) ON DELETE CASCADE,
+            analysis_id INTEGER NOT NULL REFERENCES photo_analyses(id) ON DELETE CASCADE,
+            added_at TEXT NOT NULL,
+            PRIMARY KEY (collection_id, analysis_id)
+        )"""
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_photo_collection_items_analysis_id "
+        "ON photo_collection_items (analysis_id)"
+    )
 
 
 def sync_analysis_tags(

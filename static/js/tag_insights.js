@@ -195,8 +195,13 @@ function setInsightsRatingMode(mode) {
   renderTagInsights();
 }
 
+function getInsightsSourceList() {
+  const rawList = (typeof allData !== 'undefined' && Array.isArray(allData)) ? allData : [];
+  return (typeof getScopedData === 'function') ? getScopedData(rawList) : rawList;
+}
+
 function computeClientTagStats(minCount) {
-  const dataList = (typeof allData !== 'undefined' && Array.isArray(allData)) ? allData : [];
+  const dataList = getInsightsSourceList();
   const totalPhotos = dataList.length;
   const userRatedPhotos = dataList.filter(d => d.user_score !== null && d.user_score !== undefined).length;
   const tagData = {};
@@ -432,7 +437,7 @@ function renderInsightsScoreDistSection(dataList) {
 }
 
 function computeClientFocalStats(minCount) {
-  const dataList = (typeof allData !== 'undefined' && Array.isArray(allData)) ? allData : [];
+  const dataList = getInsightsSourceList();
   const totalPhotos = dataList.length;
   let identifiedPhotos = 0;
   let userRatedPhotos = 0;
@@ -939,9 +944,22 @@ function renderTagInsights() {
   const container = document.getElementById('insights-view');
   if (!container) return;
 
-  const dataList = (typeof allData !== 'undefined' && Array.isArray(allData)) ? allData : [];
+  const rawAll = (typeof allData !== 'undefined' && Array.isArray(allData)) ? allData : [];
+  const dataList = getInsightsSourceList();
+  const scopeActive = (typeof isDateScopeActive === 'function') ? isDateScopeActive() : false;
+  const scopeLabel = (typeof getDateScopeLabel === 'function') ? getDateScopeLabel() : '전체 기간';
+
   if (!dataList.length) {
-    container.innerHTML = '<div style="text-align:center;padding:60px;color:var(--muted)">분석된 사진 데이터가 없습니다. 먼저 사진을 업로드해 분석해주세요.</div>';
+    if (scopeActive && rawAll.length > 0) {
+      container.innerHTML = `
+        <div style="text-align:center;padding:50px;color:var(--muted);background:var(--card-sub,#f8fafc);border:1px dashed var(--line,#cbd5e1);border-radius:14px;">
+          <div style="font-size:1.05rem;font-weight:800;color:var(--navy);margin-bottom:8px;">📅 선택한 기간 범위(${escapeHtml(scopeLabel)})에 해당하는 사진이 없습니다.</div>
+          <button type="button" class="filter-btn" style="padding:6px 14px;font-weight:700;color:#4f46e5;border-color:#818cf8;" onclick="clearDateScope()">✕ 기간 필터 해제 (전체 ${rawAll.length}장 보기)</button>
+        </div>
+      `;
+    } else {
+      container.innerHTML = '<div style="text-align:center;padding:60px;color:var(--muted)">분석된 사진 데이터가 없습니다. 먼저 사진을 업로드해 분석해주세요.</div>';
+    }
     return;
   }
 
@@ -953,7 +971,17 @@ function renderTagInsights() {
   const categoriesMap = (typeof TAG_CATEGORIES !== 'undefined' ? TAG_CATEGORIES : (window.TAG_CATEGORIES || {}));
   const isFocalMode = insightsDimension === 'focal';
 
-  const toolbarHtml = `
+  const scopeBannerHtml = scopeActive ? `
+    <div style="margin-bottom:14px;padding:10px 14px;background:rgba(79,70,229,0.08);border:1px solid rgba(99,102,241,0.35);border-radius:12px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+      <div style="font-size:0.84rem;color:var(--navy);font-weight:700;">
+        📅 <strong>현재 기간 스코프 통계 적용 중:</strong> <span style="color:#4f46e5;">${escapeHtml(scopeLabel)}</span>
+        <span style="margin-left:6px;font-weight:600;color:var(--muted);">(대상 ${dataList.length}장 / 전체 ${rawAll.length}장 — 아래 태그·화각 통계는 모두 이 기간 내부 데이터만 집계됩니다)</span>
+      </div>
+      <button type="button" class="filter-btn" style="padding:3px 10px;font-size:0.76rem;color:#ef4444;border-color:#fca5a5;background:#fff5f5;font-weight:700;" onclick="clearDateScope()">✕ 전체 기간으로 보기</button>
+    </div>
+  ` : '';
+
+  const toolbarHtml = scopeBannerHtml + `
     <!-- Insights Toolbar -->
     <div class="insights-toolbar" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:20px;">
       <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
@@ -1160,7 +1188,7 @@ function populateCompareSelects() {
   const selA = document.getElementById('comp-a-select');
   const selB = document.getElementById('comp-b-select');
   if (!selA || !selB) return;
-  const dataList = (typeof allData !== 'undefined' && Array.isArray(allData)) ? allData : [];
+  const dataList = getInsightsSourceList();
   if (!dataList.length) {
     selA.innerHTML = '<option value="">(비교할 사진 없음)</option>';
     selB.innerHTML = '<option value="">(비교할 사진 없음)</option>';
@@ -1196,7 +1224,7 @@ function updateComparison() {
   const content = document.getElementById('compare-content');
   if (!content) return;
 
-  const dataList = (typeof allData !== 'undefined' && Array.isArray(allData)) ? allData : [];
+  const dataList = getInsightsSourceList();
   if (!dataList.length) {
     content.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:60px;color:var(--muted)">비교할 사진 데이터가 없습니다. 먼저 사진을 업로드해 분석해주세요.</div>';
     return;

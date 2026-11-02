@@ -22,12 +22,18 @@ function handleDragLeave(e) {
   if (dz) dz.classList.remove('drag-over');
 }
 
-async function getFilesFromEntry(entry) {
+async function getFilesFromEntry(entry, rootFolderName = '') {
   if (entry.isFile) {
     return new Promise((resolve) => {
-      entry.file(f => resolve([f]), () => resolve([]));
+      entry.file(f => {
+        if (rootFolderName) {
+          try { f._folderName = rootFolderName; } catch (e) {}
+        }
+        resolve([f]);
+      }, () => resolve([]));
     });
   } else if (entry.isDirectory) {
+    const folderLabel = rootFolderName || entry.name || '';
     const dirReader = entry.createReader();
     const entries = await new Promise((resolve) => {
       const all = [];
@@ -45,7 +51,7 @@ async function getFilesFromEntry(entry) {
     });
     const subFiles = [];
     for (const child of entries) {
-      const fList = await getFilesFromEntry(child);
+      const fList = await getFilesFromEntry(child, folderLabel);
       subFiles.push(...fList);
     }
     return subFiles;
@@ -280,6 +286,38 @@ function selectUploadAnalysisMode(mode) {
   }
 }
 
+function onUploadCollectionSelectChange(sel) {
+  const newInput = document.getElementById('upload-new-collection-name');
+  if (!newInput) return;
+  if (sel && sel.value === '__new__') {
+    newInput.style.display = 'block';
+    newInput.focus();
+  } else {
+    newInput.style.display = 'none';
+  }
+}
+window.onUploadCollectionSelectChange = onUploadCollectionSelectChange;
+
+function populateUploadCollectionSelect() {
+  const sel = document.getElementById('upload-collection-select');
+  if (!sel) return;
+  const cols = (typeof window.allCollections !== 'undefined' && Array.isArray(window.allCollections)) ? window.allCollections : [];
+  const activeCol = (typeof window.currentCollectionFilter !== 'undefined') ? String(window.currentCollectionFilter) : 'all';
+  let html = '<option value="">선택 안 함 (미분류 상태로 업로드)</option>';
+  cols.forEach(c => {
+    const isSel = (activeCol === String(c.id)) ? 'selected' : '';
+    html += `<option value="${c.id}" ${isSel}>🗂️ ${escapeUsageHtml(c.name)} (${c.count || 0}장)</option>`;
+  });
+  html += '<option value="__new__">+ 새 컬렉션 직접 입력하여 생성...</option>';
+  sel.innerHTML = html;
+  const newInput = document.getElementById('upload-new-collection-name');
+  if (newInput) {
+    newInput.style.display = 'none';
+    newInput.value = '';
+  }
+}
+window.populateUploadCollectionSelect = populateUploadCollectionSelect;
+
 function openUploadModal() {
   document.getElementById('upload-modal').style.display = 'flex';
   const uploadTierEl = document.getElementById('upload-tier');
@@ -288,6 +326,7 @@ function openUploadModal() {
   }
   const currentModeEl = document.getElementById('upload-analysis-mode');
   selectUploadAnalysisMode(currentModeEl && currentModeEl.value === 'fast' ? 'fast' : 'full');
+  populateUploadCollectionSelect();
   document.getElementById('upload-status').textContent = '';
   document.getElementById('progress-container').style.display = 'none';
   document.getElementById('progress-bar').style.width = '0%';
@@ -388,6 +427,22 @@ async function processBatchUpload(files) {
       formData.append('tier', tier);
       formData.append('category', category);
       formData.append('analysis_mode', analysisMode);
+
+      const colSelectEl = document.getElementById('upload-collection-select');
+      const colNewInputEl = document.getElementById('upload-new-collection-name');
+      const autoFolderBox = document.getElementById('upload-auto-folder-collection');
+      const selectedColVal = colSelectEl ? colSelectEl.value : '';
+      let fileFolderName = file._folderName || '';
+      if (!fileFolderName && file.webkitRelativePath && file.webkitRelativePath.includes('/')) {
+        fileFolderName = file.webkitRelativePath.split('/')[0].trim();
+      }
+      if (selectedColVal === '__new__' && colNewInputEl && colNewInputEl.value.trim()) {
+        formData.append('collection_name', colNewInputEl.value.trim());
+      } else if (selectedColVal && /^\d+$/.test(selectedColVal)) {
+        formData.append('collection_id', selectedColVal);
+      } else if ((!autoFolderBox || autoFolderBox.checked) && fileFolderName) {
+        formData.append('collection_name', fileFolderName);
+      }
 
       try {
         const result = await API.uploadPhoto(formData, force);

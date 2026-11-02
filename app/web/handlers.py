@@ -29,19 +29,26 @@ from app.config import (
     TEMPLATES_DIR,
 )
 from app.db import (
+    create_collection,
     delete_analyses,
+    delete_collection,
     ensure_db_columns,
     ensure_tag_tables,
+    filter_analyses_by_collection,
+    filter_analyses_by_date,
     find_existing_analysis,
     get_all_analyses,
+    get_all_collections,
     get_analyses_and_tags_for_export,
     get_analysis_by_id,
     get_analysis_row_by_id,
     get_focal_stats,
     get_photo_thumbnail_and_hash,
     get_tag_stats,
+    rename_collection,
     save_analysis,
     update_analysis,
+    update_collection_items,
     update_cross_check_opinion,
     update_lr_advice,
     update_photo_thumbnail,
@@ -301,6 +308,10 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 result["category"] = data.decode("utf-8", errors="replace").strip()
             elif b'name="analysis_mode"' in header:
                 result["analysis_mode"] = data.decode("utf-8", errors="replace").strip()
+            elif b'name="collection_id"' in header:
+                result["collection_id"] = data.decode("utf-8", errors="replace").strip()
+            elif b'name="collection_name"' in header:
+                result["collection_name"] = data.decode("utf-8", errors="replace").strip()
             elif b'name="sample_count"' in header:
                 result["sample_count"] = data.decode("utf-8", errors="replace").strip()
             elif b'name="image"' in header:
@@ -327,6 +338,9 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
 
         if path == "/api/analyses":
             return self._handle_get_analyses(parsed.query)
+
+        if path == "/api/collections":
+            return self._handle_get_collections()
 
         if path == "/api/usage-stats":
             return self._handle_get_usage_stats()
@@ -377,7 +391,19 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             burst_dist = int(query.get("burst_dist", ["15"])[0])
         except Exception:
             burst_dist = 15
+        date_basis = query.get("date_basis", ["smart"])[0]
+        date_from = query.get("date_from", [""])[0] or None
+        date_to = query.get("date_to", [""])[0] or None
+        collection_id = query.get("collection_id", [""])[0] or None
         data = get_all_analyses(self.db_path, max_hamming_dist=burst_dist)
+        if collection_id:
+            data = filter_analyses_by_collection(data, collection_id=collection_id)
+        if date_from or date_to or date_basis == "captured_missing":
+            data = filter_analyses_by_date(data, date_basis=date_basis, date_from=date_from, date_to=date_to)
+        self._send_json_ok(data)
+
+    def _handle_get_collections(self) -> None:
+        data = get_all_collections(self.db_path)
         self._send_json_ok(data)
 
     def _handle_get_usage_stats(self) -> None:
@@ -390,7 +416,18 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             min_count = max(1, int(query.get("min_count", ["1"])[0]))
         except Exception:
             min_count = 1
-        data = get_tag_stats(self.db_path, min_count=min_count)
+        date_basis = query.get("date_basis", ["smart"])[0]
+        date_from = query.get("date_from", [""])[0] or None
+        date_to = query.get("date_to", [""])[0] or None
+        collection_id = query.get("collection_id", [""])[0] or None
+        data = get_tag_stats(
+            self.db_path,
+            min_count=min_count,
+            date_basis=date_basis,
+            date_from=date_from,
+            date_to=date_to,
+            collection_id=collection_id,
+        )
         self._send_json_ok(data)
 
     def _handle_get_focal_stats(self, query_str: str) -> None:
@@ -399,7 +436,18 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             min_count = max(1, int(query.get("min_count", ["1"])[0]))
         except Exception:
             min_count = 1
-        data = get_focal_stats(self.db_path, min_count=min_count)
+        date_basis = query.get("date_basis", ["smart"])[0]
+        date_from = query.get("date_from", [""])[0] or None
+        date_to = query.get("date_to", [""])[0] or None
+        collection_id = query.get("collection_id", [""])[0] or None
+        data = get_focal_stats(
+            self.db_path,
+            min_count=min_count,
+            date_basis=date_basis,
+            date_from=date_from,
+            date_to=date_to,
+            collection_id=collection_id,
+        )
         self._send_json_ok(data)
 
     def _handle_get_image(self, path: str, query_str: str) -> None:
@@ -473,6 +521,10 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 return self._handle_post_rate()
             if path == "/api/delete-analysis":
                 return self._handle_post_delete_analysis()
+            if path == "/api/collections":
+                return self._handle_post_collections()
+            if path == "/api/collections/items":
+                return self._handle_post_collection_items()
             if path == "/api/export-xmp":
                 return self._handle_post_export_xmp()
 
@@ -583,16 +635,78 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             duplicate = False
 
         sampled_scores = get_last_sampled_scores()
+        assigned_collection = None
+        col_name_param = str(form_data.get("collection_name") or "").strip()
+        col_id_param = str(form_data.get("collection_id") or "").strip()
+        if col_name_param:
+            created_col = create_collection(self.db_path, col_name_param)
+            assigned_collection = update_collection_items(
+                self.db_path, created_col["id"], [record_id], action="add"
+            )
+        elif col_id_param and col_id_param.isdigit():
+            assigned_collection = update_collection_items(
+                self.db_path, int(col_id_param), [record_id], action="add"
+            )
+
         res_data = {
             "success": True,
             "record_id": record_id,
             "analysis": analysis_dict,
             "duplicate": duplicate,
         }
+        if assigned_collection:
+            res_data["collection"] = assigned_collection
         if sampled_scores:
             res_data["sampled_scores"] = sampled_scores
             res_data["median_score"] = analysis_dict.get("final_score")
         self._send_json_ok(res_data)
+
+    def _handle_post_collections(self) -> None:
+        data = self._read_json_body()
+        action = str(data.get("action", "create")).strip().lower()
+        if action == "delete":
+            cid = int(data.get("id"))
+            if not delete_collection(self.db_path, cid):
+                self._send_json_error(HTTPStatus.NOT_FOUND, f"컬렉션 ID {cid}를 찾을 수 없습니다.")
+                return
+            self._send_json_ok({"success": True, "deleted_id": cid, "collections": get_all_collections(self.db_path)})
+            return
+        if action == "rename":
+            cid = int(data.get("id"))
+            new_name = str(data.get("name", "")).strip()
+            color = data.get("color")
+            updated = rename_collection(self.db_path, cid, new_name, color=color)
+            if not updated:
+                self._send_json_error(HTTPStatus.NOT_FOUND, f"컬렉션 ID {cid}를 찾을 수 없습니다.")
+                return
+            self._send_json_ok({"success": True, "collection": updated, "collections": get_all_collections(self.db_path)})
+            return
+        # Default: 'create'
+        name = str(data.get("name", "")).strip()
+        color = str(data.get("color", "#4f46e5")).strip() or "#4f46e5"
+        created = create_collection(self.db_path, name, color=color)
+        initial_ids = data.get("analysis_ids")
+        if isinstance(initial_ids, list) and initial_ids:
+            created = update_collection_items(self.db_path, created["id"], initial_ids, action="add") or created
+        self._send_json_ok({"success": True, "collection": created, "collections": get_all_collections(self.db_path)})
+
+    def _handle_post_collection_items(self) -> None:
+        data = self._read_json_body()
+        cid = int(data.get("collection_id"))
+        action = str(data.get("action", "add")).strip().lower()
+        raw_ids = data.get("analysis_ids") or data.get("ids") or []
+        if not isinstance(raw_ids, list):
+            raw_ids = [raw_ids]
+        analysis_ids = [int(i) for i in raw_ids if str(i).lstrip("-").isdigit()]
+        updated = update_collection_items(self.db_path, cid, analysis_ids, action=action)
+        if not updated:
+            self._send_json_error(HTTPStatus.NOT_FOUND, f"컬렉션 ID {cid}를 찾을 수 없습니다.")
+            return
+        self._send_json_ok({
+            "success": True,
+            "collection": updated,
+            "collections": get_all_collections(self.db_path),
+        })
 
     def _handle_post_reanalyze(self) -> None:
         data = self._read_json_body()

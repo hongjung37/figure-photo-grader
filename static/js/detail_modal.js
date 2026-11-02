@@ -310,6 +310,8 @@ function openDetailModal(id) {
         <b>종합 총평:</b> ${_escapeDetailHtml(item.final_reason)}
       </div>
 
+      ${renderDetailCollectionSection(item)}
+
       <!-- 사용자 직접 평점 매기기 & AI 비교 영역 -->
       <div class="user-score-section">
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
@@ -573,7 +575,82 @@ function navigateDetail(dir) {
   }
 }
 
+function renderDetailCollectionSection(item) {
+  const cols = (typeof allCollections !== 'undefined' && Array.isArray(allCollections))
+    ? allCollections
+    : (Array.isArray(window.allCollections) ? window.allCollections : []);
+  const itemColIds = Array.isArray(item.collection_ids) ? item.collection_ids.map(Number) : [];
+  const memberCols = cols.filter(c => itemColIds.includes(Number(c.id)));
+  const availableCols = cols.filter(c => !itemColIds.includes(Number(c.id)));
+
+  const badgesHtml = memberCols.length > 0
+    ? memberCols.map(c => `
+        <span style="display:inline-flex;align-items:center;gap:5px;background:#f0fdfa;color:#0f766e;border:1px solid #99f6e4;padding:3px 9px;border-radius:999px;font-size:0.76rem;font-weight:800;">
+          📁 ${_escapeDetailHtml(c.name)}
+          <button type="button" onclick="togglePhotoCollectionInDetail(${item.id}, ${c.id}, 'remove')" style="border:none;background:none;color:#0f766e;cursor:pointer;font-weight:900;padding:0 2px;font-size:0.75rem;" title="이 컬렉션에서 제외">✕</button>
+        </span>
+      `).join('')
+    : '<span style="font-size:0.76rem;color:var(--muted);">소속된 컬렉션 없음 (미분류)</span>';
+
+  return `
+    <div style="background:var(--card-bg);border:1px solid var(--line);border-radius:10px;padding:9px 12px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+        <span style="font-size:0.8rem;font-weight:800;color:var(--navy);">🗂️ 소속 컬렉션:</span>
+        ${badgesHtml}
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+        <select id="detail-collection-add-select-${item.id}" class="select-input" style="padding:3px 8px;font-size:0.75rem;height:auto;" onchange="onDetailCollectionSelectChange(${item.id}, this)">
+          <option value="">+ 컬렉션에 추가...</option>
+          ${availableCols.map(c => `<option value="${c.id}">📁 ${_escapeDetailHtml(c.name)}</option>`).join('')}
+          <option value="__new__">✨ 새 컬렉션 만들어 추가...</option>
+        </select>
+      </div>
+    </div>
+  `;
+}
+
+async function togglePhotoCollectionInDetail(recordId, collectionId, action) {
+  try {
+    const res = await API.updateCollectionItems(action, Number(collectionId), [Number(recordId)]);
+    if (!res.ok || !res.data || !res.data.success) {
+      alert((res.data && res.data.error) || '컬렉션 변경 실패');
+      return;
+    }
+    if (typeof loadData === 'function') {
+      await loadData();
+    }
+    openDetailModal(recordId);
+  } catch (err) {
+    alert(`오류: ${err.message}`);
+  }
+}
+
+async function onDetailCollectionSelectChange(recordId, selectEl) {
+  if (!selectEl || !selectEl.value) return;
+  const val = selectEl.value;
+  selectEl.value = '';
+  if (val === '__new__') {
+    const name = prompt('새로 만들고 이 사진을 담을 컬렉션(앨범) 이름을 입력하세요:');
+    if (!name || !name.trim()) return;
+    try {
+      const createRes = await API.createCollection(name.trim());
+      if (!createRes.ok || !createRes.data || !createRes.data.collection) {
+        alert((createRes.data && createRes.data.error) || '컬렉션 생성 실패');
+        return;
+      }
+      await togglePhotoCollectionInDetail(recordId, createRes.data.collection.id, 'add');
+    } catch (err) {
+      alert(`오류: ${err.message}`);
+    }
+    return;
+  }
+  await togglePhotoCollectionInDetail(recordId, Number(val), 'add');
+}
+
 // Global scope export
+window.renderDetailCollectionSection = renderDetailCollectionSection;
+window.togglePhotoCollectionInDetail = togglePhotoCollectionInDetail;
+window.onDetailCollectionSelectChange = onDetailCollectionSelectChange;
 window.renderCrossCheckOpinion = renderCrossCheckOpinion;
 window.renderExifSummary = renderExifSummary;
 window.openDetailModal = openDetailModal;

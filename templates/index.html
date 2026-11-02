@@ -40,6 +40,78 @@
 
 <main class="main-container">
   <div class="controls">
+    <!-- Global Scope Bar: Collections (Phase 2) + Date Scope & Shooting Sessions (Phase 1) -->
+    <div id="date-scope-panel" class="filter-group" style="width:100%;padding:10px 12px;margin-bottom:8px;background:var(--card-sub, #f8fafc);border:1px solid var(--line, #e2e8f0);border-radius:12px;display:flex;flex-direction:column;gap:8px;">
+      <!-- Row 1: Lightroom-style Virtual Collections Bar -->
+      <div id="collection-scope-row" style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;width:100%;padding-bottom:8px;border-bottom:1px dashed var(--line, #e2e8f0);">
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          <span style="font-size:0.84rem;font-weight:800;color:var(--navy);display:inline-flex;align-items:center;gap:4px;">🗂️ 컬렉션(앨범):</span>
+          <div id="collection-scope-chips" style="display:inline-flex;gap:5px;flex-wrap:wrap;align-items:center;"></div>
+          <button type="button" class="filter-btn collection-chip-btn" style="padding:3px 9px;font-size:0.75rem;font-weight:700;color:#4f46e5;border-color:#c7d2fe;background:rgba(79,70,229,0.06);" onclick="createNewCollectionPrompt()">+ 새 컬렉션 만들기</button>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          <div id="collection-manage-btns" style="display:none;align-items:center;gap:5px;">
+            <button type="button" class="filter-btn collection-chip-btn" style="padding:2px 8px;font-size:0.73rem;color:#0284c7;" onclick="renameActiveCollectionPrompt()" title="현재 선택된 컬렉션 이름 변경">✏️ 이름 변경</button>
+            <button type="button" class="filter-btn collection-chip-btn" style="padding:2px 8px;font-size:0.73rem;color:#e11d48;border-color:#fecdd3;" onclick="deleteActiveCollectionConfirm()" title="컬렉션만 삭제 (원본 사진 및 분석 기록은 유지됨)">🗑️ 컬렉션 삭제</button>
+          </div>
+          <button type="button" id="btn-toggle-batch-select" class="filter-btn collection-chip-btn" style="padding:3px 10px;font-size:0.75rem;font-weight:800;color:#0d9488;border-color:#99f6e4;" onclick="toggleBatchSelectMode()">☑️ 사진 선택·컬렉션 정리</button>
+        </div>
+      </div>
+
+      <!-- Optional Row 1-b: Batch Selection Action Bar (shown when Batch Select Mode is active) -->
+      <div id="batch-select-bar" style="display:none;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;width:100%;padding:8px 12px;background:rgba(13,148,136,0.08);border:1px solid rgba(13,148,136,0.35);border-radius:10px;">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span style="font-size:0.82rem;font-weight:800;color:#0f766e;">☑️ 다중 선택 모드: <strong id="batch-selected-count">0</strong>장 선택됨</span>
+          <button type="button" class="filter-btn collection-chip-btn" style="padding:2px 8px;font-size:0.74rem;font-weight:700;" onclick="selectAllFilteredPhotos()">현재 필터 사진 전체 선택</button>
+          <button type="button" class="filter-btn collection-chip-btn" style="padding:2px 8px;font-size:0.74rem;" onclick="clearBatchSelection()">선택 해제</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          <select id="batch-target-collection" class="select-input" style="padding:3px 8px;font-size:0.76rem;height:auto;min-width:170px;">
+            <option value="">담을 컬렉션 선택...</option>
+          </select>
+          <button type="button" class="upload-btn" style="padding:4px 10px;font-size:0.76rem;background:#4f46e5;" onclick="applyBatchAddToCollection()">📥 선택 사진 담기</button>
+          <button type="button" id="btn-batch-remove-from-col" class="upload-btn" style="display:none;padding:4px 10px;font-size:0.76rem;background:#e11d48;" onclick="applyBatchRemoveFromCurrentCollection()">📤 현재 컬렉션에서 제외</button>
+          <button type="button" class="filter-btn collection-chip-btn" style="padding:3px 8px;font-size:0.74rem;" onclick="toggleBatchSelectMode(false)">닫기 ✕</button>
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;width:100%;">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span style="font-size:0.84rem;font-weight:800;color:var(--navy);display:inline-flex;align-items:center;gap:4px;">📅 분석 기간 범위:</span>
+          <div style="display:inline-flex;background:var(--filter-btn-bg, #e2e8f0);border:1px solid var(--line, #cbd5e1);border-radius:8px;padding:2px;gap:2px;">
+            <button type="button" id="date-basis-smart" class="toggle-logic-btn active" onclick="setDateBasis('smart')" title="EXIF 촬영일이 있으면 촬영일 기준, 없으면 AI 분석일 기준으로 자동 매칭">✨ 스마트(촬영일 우선)</button>
+            <button type="button" id="date-basis-captured" class="toggle-logic-btn" onclick="setDateBasis('captured')" title="순수 카메라 EXIF 촬영 일시(captured_at) 기준">📷 촬영일(EXIF)</button>
+            <button type="button" id="date-basis-created" class="toggle-logic-btn" onclick="setDateBasis('created')" title="대시보드에 업로드하여 분석한 일시(created_at) 기준">🤖 분석 등록일</button>
+          </div>
+
+          <div style="display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;">
+            <button type="button" class="filter-btn date-preset-btn active" data-date-preset="all" onclick="setDatePreset('all', this)" style="padding:3px 9px;font-size:0.76rem;">전체 기간</button>
+            <button type="button" class="filter-btn date-preset-btn" data-date-preset="today" onclick="setDatePreset('today', this)" style="padding:3px 9px;font-size:0.76rem;">오늘</button>
+            <button type="button" class="filter-btn date-preset-btn" data-date-preset="7d" onclick="setDatePreset('7d', this)" style="padding:3px 9px;font-size:0.76rem;">최근 7일</button>
+            <button type="button" class="filter-btn date-preset-btn" data-date-preset="30d" onclick="setDatePreset('30d', this)" style="padding:3px 9px;font-size:0.76rem;">최근 30일</button>
+            <button type="button" class="filter-btn date-preset-btn" data-date-preset="this_month" onclick="setDatePreset('this_month', this)" style="padding:3px 9px;font-size:0.76rem;">이번 달</button>
+            <button type="button" class="filter-btn date-preset-btn" data-date-preset="missing_exif" onclick="setDatePreset('missing_exif', this)" style="padding:3px 9px;font-size:0.76rem;" title="EXIF 촬영 일시가 없는 사진만 보기">EXIF 날짜 미기록</button>
+          </div>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          <span style="font-size:0.75rem;font-weight:700;color:var(--muted);">직접 지정:</span>
+          <input type="date" id="date-scope-from" class="select-input" style="padding:2px 6px;font-size:0.76rem;height:auto;" onchange="onCustomDateRangeChange()">
+          <span style="color:var(--muted);font-size:0.78rem;">~</span>
+          <input type="date" id="date-scope-to" class="select-input" style="padding:2px 6px;font-size:0.76rem;height:auto;" onchange="onCustomDateRangeChange()">
+          <button type="button" id="btn-clear-date-scope" class="filter-btn date-preset-btn" style="display:none;padding:2px 8px;font-size:0.74rem;color:#ef4444;border-color:#fca5a5;background:#fff5f5;font-weight:700;" onclick="clearDateScope()">✕ 기간 해제</button>
+        </div>
+      </div>
+
+      <!-- Auto-detected Shooting / Analysis Date Session Chips -->
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;width:100%;">
+        <span style="font-size:0.75rem;font-weight:700;color:var(--muted);">🗓️ 일자별 세션 빠른 선택:</span>
+        <div id="date-session-chips" style="display:inline-flex;gap:5px;flex-wrap:wrap;align-items:center;"></div>
+        <span id="active-date-scope-summary" style="margin-left:auto;font-size:0.76rem;font-weight:800;color:#4f46e5;display:none;"></span>
+      </div>
+    </div>
+
     <div class="filter-group" style="width:100%;justify-content:space-between;">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         <span style="font-size:0.84rem;font-weight:700;color:var(--muted)">등급:</span>
@@ -351,13 +423,26 @@
     </div>
 
     <label style="font-weight:700;font-size:0.84rem;display:block;margin-bottom:6px;">피규어 촬영 세부 유형:</label>
-    <select class="select-input" id="upload-category" style="width:100%;margin-bottom:14px;">
+    <select class="select-input" id="upload-category" style="width:100%;margin-bottom:12px;">
       <option value="auto">자동 판별 (Gemini가 사진을 분석하여 자동 분류)</option>
       <option value="macro">🔍 접사/디테일 (도색, 접합선, 데칼 초점 심사)</option>
       <option value="snap">🌿 일상/야외 스냅 (배경 조화, 자연광, 생활감 심사)</option>
       <option value="staging">🎬 스튜디오 연출/디오라마 (드라마틱 조명, 콘트라스트)</option>
       <option value="general">📷 일반 피규어 촬영 (기본 전시/조형 중심)</option>
     </select>
+
+    <label style="font-weight:700;font-size:0.84rem;display:block;margin-bottom:6px;">🗂️ 업로드 후 담을 컬렉션(앨범):</label>
+    <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px;">
+      <select class="select-input" id="upload-collection-select" style="width:100%;" onchange="onUploadCollectionSelectChange(this)">
+        <option value="">선택 안 함 (미분류 상태로 업로드)</option>
+        <option value="__new__">+ 새 컬렉션 직접 입력하여 생성...</option>
+      </select>
+      <input type="text" id="upload-new-collection-name" class="select-input" placeholder="새 컬렉션 이름 입력 (예: 2026-11 아키하바라 출사)" style="display:none;width:100%;padding:7px 10px;font-size:0.84rem;">
+      <label style="display:flex;align-items:center;gap:6px;font-size:0.78rem;color:var(--muted);cursor:pointer;">
+        <input type="checkbox" id="upload-auto-folder-collection" checked>
+        <span>📁 폴더 통째로 선택/드롭 시 <b>폴더 이름</b>으로 컬렉션 자동 생성·배정</span>
+      </label>
+    </div>
 
     <label style="display:flex;align-items:flex-start;gap:8px;font-size:0.84rem;margin-bottom:14px;cursor:pointer;">
       <input type="checkbox" id="upload-force" style="margin-top:3px;">

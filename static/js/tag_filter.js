@@ -170,7 +170,8 @@ function populateTagSelectorAndQuickTags() {
   const tagFreq = {};
   const tagsByCategory = {};
 
-  const dataList = (typeof allData !== 'undefined' && Array.isArray(allData)) ? allData : [];
+  const rawList = (typeof allData !== 'undefined' && Array.isArray(allData)) ? allData : [];
+  const dataList = (typeof getScopedData === 'function') ? getScopedData(rawList) : rawList;
   dataList.forEach(d => {
     const tags = d.aesthetic_tags || {};
     for (const [ckey, list] of Object.entries(tags)) {

@@ -95,20 +95,72 @@ const API = {
     return await res.json();
   },
 
+  async fetchCollections() {
+    const res = await fetch(`/api/collections?_t=${Date.now()}`, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`컬렉션 조회 오류: ${res.status}`);
+    return await res.json();
+  },
+
+  async createCollection(name, color = '#4f46e5', analysisIds = []) {
+    const res = await fetch('/api/collections', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'create', name, color, analysis_ids: analysisIds })
+    });
+    return await res.json();
+  },
+
+  async renameCollection(id, name, color = null) {
+    const payload = { action: 'rename', id, name };
+    if (color) payload.color = color;
+    const res = await fetch('/api/collections', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    return await res.json();
+  },
+
+  async deleteCollection(id) {
+    const res = await fetch('/api/collections', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'delete', id })
+    });
+    return await res.json();
+  },
+
+  async updateCollectionItems(collectionId, analysisIds, action = 'add') {
+    const res = await fetch('/api/collections/items', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ collection_id: collectionId, analysis_ids: analysisIds, action })
+    });
+    return await res.json();
+  },
+
   async fetchUsageStats() {
     const res = await fetch(`/api/usage-stats?_t=${Date.now()}`, { cache: 'no-store' });
     if (!res.ok) throw new Error(`사용 통계 조회 오류: ${res.status}`);
     return await res.json();
   },
 
-  async fetchTagStats(minCount = 1) {
-    const res = await fetch(`/api/tag-stats?min_count=${minCount}&_t=${Date.now()}`, { cache: 'no-store' });
+  async fetchTagStats(minCount = 1, dateScope = {}) {
+    const params = new URLSearchParams({ min_count: String(minCount), _t: String(Date.now()) });
+    if (dateScope && dateScope.dateBasis) params.set('date_basis', dateScope.dateBasis);
+    if (dateScope && dateScope.dateFrom) params.set('date_from', dateScope.dateFrom);
+    if (dateScope && dateScope.dateTo) params.set('date_to', dateScope.dateTo);
+    const res = await fetch(`/api/tag-stats?${params.toString()}`, { cache: 'no-store' });
     if (!res.ok) throw new Error(`태그 통계 조회 오류: ${res.status}`);
     return await res.json();
   },
 
-  async fetchFocalStats(minCount = 1) {
-    const res = await fetch(`/api/focal-stats?min_count=${minCount}&_t=${Date.now()}`, { cache: 'no-store' });
+  async fetchFocalStats(minCount = 1, dateScope = {}) {
+    const params = new URLSearchParams({ min_count: String(minCount), _t: String(Date.now()) });
+    if (dateScope && dateScope.dateBasis) params.set('date_basis', dateScope.dateBasis);
+    if (dateScope && dateScope.dateFrom) params.set('date_from', dateScope.dateFrom);
+    if (dateScope && dateScope.dateTo) params.set('date_to', dateScope.dateTo);
+    const res = await fetch(`/api/focal-stats?${params.toString()}`, { cache: 'no-store' });
     if (!res.ok) throw new Error(`화각 통계 조회 오류: ${res.status}`);
     return await res.json();
   },
