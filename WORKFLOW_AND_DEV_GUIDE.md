@@ -9,7 +9,8 @@
 ```mermaid
 flowchart TD
     subgraph Client ["Client Layer (Responsive Web UI)"]
-        UI_Gallery["갤러리 / 1:1 비교 / 블라인드 토너먼트"]
+        UI_Gallery["갤러리 / 1:1 비교 / 블라인드 토너먼트 / 화각 필터"]
+        UI_Insights["📊 태그 및 화각 인사이트 (Tag / Focal Insights)"]
         UI_Settings["⚙️ 모델 설정 모달 (작업별 LLM 지정 / 프리셋)"]
         UI_Detail["사진 상세 모달 (초점 줌 / Lr 수치 / SNS 크롭)"]
         UI_Usage["📊 API 사용량 모니터링 (모델별/기능별 집계)"]
@@ -80,6 +81,20 @@ flowchart TD
 3. 브라우저에서 버튼 클릭 시 원본 이미지 위에 반응형 크롭 박스(3분할 가이드)를 즉시 오버레이.
 4. HTML5 Canvas를 이용해 원본 해상도에서 무손실 크롭 다운로드 수행 (서버 부하 0%).
 
+### 2.4 화각(초점거리) 추출 및 렌즈 성능 분석 파이프라인
+1. **광학 메타데이터 우선순위 추출 (`extract_focal_length_mm`, `extract_lens_model`)**:
+   - 1순위: EXIF `FocalLengthIn35mmFilm` (풀프레임 기준 환산 화각)
+   - 2순위: EXIF `FocalLength` (단일 초점거리)
+   - 3순위: AI 감지 설정(`detected_camera_settings.focal_length` 또는 단렌즈 `lens` OCR 텍스트)
+   - 4순위: 메타데이터가 없는 웹/스크린샷 사진은 `unknown (화각 미식별)`으로 안전 분류
+2. **사진학적 5대 표준 화각대 버킷팅 (`classify_focal_band`)**:
+   - `wide_24` (24mm 이하 광각), `semi_wide_35` (35mm 부근 준광각), `standard_50` (50mm 부근 표준), `portrait_85` (70~85mm 준망원), `tele_100` (100mm+ 망원/매크로).
+3. **핵심 강점/약점 피드백 클러스터링 (`summarizeFeedbackThemes`)**:
+   - 화각대별로 누적된 AI 심사평에서 칼초점, 배경 분리(보케), 색감 대비, 공간감 연출, 림라이트 부족, 가장자리 잘림 등 주요 사진학적 테마를 빈도순으로 자동 그룹핑하고 실제 심사평 인용문을 매핑.
+4. **대시보드 실시간 연동**:
+   - `GET /api/focal-stats` API 및 클라이언트 캐시 연산으로 화각별 4대 심사 영역(구도·조명·색감·기술) 성적표 및 단일 mm 단위 정밀 랭킹 렌더링.
+   - 갤러리 상단 화각 필터 바 및 개별 사진 카드 초점거리 뱃지(`🔭 50mm`) 동시 연동.
+
 ---
 
 ## 3. 프롬프트 엔지니어링 설계 원칙
@@ -103,7 +118,7 @@ flowchart TD
   - `static/js/crop_viewer.js`: SNS 크롭 연산, 캔버스 다운로드, 캡션 클립보드 복사
   - `static/js/tag_filter.js`: 미학 태그 필터링 및 8대 어휘 카탈로그
   - `static/js/tournament.js`: 블라인드 1:1 토너먼트 매치, 브래킷 관리, 우승작 선정
-  - `static/js/tag_insights.js`: 미학 태그 통계 차트 및 1:1 사진 비교 뷰
+  - `static/js/tag_insights.js`: 미학 태그 및 5대 화각(초점거리)별 렌즈 성능/강점·약점 심층 분석 대시보드 및 1:1 사진 비교 뷰
   - `static/js/modals.js`: 일괄 사진 업로드(드롭존), API 사용량 통계 모달, 모델 설정 모달
   - `static/dashboard.js`: 갤러리 40장 단위 프로그레시브 청크 렌더러(`IntersectionObserver`), 테마 토글, 사진 상세 검사기(EXIF, 줌, 재평가)
 - **백엔드 서비스 분리**:
@@ -124,6 +139,8 @@ flowchart TD
   - 불완전한 JSON 및 오탈자 Enum 입력 시 `from_llm_json`의 정상 복원 여부 검증.
 - **재평가 및 크로스체크 엔드포인트 검증 (`tests/test_reanalyze.py`)**:
   - 웹 대시보드 내 전체 재평가 및 OpenAI 단독 크로스체크 API 통합 검증.
+- **태그 인사이트 및 화각 통계 검증 (`tests/test_tag_insights_and_rating.py`)**:
+  - 사용자 직접 평가 저장/로드, 미학 태그 집계, 초점거리(mm) 추출 우선순위, 5대 표준 화각대 분류 및 `/api/focal-stats` 엔드포인트 검증.
 - **Node.js 헤드리스 렌더링 검증 (`tests/test_dashboard_modularization.py`)**:
   - Node.js 환경에서 크롭 좌표 연산(`calculateExactCrop`)과 HTML 이스케이프가 브라우저 없이도 오류 없이 실행되는지 자동 검증.
 
@@ -135,7 +152,7 @@ flowchart TD
 # 가상환경 활성화
 .\.work\venv\Scripts\Activate.ps1
 
-# 전체 유닛 테스트 실행 (87개 전 항목 검증)
+# 전체 유닛 테스트 실행 (108개 전 항목 검증)
 $env:PYTHONPATH="c:\Users\gkwjd\photo-recovery"
 python -m unittest discover -s tests
 
