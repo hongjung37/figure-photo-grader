@@ -7,12 +7,15 @@ from app.db.connection import (
     sync_analysis_tags,
 )
 from app.db.repository import (
+    classify_focal_band,
     delete_analyses,
+    extract_focal_length_mm,
     find_existing_analysis,
     get_all_analyses,
     get_analyses_and_tags_for_export,
     get_analysis_by_id,
     get_analysis_row_by_id,
+    get_focal_stats,
     get_photo_thumbnail_and_hash,
     get_tag_stats,
     save_analysis,
@@ -26,15 +29,18 @@ from app.db.repository import (
 )
 
 __all__ = [
+    "classify_focal_band",
     "delete_analyses",
     "ensure_db_columns",
     "ensure_tag_tables",
+    "extract_focal_length_mm",
     "find_existing_analysis",
     "get_all_analyses",
     "get_analyses_and_tags_for_export",
     "get_analysis_by_id",
     "get_analysis_row_by_id",
     "get_db_connection",
+    "get_focal_stats",
     "get_photo_thumbnail_and_hash",
     "get_tag_stats",
     "save_analysis",

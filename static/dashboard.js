@@ -56,6 +56,7 @@ function updateThemeButton(isDark) {
 let allData = (typeof window !== 'undefined' && window.allData) || [];
 let currentFilter = 'all';
 let currentCatFilter = 'all';
+let currentFocalFilter = 'all'; // 'all' | 'wide_24' | 'semi_wide_35' | 'standard_50' | 'portrait_85' | 'tele_100' | 'unknown' | 'mm:<int>'
 let currentSort = 'score_desc';
 let currentDetailId = null;
 let currentBurstDist = 15;
@@ -268,9 +269,10 @@ function renderScoreDistPanel() {
     return;
   }
 
-  // Filter items by current category/tag/burst (excluding grade & bin filter so full distribution is visible)
+  // Filter items by current category/focal/tag/burst (excluding grade & bin filter so full distribution is visible)
   const baseList = allData.filter(item => {
     if (currentCatFilter !== 'all' && item.figure_category !== currentCatFilter) return false;
+    if (currentFocalFilter !== 'all' && !matchFocalFilter(item, currentFocalFilter)) return false;
     if (currentBurstFilter === 'burst_only' && !item.is_burst) return false;
     if (currentBurstFilter === 'best_only' && item.is_burst && !item.is_best_pick) return false;
     if (typeof selectedTags !== 'undefined' && selectedTags && selectedTags.size > 0 && typeof getAllTagsFromItem === 'function') {
@@ -375,6 +377,89 @@ function setCatFilter(cat, btn) {
   renderGallery();
 }
 
+function getItemFocalMm(item) {
+  if (!item) return null;
+  if (item.focal_length_mm !== undefined && item.focal_length_mm !== null) {
+    const num = Number(item.focal_length_mm);
+    if (!Number.isNaN(num) && num > 0) return num;
+  }
+  if (typeof window.extractFocalLengthMm === 'function') {
+    return window.extractFocalLengthMm(item);
+  }
+  const exif = item.exif || {};
+  const det = item.detected_camera_settings || {};
+  const raw = exif.FocalLengthIn35mmFilm || exif.FocalLength || det.focal_length || det.FocalLength;
+  if (raw !== undefined && raw !== null) {
+    const m = String(raw).match(/(\d+(?:\.\d+)?)/);
+    if (m) {
+      const fval = parseFloat(m[1]);
+      if (fval >= 1 && fval <= 2000) return Math.round(fval * 10) / 10;
+    }
+  }
+  const lensStr = String(det.lens || exif.LensModel || '');
+  if (lensStr && !/\d+\s*-\s*\d+\s*mm/i.test(lensStr)) {
+    const mp = lensStr.match(/\b(\d{2,3}(?:\.\d+)?)\s*mm\b/i);
+    if (mp) return parseFloat(mp[1]);
+  }
+  return null;
+}
+
+function getItemFocalBandKey(item) {
+  if (item && item.focal_band_key) return item.focal_band_key;
+  const fl = getItemFocalMm(item);
+  if (fl === null || fl <= 0) return 'unknown';
+  if (fl <= 28) return 'wide_24';
+  if (fl <= 40) return 'semi_wide_35';
+  if (fl <= 60) return 'standard_50';
+  if (fl <= 90) return 'portrait_85';
+  return 'tele_100';
+}
+
+function matchFocalFilter(item, focalKey) {
+  if (!focalKey || focalKey === 'all') return true;
+  if (focalKey.startsWith('mm:')) {
+    const targetMm = parseInt(focalKey.slice(3), 10);
+    const fl = getItemFocalMm(item);
+    return fl !== null && Math.round(fl) === targetMm;
+  }
+  return getItemFocalBandKey(item) === focalKey;
+}
+
+function updateFocalExactBadge() {
+  const badge = document.getElementById('active-focal-exact-badge');
+  const text = document.getElementById('active-focal-exact-text');
+  if (!badge || !text) return;
+  if (currentFocalFilter && currentFocalFilter.startsWith('mm:')) {
+    const mmVal = currentFocalFilter.slice(3);
+    text.textContent = `🔭 단일 화각: ${mmVal}mm`;
+    badge.style.display = 'inline-flex';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+function setFocalFilter(focalKey, btn) {
+  currentFocalFilter = focalKey || 'all';
+  window.currentFocalFilter = currentFocalFilter;
+  document.querySelectorAll('.focal-btn').forEach(b => {
+    const bKey = b.getAttribute ? b.getAttribute('data-focal-key') : null;
+    if (btn) {
+      b.classList.toggle('active', b === btn);
+    } else if (bKey) {
+      b.classList.toggle('active', bKey === currentFocalFilter);
+    } else {
+      b.classList.remove('active');
+    }
+  });
+  updateFocalExactBadge();
+  renderScoreDistPanel();
+  renderGallery();
+}
+
+function clearFocalFilter() {
+  setFocalFilter('all');
+}
+
 async function loadData() {
   const data = await API.fetchAnalyses(currentBurstDist);
   allData = Array.isArray(data) ? data : [];
@@ -438,7 +523,7 @@ function setFilter(filter, btn) {
     updateScoreBinFilterBadge();
     renderScoreDistPanel();
   }
-  document.querySelectorAll('.filter-btn:not(.burst-btn):not(.cat-btn):not(#btn-toggle-score-dist)').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.filter-btn:not(.burst-btn):not(.cat-btn):not(.focal-btn):not(#btn-toggle-score-dist)').forEach(b => b.classList.remove('active'));
   if (btn) btn.classList.add('active');
   renderGallery();
 }
@@ -459,6 +544,9 @@ function filterList(list) {
 
     // 2. Category filter
     if (currentCatFilter !== 'all' && item.figure_category !== currentCatFilter) return false;
+
+    // 2-b. Focal length filter
+    if (currentFocalFilter !== 'all' && !matchFocalFilter(item, currentFocalFilter)) return false;
 
     // 3. Burst filter
     if (currentBurstFilter === 'burst_only' && !item.is_burst) return false;
@@ -536,6 +624,7 @@ function renderGalleryCard(item) {
   const modelBadgeText = (window.ModelSettings && item.model)
     ? window.ModelSettings.formatBadge(item.model)
     : (item.model || '');
+  const focalMm = getItemFocalMm(item);
   return `
     <article class="card" onclick="openDetailModal(${item.id})">
       <button class="card-delete-btn" title="이 분석 기록 삭제" onclick="event.stopPropagation(); deleteAnalysisRecord(${item.id})">🗑️</button>
@@ -547,6 +636,7 @@ function renderGalleryCard(item) {
             <div style="margin-top:4px;font-size:0.72rem;color:var(--muted);">📷 ${escapeHtml(formatCapturedAt(item.captured_at))}</div>
             <span style="display:inline-block;margin-top:4px;font-size:0.75rem;font-weight:700;color:#4f46e5;background:#eef2ff;padding:2px 7px;border-radius:6px;">${escapeHtml(item.figure_category)}</span>
             <span style="display:inline-block;margin-top:4px;margin-left:4px;font-size:0.75rem;font-weight:700;color:#0d9488;background:#f0fdfa;padding:2px 7px;border-radius:6px;">🎯 ${escapeHtml(item.focus_status || '완벽 칼초점')}</span>
+            ${focalMm !== null ? `<span style="display:inline-block;margin-top:4px;margin-left:4px;font-size:0.74rem;font-weight:700;color:#0369a1;background:#e0f2fe;border:1px solid #bae6fd;padding:1px 7px;border-radius:6px;" title="촬영 화각(초점거리): ${focalMm}mm">🔭 ${Math.round(focalMm)}mm</span>` : ''}
             ${modelBadgeText ? `<span style="display:inline-block;margin-top:4px;margin-left:4px;font-size:0.73rem;font-weight:700;color:#334155;background:rgba(148,163,184,0.16);border:1px solid rgba(148,163,184,0.35);padding:1px 7px;border-radius:6px;" title="평가 모델: ${escapeHtml(item.model)}">🤖 ${escapeHtml(modelBadgeText)}</span>` : ''}
             ${item.is_burst ? (item.is_best_pick ?
               `<span class="badge-best-pick" style="display:inline-block;margin-top:4px;margin-left:4px;">👑 Best Pick (${item.burst_total}장 1위)</span>` :
@@ -764,6 +854,11 @@ window.exportAllXmp = exportAllXmp;
 window.changeBurstSensitivity = changeBurstSensitivity;
 window.setFilter = setFilter;
 window.setCatFilter = setCatFilter;
+window.setFocalFilter = setFocalFilter;
+window.clearFocalFilter = clearFocalFilter;
+window.getItemFocalMm = getItemFocalMm;
+window.getItemFocalBandKey = getItemFocalBandKey;
+window.matchFocalFilter = matchFocalFilter;
 window.setBurstFilter = setBurstFilter;
 window.toggleExpandBurstGroup = toggleExpandBurstGroup;
 window.initTheme = initTheme;

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from contextlib import closing
 from datetime import datetime, timezone
@@ -208,6 +209,127 @@ def get_all_analyses(db_path: Path, max_hamming_dist: int = 15) -> list[dict]:
     return cluster_burst_groups(results, max_hamming_dist=max_hamming_dist)
 
 
+FOCAL_BAND_DEFINITIONS: list[dict[str, Any]] = [
+    {"key": "wide_24", "label": "24mm 이하 (광각)", "short_label": "24mm 광각", "order": 1, "min_mm": 0.0, "max_mm": 28.0},
+    {"key": "semi_wide_35", "label": "35mm 부근 (준광각)", "short_label": "35mm 준광각", "order": 2, "min_mm": 28.0, "max_mm": 40.0},
+    {"key": "standard_50", "label": "50mm 부근 (표준)", "short_label": "50mm 표준", "order": 3, "min_mm": 40.0, "max_mm": 60.0},
+    {"key": "portrait_85", "label": "70~85mm (준망원)", "short_label": "70~85mm 준망원", "order": 4, "min_mm": 60.0, "max_mm": 90.0},
+    {"key": "tele_100", "label": "100mm+ (망원/매크로)", "short_label": "100mm+ 망원/접사", "order": 5, "min_mm": 90.0, "max_mm": 9999.0},
+    {"key": "unknown", "label": "미식별 (EXIF 없음)", "short_label": "화각 미식별", "order": 6, "min_mm": None, "max_mm": None},
+]
+
+STRENGTH_THEME_PATTERNS: list[tuple[str, list[str]]] = [
+    ("🎯 칼초점 & 눈동자 디테일", ["초점", "눈동자", "선명", "데칼", "디테일", "명확"]),
+    ("✨ 배경 분리 & 보케(심도)", ["분리", "흐림", "보케", "심도", "아웃포커싱"]),
+    ("🎨 색감 대비 & 톤 조화", ["색", "톤", "파스텔", "화사", "대비", "조화"]),
+    ("🌿 공간감 & 스토리텔링 연출", ["소품", "공간", "맥락", "상황", "분위기", "야외", "레이어", "배경"]),
+    ("📐 안정적인 구도 & 프레이밍", ["구도", "프레이밍", "실루엣", "배치", "포즈", "시선"]),
+    ("💡 자연스러운 빛 & 조명 활용", ["자연광", "조명", "광원", "빛", "역광"]),
+]
+
+IMPROVEMENT_THEME_PATTERNS: list[tuple[str, list[str]]] = [
+    ("💡 입체감 부족 (림라이트·측광 필요)", ["림라이트", "사광", "측광", "측면", "입체감", "보조광"]),
+    ("✂️ 가장자리 잘림 & 여백 답답함", ["여백", "잘림", "크롭", "답답", "가장자리", "하단", "머리 위"]),
+    ("🧹 주변 산만함 & 시선 분산 요소", ["시선 분산", "산만", "정리", "덜어", "빈 벽", "배경의", "가리지", "프레임 밖"]),
+    ("🔍 피사체 비중 부족 (더 크게 촬영 권장)", ["크게 담", "비중을 줄", "존재감", "주인공으로", "타이트하게"]),
+    ("☀️ 반사 하이라이트 & 노출·대비 제어", ["반사", "하이라이트", "확산", "대비", "어두운", "노출", "밝기", "붉은 조명"]),
+    ("🎯 초점·피사계심도 보완", ["초점", "흔들림", "심도", "조리개", "선명"]),
+]
+
+
+def _parse_numeric_mm(val: Any) -> float | None:
+    if val is None:
+        return None
+    if isinstance(val, (int, float)):
+        fval = float(val)
+        return round(fval, 1) if 1.0 <= fval <= 2000.0 else None
+    if isinstance(val, (list, tuple)) and len(val) == 2:
+        try:
+            den = float(val[1])
+            if den != 0:
+                fval = float(val[0]) / den
+                return round(fval, 1) if 1.0 <= fval <= 2000.0 else None
+        except (TypeError, ValueError):
+            pass
+    s = str(val).strip()
+    if not s:
+        return None
+    m = re.search(r"(\d+(?:\.\d+)?)", s)
+    if m:
+        try:
+            fval = float(m.group(1))
+            return round(fval, 1) if 1.0 <= fval <= 2000.0 else None
+        except ValueError:
+            pass
+    return None
+
+
+def extract_focal_length_mm(
+    exif_data: dict[str, Any] | None,
+    detected_camera_settings: dict[str, Any] | None = None,
+) -> float | None:
+    """Extract focal length in mm prioritizing 35mm equivalent EXIF, actual EXIF, then AI OCR settings."""
+    exif = exif_data if isinstance(exif_data, dict) else {}
+    det = detected_camera_settings if isinstance(detected_camera_settings, dict) else {}
+
+    # 1. EXIF FocalLengthIn35mmFilm (full-frame equivalent)
+    for k in ("FocalLengthIn35mmFilm", "FocalLengthIn35mmFormat"):
+        fl = _parse_numeric_mm(exif.get(k))
+        if fl is not None:
+            return fl
+
+    # 2. EXIF FocalLength
+    fl = _parse_numeric_mm(exif.get("FocalLength"))
+    if fl is not None:
+        return fl
+
+    # 3. AI detected_camera_settings focal_length
+    for k in ("focal_length", "FocalLength"):
+        fl = _parse_numeric_mm(det.get(k))
+        if fl is not None:
+            return fl
+
+    # 4. Single prime lens string in detected_camera_settings.lens or EXIF LensModel (exclude zoom ranges like 24-70mm)
+    lens_str = str(det.get("lens") or exif.get("LensModel") or "").strip()
+    if lens_str and not re.search(r"\d+\s*-\s*\d+\s*mm", lens_str, re.IGNORECASE):
+        m_prime = re.search(r"\b(\d{2,3}(?:\.\d+)?)\s*mm\b", lens_str, re.IGNORECASE)
+        if m_prime:
+            try:
+                fval = float(m_prime.group(1))
+                if 8.0 <= fval <= 1200.0:
+                    return round(fval, 1)
+            except ValueError:
+                pass
+
+    return None
+
+
+def extract_lens_model(
+    exif_data: dict[str, Any] | None,
+    detected_camera_settings: dict[str, Any] | None = None,
+) -> str:
+    """Extract human-readable lens model name from EXIF or detected camera settings."""
+    exif = exif_data if isinstance(exif_data, dict) else {}
+    det = detected_camera_settings if isinstance(detected_camera_settings, dict) else {}
+    lens = str(exif.get("LensModel") or det.get("lens") or "").strip()
+    return lens
+
+
+def classify_focal_band(focal_mm: float | None) -> dict[str, Any]:
+    """Classify a numeric focal length (mm) into one of the 5 standard photographic bands (or unknown)."""
+    if focal_mm is None or focal_mm <= 0:
+        return FOCAL_BAND_DEFINITIONS[-1]
+    if focal_mm <= 28.0:
+        return FOCAL_BAND_DEFINITIONS[0]
+    if focal_mm <= 40.0:
+        return FOCAL_BAND_DEFINITIONS[1]
+    if focal_mm <= 60.0:
+        return FOCAL_BAND_DEFINITIONS[2]
+    if focal_mm <= 90.0:
+        return FOCAL_BAND_DEFINITIONS[3]
+    return FOCAL_BAND_DEFINITIONS[4]
+
+
 def _format_analysis_row(
     row: sqlite3.Row | dict[str, Any],
     tags_dict: dict[str, list[str]] | None = None,
@@ -255,6 +377,11 @@ def _format_analysis_row(
 
     final_score = float(analysis_data.get("final_score", 0))
     tags = tags_dict if tags_dict is not None else analysis_data.get("aesthetic_tags", {})
+    detected_settings = analysis_data.get("detected_camera_settings")
+    focal_mm = extract_focal_length_mm(exif_data, detected_settings)
+    focal_band = classify_focal_band(focal_mm)
+    lens_model = extract_lens_model(exif_data, detected_settings)
+
     return {
         "id": aid,
         "sha256": row["sha256"],
@@ -285,7 +412,12 @@ def _format_analysis_row(
         "strengths": analysis_data.get("strengths", []),
         "improvements": analysis_data.get("improvements", []),
         "aesthetic_tags": tags,
-        "detected_camera_settings": analysis_data.get("detected_camera_settings"),
+        "detected_camera_settings": detected_settings,
+        "focal_length_mm": focal_mm,
+        "focal_band_key": focal_band["key"],
+        "focal_band_label": focal_band["label"],
+        "focal_band_short": focal_band["short_label"],
+        "lens_model": lens_model,
         "cross_check_opinion": analysis_data.get("cross_check_opinion"),
         "lr_advice": lr_advice,
         "sns_advice": sns_advice,
@@ -468,6 +600,241 @@ def get_tag_stats(db_path: Path, min_count: int = 1) -> dict:
         "top_user_fav_tags": top_user_fav_tags,
         "categories": categories_dict,
         "category_names": AESTHETIC_TAG_CATEGORIES,
+    }
+
+
+def _summarize_feedback_themes(
+    photo_texts_list: list[list[str]],
+    theme_patterns: list[tuple[str, list[str]]],
+    total_count: int,
+    top_n: int = 3,
+) -> list[dict[str, Any]]:
+    """Summarize per-photo strength/improvement lists into ranked photographic themes with sample quotes."""
+    if total_count <= 0:
+        return []
+    results: list[dict[str, Any]] = []
+    for theme_label, keywords in theme_patterns:
+        matched_photos = 0
+        sample_quote = ""
+        for texts in photo_texts_list:
+            if not isinstance(texts, list):
+                continue
+            hit = False
+            for sentence in texts:
+                s_str = str(sentence).strip()
+                if any(kw in s_str for kw in keywords):
+                    hit = True
+                    if not sample_quote:
+                        sample_quote = s_str
+                    break
+            if hit:
+                matched_photos += 1
+        if matched_photos > 0:
+            results.append({
+                "theme": theme_label,
+                "photo_count": matched_photos,
+                "pct": round((matched_photos / total_count) * 100),
+                "sample": sample_quote,
+            })
+    results.sort(key=lambda x: x["photo_count"], reverse=True)
+    return results[:top_n]
+
+
+def get_focal_stats(db_path: Path, min_count: int = 1) -> dict[str, Any]:
+    """Aggregate statistics, strengths, and weaknesses by focal length band and exact mm."""
+    ensure_db_columns(db_path)
+    analyses = get_all_analyses(db_path)
+
+    total_photos = len(analyses)
+    identified_photos = sum(1 for a in analyses if a.get("focal_length_mm") is not None)
+    unknown_photos = total_photos - identified_photos
+    user_rated_photos = sum(1 for a in analyses if a.get("user_score") is not None)
+
+    band_buckets: dict[str, dict[str, Any]] = {}
+    exact_buckets: dict[int, dict[str, Any]] = {}
+
+    for bdef in FOCAL_BAND_DEFINITIONS:
+        band_buckets[bdef["key"]] = {
+            "def": bdef,
+            "count": 0,
+            "ai_scores": [],
+            "user_scores": [],
+            "lighting_scores": [],
+            "composition_scores": [],
+            "technique_scores": [],
+            "color_scores": [],
+            "photo_strengths": [],
+            "photo_improvements": [],
+            "tag_counts": {},
+            "lens_counts": {},
+            "exact_mm_scores": {},
+        }
+
+    for a in analyses:
+        fl = a.get("focal_length_mm")
+        bdef = classify_focal_band(fl)
+        bkey = bdef["key"]
+        bucket = band_buckets[bkey]
+
+        ai_score = float(a.get("final_score") or 0.0)
+        u_score = a.get("user_score")
+        light_score = float(a.get("lighting_score") or 0.0)
+        comp_score = float(a.get("composition_score") or 0.0)
+        tech_score = float(a.get("technique_score") or 0.0)
+        color_score = float(a.get("color_score") or 0.0)
+
+        bucket["count"] += 1
+        bucket["ai_scores"].append(ai_score)
+        if u_score is not None:
+            bucket["user_scores"].append(float(u_score))
+        bucket["lighting_scores"].append(light_score)
+        bucket["composition_scores"].append(comp_score)
+        bucket["technique_scores"].append(tech_score)
+        bucket["color_scores"].append(color_score)
+        bucket["photo_strengths"].append(a.get("strengths") or [])
+        bucket["photo_improvements"].append(a.get("improvements") or [])
+
+        tags_dict = a.get("aesthetic_tags") or {}
+        if isinstance(tags_dict, dict):
+            for t_list in tags_dict.values():
+                if isinstance(t_list, list):
+                    for t in t_list:
+                        bucket["tag_counts"][t] = bucket["tag_counts"].get(t, 0) + 1
+
+        lens = str(a.get("lens_model") or "").strip()
+        if lens:
+            bucket["lens_counts"][lens] = bucket["lens_counts"].get(lens, 0) + 1
+
+        if fl is not None:
+            mm_int = int(round(float(fl)))
+            bucket["exact_mm_scores"].setdefault(mm_int, []).append(ai_score)
+            if mm_int not in exact_buckets:
+                exact_buckets[mm_int] = {
+                    "mm": mm_int,
+                    "label": f"{mm_int}mm",
+                    "band_key": bkey,
+                    "band_label": bdef["label"],
+                    "count": 0,
+                    "ai_scores": [],
+                    "user_scores": [],
+                    "lighting_scores": [],
+                    "composition_scores": [],
+                    "technique_scores": [],
+                    "color_scores": [],
+                    "photo_strengths": [],
+                    "photo_improvements": [],
+                }
+            eb = exact_buckets[mm_int]
+            eb["count"] += 1
+            eb["ai_scores"].append(ai_score)
+            if u_score is not None:
+                eb["user_scores"].append(float(u_score))
+            eb["lighting_scores"].append(light_score)
+            eb["composition_scores"].append(comp_score)
+            eb["technique_scores"].append(tech_score)
+            eb["color_scores"].append(color_score)
+            eb["photo_strengths"].append(a.get("strengths") or [])
+            eb["photo_improvements"].append(a.get("improvements") or [])
+
+    bands_result: list[dict[str, Any]] = []
+    for bdef in FOCAL_BAND_DEFINITIONS:
+        bkey = bdef["key"]
+        bk = band_buckets[bkey]
+        cnt = bk["count"]
+        if cnt == 0:
+            continue
+        if bkey != "unknown" and cnt < min_count:
+            continue
+
+        avg_ai = sum(bk["ai_scores"]) / cnt
+        avg_user = (sum(bk["user_scores"]) / len(bk["user_scores"])) if bk["user_scores"] else None
+        avg_light = sum(bk["lighting_scores"]) / cnt
+        avg_comp = sum(bk["composition_scores"]) / cnt
+        avg_tech = sum(bk["technique_scores"]) / cnt
+        avg_color = sum(bk["color_scores"]) / cnt
+        score_diff = round(avg_user - avg_ai, 2) if avg_user is not None else None
+
+        top_tags = [
+            {"tag": t, "count": c}
+            for t, c in sorted(bk["tag_counts"].items(), key=lambda x: x[1], reverse=True)[:5]
+        ]
+        lenses = [
+            {"lens": l, "count": c}
+            for l, c in sorted(bk["lens_counts"].items(), key=lambda x: x[1], reverse=True)[:3]
+        ]
+        exact_mms = [
+            {
+                "mm": mm_val,
+                "label": f"{mm_val}mm",
+                "count": len(scores),
+                "avg_ai_score": round(sum(scores) / len(scores), 2),
+            }
+            for mm_val, scores in sorted(bk["exact_mm_scores"].items(), key=lambda x: x[0])
+        ]
+
+        bands_result.append({
+            "band_key": bkey,
+            "band_label": bdef["label"],
+            "short_label": bdef["short_label"],
+            "order": bdef["order"],
+            "count": cnt,
+            "avg_ai_score": round(avg_ai, 2),
+            "avg_user_score": round(avg_user, 2) if avg_user is not None else None,
+            "score_diff": score_diff,
+            "user_rated_count": len(bk["user_scores"]),
+            "avg_lighting_score": round(avg_light, 2),
+            "avg_composition_score": round(avg_comp, 2),
+            "avg_technique_score": round(avg_tech, 2),
+            "avg_color_score": round(avg_color, 2),
+            "top_strengths": _summarize_feedback_themes(bk["photo_strengths"], STRENGTH_THEME_PATTERNS, cnt, top_n=3),
+            "top_improvements": _summarize_feedback_themes(bk["photo_improvements"], IMPROVEMENT_THEME_PATTERNS, cnt, top_n=3),
+            "top_tags": top_tags,
+            "lenses": lenses,
+            "exact_mms": exact_mms,
+        })
+
+    exact_result: list[dict[str, Any]] = []
+    for mm_val, eb in sorted(exact_buckets.items(), key=lambda x: x[0]):
+        cnt = eb["count"]
+        if cnt < min_count:
+            continue
+        avg_ai = sum(eb["ai_scores"]) / cnt
+        avg_user = (sum(eb["user_scores"]) / len(eb["user_scores"])) if eb["user_scores"] else None
+        score_diff = round(avg_user - avg_ai, 2) if avg_user is not None else None
+        exact_result.append({
+            "mm": mm_val,
+            "label": eb["label"],
+            "band_key": eb["band_key"],
+            "band_label": eb["band_label"],
+            "count": cnt,
+            "avg_ai_score": round(avg_ai, 2),
+            "avg_user_score": round(avg_user, 2) if avg_user is not None else None,
+            "score_diff": score_diff,
+            "user_rated_count": len(eb["user_scores"]),
+            "avg_lighting_score": round(sum(eb["lighting_scores"]) / cnt, 2),
+            "avg_composition_score": round(sum(eb["composition_scores"]) / cnt, 2),
+            "avg_technique_score": round(sum(eb["technique_scores"]) / cnt, 2),
+            "avg_color_score": round(sum(eb["color_scores"]) / cnt, 2),
+            "top_strengths": _summarize_feedback_themes(eb["photo_strengths"], STRENGTH_THEME_PATTERNS, cnt, top_n=2),
+            "top_improvements": _summarize_feedback_themes(eb["photo_improvements"], IMPROVEMENT_THEME_PATTERNS, cnt, top_n=2),
+        })
+
+    known_bands = [b for b in bands_result if b["band_key"] != "unknown"]
+    best_band = max(known_bands, key=lambda x: x["avg_ai_score"]) if known_bands else None
+    most_used_band = max(known_bands, key=lambda x: x["count"]) if known_bands else None
+    weakest_band = min(known_bands, key=lambda x: x["avg_ai_score"]) if len(known_bands) >= 2 else None
+
+    return {
+        "total_photos": total_photos,
+        "identified_photos": identified_photos,
+        "unknown_photos": unknown_photos,
+        "user_rated_photos": user_rated_photos,
+        "min_count": min_count,
+        "bands": bands_result,
+        "exact_focal_lengths": exact_result,
+        "best_band": best_band,
+        "most_used_band": most_used_band,
+        "weakest_band": weakest_band,
     }
 
 

@@ -165,14 +165,18 @@ const sampleItems = [
     figure_category: '접사/디테일', is_burst: true, is_best_pick: true, burst_group_id: 'g1', burst_total: 2,
     aesthetic_tags: { viewpoint: ['정면'], mood: ['고요함'] },
     composition_score: 8.5, lighting_score: 8.5, color_score: 8.5, technique_score: 8.5,
-    review_status: '토너먼트 1위', sns_advice: { best_ratio_key: 'original' }
+    review_status: '토너먼트 1위', sns_advice: { best_ratio_key: 'original' },
+    exif: { FocalLengthIn35mmFilm: 85, LensModel: '85mm F1.4' },
+    strengths: ['눈동자 초점이 선명함'], improvements: ['림라이트를 더해 입체감을 보강하기']
   },
   {
     id: 2, filename: 'a_item.jpg', final_score: 7.5, user_score: 9.5,
     created_at: '2026-10-17T10:00:00+00:00', captured_at: '2024-01-01T10:00:00',
     figure_category: '접사/디테일', is_burst: true, is_best_pick: false, burst_group_id: 'g1', burst_total: 2, drop_reason: '초점 열세',
     aesthetic_tags: { viewpoint: ['로우앵글'], mood: ['고요함'] },
-    composition_score: 7.5, lighting_score: 7.5, color_score: 7.5, technique_score: 7.5
+    composition_score: 7.5, lighting_score: 7.5, color_score: 7.5, technique_score: 7.5,
+    exif: { FocalLength: 50 },
+    strengths: ['자연스러운 배경 공간감'], improvements: ['가장자리 여백과 하단 잘림 확보']
   }
 ];
 
@@ -259,6 +263,26 @@ const insightsDistHtml = vm.runInContext('renderInsightsScoreDistSection(' + JSO
 if (!insightsDistHtml.includes('종합 점수 분포') || !insightsDistHtml.includes('구도 (Composition)')) {
   throw new Error('renderInsightsScoreDistSection missing expected sections');
 }
+
+// 6) Focal Length Insights & Focal Band/Exact mm Filtering
+vm.runInContext('allData = ' + JSON.stringify(sampleItems) + '; window.allData = allData; insightsMinCount = 1;', ctx);
+const fStats = vm.runInContext('computeClientFocalStats(1)', ctx);
+if (fStats.identifiedPhotos !== 2 || !fStats.bestBand || fStats.bestBand.band_key !== 'portrait_85') {
+  throw new Error('computeClientFocalStats failed to compute focal bands properly');
+}
+vm.runInContext('setInsightsDimension("focal");', ctx);
+if (!mockElements['insights-view'].innerHTML.includes('화각 구간별 종합 성적표') || !mockElements['insights-view'].innerHTML.includes('85mm')) {
+  throw new Error('Focal insights view did not render expected focal table and mm pills');
+}
+const filteredByFocalBand = vm.runInContext('setFocalFilter("standard_50"); filterList(' + JSON.stringify(sampleItems) + ')', ctx);
+if (filteredByFocalBand.length !== 1 || filteredByFocalBand[0].id !== 2) {
+  throw new Error('setFocalFilter("standard_50") failed to filter 50mm item');
+}
+const filteredByExactMm = vm.runInContext('setFocalFilter("mm:85"); filterList(' + JSON.stringify(sampleItems) + ')', ctx);
+if (filteredByExactMm.length !== 1 || filteredByExactMm[0].id !== 1) {
+  throw new Error('setFocalFilter("mm:85") failed to filter exact 85mm item');
+}
+vm.runInContext('clearFocalFilter(); setInsightsDimension("tag");', ctx);
 
 process.stdout.write('OK');
 """

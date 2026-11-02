@@ -14,13 +14,16 @@ from app.config import (
     TEMPLATES_DIR,
 )
 from app.db import (
+    classify_focal_band,
     delete_analyses,
     ensure_db_columns,
     ensure_tag_tables,
+    extract_focal_length_mm,
     find_existing_analysis,
     get_all_analyses,
     get_analyses_and_tags_for_export,
     get_analysis_row_by_id,
+    get_focal_stats,
     get_photo_thumbnail_and_hash,
     get_tag_stats,
     save_analysis,

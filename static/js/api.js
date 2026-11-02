@@ -107,6 +107,12 @@ const API = {
     return await res.json();
   },
 
+  async fetchFocalStats(minCount = 1) {
+    const res = await fetch(`/api/focal-stats?min_count=${minCount}&_t=${Date.now()}`, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`화각 통계 조회 오류: ${res.status}`);
+    return await res.json();
+  },
+
   async updateStatus(id, status) {
     const res = await fetch('/api/update-status', {
       method: 'POST',

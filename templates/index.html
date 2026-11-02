@@ -66,6 +66,20 @@
       <button class="filter-btn cat-btn" onclick="setCatFilter('일반 피규어 촬영', this)">📷 일반 촬영</button>
     </div>
     <div class="filter-group" style="margin-top:8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+      <span style="font-size:0.84rem;font-weight:700;color:var(--muted)">🔭 화각(초점거리):</span>
+      <button class="filter-btn active focal-btn" data-focal-key="all" onclick="setFocalFilter('all', this)">전체 화각</button>
+      <button class="filter-btn focal-btn" data-focal-key="wide_24" onclick="setFocalFilter('wide_24', this)">24mm 이하 (광각)</button>
+      <button class="filter-btn focal-btn" data-focal-key="semi_wide_35" onclick="setFocalFilter('semi_wide_35', this)">35mm 부근 (준광각)</button>
+      <button class="filter-btn focal-btn" data-focal-key="standard_50" onclick="setFocalFilter('standard_50', this)">50mm 부근 (표준)</button>
+      <button class="filter-btn focal-btn" data-focal-key="portrait_85" onclick="setFocalFilter('portrait_85', this)">70~85mm (준망원)</button>
+      <button class="filter-btn focal-btn" data-focal-key="tele_100" onclick="setFocalFilter('tele_100', this)">100mm+ (망원/접사)</button>
+      <button class="filter-btn focal-btn" data-focal-key="unknown" onclick="setFocalFilter('unknown', this)">화각 미식별</button>
+      <span id="active-focal-exact-badge" style="display:none;align-items:center;gap:6px;background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;padding:4px 10px;border-radius:999px;font-size:0.78rem;font-weight:800;">
+        <span id="active-focal-exact-text"></span>
+        <button type="button" onclick="clearFocalFilter()" style="border:none;background:transparent;color:#15803d;font-weight:900;cursor:pointer;padding:0 2px;font-size:0.84rem;" title="단일 화각 필터 해제">✕</button>
+      </span>
+    </div>
+    <div class="filter-group" style="margin-top:8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
       <span style="font-size:0.84rem;font-weight:700;color:var(--muted)">연사 선별(B-1):</span>
       <button class="filter-btn active burst-btn" onclick="setBurstFilter('all', this)">전체 컷</button>
       <button class="filter-btn burst-btn" onclick="setBurstFilter('best_only', this)" style="color:#065f46;">👑 Best Pick만 보기</button>
@@ -122,7 +136,7 @@
         <button class="tab-btn active" id="tab-gallery" onclick="switchView('gallery')">갤러리 뷰</button>
         <button class="tab-btn" id="tab-compare" onclick="switchView('compare')">1:1 비교(Culling)</button>
         <button class="tab-btn" id="tab-tournament" onclick="openTournamentModal()" style="background:#fef3c7;border-color:#fde68a;color:#b45309;font-weight:700;">🏆 블라인드 토너먼트</button>
-        <button class="tab-btn" id="tab-insights" onclick="switchView('insights')">📊 태그 인사이트</button>
+        <button class="tab-btn" id="tab-insights" onclick="switchView('insights')">📊 태그·화각 인사이트</button>
       </div>
     </div>
   </div>

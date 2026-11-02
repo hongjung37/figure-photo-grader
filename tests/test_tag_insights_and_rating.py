@@ -10,7 +10,14 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from photo_dashboard import ensure_db_columns, get_all_analyses, get_tag_stats
+from photo_dashboard import (
+    classify_focal_band,
+    ensure_db_columns,
+    extract_focal_length_mm,
+    get_all_analyses,
+    get_focal_stats,
+    get_tag_stats,
+)
 from photo_tag_schema import AestheticTags
 
 
@@ -275,9 +282,108 @@ class TestTagInsightsAndUserRating(unittest.TestCase):
             err_body = json.loads(ctx.exception.read().decode("utf-8"))
             self.assertFalse(err_body["success"])
             self.assertIn("9999", err_body["error"])
+
+            # 7. Test GET /api/focal-stats
+            with urllib.request.urlopen(f"{base_url}/api/focal-stats?min_count=1") as resp:
+                fstats = json.loads(resp.read().decode("utf-8"))
+                self.assertEqual(fstats["total_photos"], 3)
+                self.assertIn("bands", fstats)
         finally:
             server.shutdown()
             server.server_close()
+
+    def test_focal_length_extraction_and_focal_stats(self):
+        # Verify extract_focal_length_mm priority
+        self.assertEqual(
+            extract_focal_length_mm({"FocalLengthIn35mmFilm": 85, "FocalLength": 56.0}, {}),
+            85.0,
+        )
+        self.assertEqual(
+            extract_focal_length_mm({"FocalLength": [50, 1]}, {}),
+            50.0,
+        )
+        self.assertEqual(
+            extract_focal_length_mm({}, {"focal_length": "24mm"}),
+            24.0,
+        )
+        self.assertEqual(
+            extract_focal_length_mm({}, {"lens": "180mm macro f/3.5"}),
+            180.0,
+        )
+        self.assertIsNone(
+            extract_focal_length_mm({"LensModel": "24-70mm F2.8 DG DN II"}, {})
+        )
+
+        # Verify classify_focal_band
+        self.assertEqual(classify_focal_band(24.0)["key"], "wide_24")
+        self.assertEqual(classify_focal_band(35.0)["key"], "semi_wide_35")
+        self.assertEqual(classify_focal_band(50.0)["key"], "standard_50")
+        self.assertEqual(classify_focal_band(70.0)["key"], "portrait_85")
+        self.assertEqual(classify_focal_band(105.0)["key"], "tele_100")
+        self.assertEqual(classify_focal_band(None)["key"], "unknown")
+
+        # Update mock DB rows with EXIF / detected_camera_settings and strengths/improvements
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
+            conn.execute(
+                "UPDATE photo_analyses SET exif_json = ?, analysis_json = ? WHERE id = 1",
+                (
+                    json.dumps({"FocalLengthIn35mmFilm": 85, "LensModel": "85mm F1.4"}),
+                    json.dumps({
+                        "final_score": 9.2,
+                        "lighting_score": 9.5,
+                        "composition_score": 9.0,
+                        "color_score": 9.0,
+                        "technique_score": 9.3,
+                        "strengths": ["눈동자 초점이 매우 선명함", "아름다운 배경 흐림과 보케 분리"],
+                        "improvements": ["약한 림라이트를 더해 입체감을 보강하기"],
+                    }),
+                ),
+            )
+            conn.execute(
+                "UPDATE photo_analyses SET exif_json = ?, analysis_json = ? WHERE id = 2",
+                (
+                    json.dumps({"FocalLength": 50.0, "LensModel": "24-70mm F2.8"}),
+                    json.dumps({
+                        "final_score": 8.0,
+                        "lighting_score": 8.0,
+                        "composition_score": 8.5,
+                        "color_score": 8.0,
+                        "technique_score": 7.5,
+                        "strengths": ["자연스러운 야외 공간감 연출"],
+                        "improvements": ["하단 여백과 가장자리 잘림 확보 필요"],
+                    }),
+                ),
+            )
+            conn.execute(
+                "UPDATE photo_analyses SET exif_json = ?, analysis_json = ? WHERE id = 3",
+                (
+                    json.dumps({}),
+                    json.dumps({
+                        "final_score": 6.5,
+                        "lighting_score": 6.0,
+                        "composition_score": 6.5,
+                        "color_score": 7.0,
+                        "technique_score": 6.5,
+                        "detected_camera_settings": {"focal_length": "24mm"},
+                        "strengths": ["자연광 활용"],
+                        "improvements": ["배경의 시선 분산 요소를 덜어내고 정리하기"],
+                    }),
+                ),
+            )
+
+        fstats = get_focal_stats(self.db_path, min_count=1)
+        self.assertEqual(fstats["total_photos"], 3)
+        self.assertEqual(fstats["identified_photos"], 3)
+        self.assertEqual(fstats["unknown_photos"], 0)
+        self.assertEqual(fstats["best_band"]["band_key"], "portrait_85")
+        self.assertEqual(fstats["weakest_band"]["band_key"], "wide_24")
+
+        bands_by_key = {b["band_key"]: b for b in fstats["bands"]}
+        self.assertIn("portrait_85", bands_by_key)
+        self.assertIn("standard_50", bands_by_key)
+        self.assertIn("wide_24", bands_by_key)
+        self.assertTrue(len(bands_by_key["portrait_85"]["top_strengths"]) >= 1)
+        self.assertTrue(len(bands_by_key["wide_24"]["top_improvements"]) >= 1)
 
 
 if __name__ == "__main__":

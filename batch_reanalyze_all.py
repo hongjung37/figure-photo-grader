@@ -27,20 +27,24 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Batch reanalyze figure photos")
     parser.add_argument("--model", default=DEFAULT_MODEL_NAME, help="Model to use (e.g. gpt-6-luna, luna, standard)")
     parser.add_argument("--delay", type=float, default=RPM_DELAY_SECONDS, help="Delay between requests in seconds")
+    parser.add_argument("--only-flash-lite", action="store_true", help="Only reanalyze photos currently using flash lite")
     args = parser.parse_args()
 
     model_arg = args.model
     provider, resolved_model = resolve_task_model(model_arg, default_tier="luna")
     delay_sec = 4.3 if "gemini" in resolved_model else args.delay
 
-    print(f"=== [{resolved_model}] 107장 전수 재분석 시작 ===")
-    print(f"제공자: {provider} | 요청 간 대기: {delay_sec}초")
+    print(f"=== [{resolved_model}] 일괄 재분석 시작 ===")
+    print(f"제공자: {provider} | 요청 간 대기: {delay_sec}초 | 대상: {'Flash-Lite 대상만' if args.only_flash_lite else '전체'}")
     print(f"DB 경로: {DB_PATH.resolve()}")
 
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
-        cur.execute("SELECT id, source_filename, model, analysis_json FROM photo_analyses ORDER BY id ASC")
+        if args.only_flash_lite:
+            cur.execute("SELECT id, source_filename, model, analysis_json FROM photo_analyses WHERE model LIKE '%flash-lite%' ORDER BY id ASC")
+        else:
+            cur.execute("SELECT id, source_filename, model, analysis_json FROM photo_analyses ORDER BY id ASC")
         rows = cur.fetchall()
 
     total = len(rows)

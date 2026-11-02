@@ -37,6 +37,7 @@ from app.db import (
     get_analyses_and_tags_for_export,
     get_analysis_by_id,
     get_analysis_row_by_id,
+    get_focal_stats,
     get_photo_thumbnail_and_hash,
     get_tag_stats,
     save_analysis,
@@ -328,6 +329,9 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         if path == "/api/tag-stats":
             return self._handle_get_tag_stats(parsed.query)
 
+        if path == "/api/focal-stats":
+            return self._handle_get_focal_stats(parsed.query)
+
         if path.startswith("/api/image/"):
             return self._handle_get_image(path, parsed.query)
 
@@ -382,6 +386,15 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         except Exception:
             min_count = 1
         data = get_tag_stats(self.db_path, min_count=min_count)
+        self._send_json_ok(data)
+
+    def _handle_get_focal_stats(self, query_str: str) -> None:
+        query = parse_qs(query_str)
+        try:
+            min_count = max(1, int(query.get("min_count", ["1"])[0]))
+        except Exception:
+            min_count = 1
+        data = get_focal_stats(self.db_path, min_count=min_count)
         self._send_json_ok(data)
 
     def _handle_get_image(self, path: str, query_str: str) -> None:
