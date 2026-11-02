@@ -39,46 +39,63 @@
 </header>
 
 <main class="main-container">
-  <div class="controls">
-    <!-- Global Scope Bar: Collections (Phase 2) + Date Scope & Shooting Sessions (Phase 1) -->
-    <div id="date-scope-panel" class="filter-group" style="width:100%;padding:10px 12px;margin-bottom:8px;background:var(--card-sub, #f8fafc);border:1px solid var(--line, #e2e8f0);border-radius:12px;display:flex;flex-direction:column;gap:8px;">
-      <!-- Row 1: Lightroom-style Virtual Collections Bar -->
-      <div id="collection-scope-row" style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;width:100%;padding-bottom:8px;border-bottom:1px dashed var(--line, #e2e8f0);">
-        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-          <span style="font-size:0.84rem;font-weight:800;color:var(--navy);display:inline-flex;align-items:center;gap:4px;">🗂️ 컬렉션(앨범):</span>
-          <div id="collection-scope-chips" style="display:inline-flex;gap:5px;flex-wrap:wrap;align-items:center;"></div>
-          <button type="button" class="filter-btn collection-chip-btn" style="padding:3px 9px;font-size:0.75rem;font-weight:700;color:#4f46e5;border-color:#c7d2fe;background:rgba(79,70,229,0.06);" onclick="createNewCollectionPrompt()">+ 새 컬렉션 만들기</button>
+  <div class="controls slim-controls">
+    <!-- ROW 1: Global Scope (Collections + Date Trigger) & View Mode Tabs -->
+    <div id="date-scope-panel" class="slim-toolbar-row slim-row-top">
+      <div id="collection-scope-row" class="slim-scope-left">
+        <span class="slim-section-label">🗂️ 컬렉션:</span>
+        <div id="collection-scope-chips" style="display:inline-flex;gap:4px;flex-wrap:wrap;align-items:center;"></div>
+        <button type="button" class="filter-btn collection-chip-btn slim-btn" style="color:#4f46e5;border-color:#c7d2fe;background:rgba(79,70,229,0.08);" onclick="createNewCollectionPrompt()" title="새 컬렉션(앨범) 만들기">+ 새 컬렉션</button>
+
+        <div id="collection-manage-btns" style="display:none;align-items:center;gap:4px;">
+          <button type="button" class="filter-btn collection-chip-btn slim-btn" style="color:#0284c7;" onclick="renameActiveCollectionPrompt()" title="현재 선택된 컬렉션 이름 변경">✏️ 이름변경</button>
+          <button type="button" class="filter-btn collection-chip-btn slim-btn" style="color:#e11d48;border-color:#fecdd3;" onclick="deleteActiveCollectionConfirm()" title="컬렉션만 삭제 (원본 사진 및 분석 기록은 유지됨)">🗑️ 삭제</button>
         </div>
 
-        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-          <div id="collection-manage-btns" style="display:none;align-items:center;gap:5px;">
-            <button type="button" class="filter-btn collection-chip-btn" style="padding:2px 8px;font-size:0.73rem;color:#0284c7;" onclick="renameActiveCollectionPrompt()" title="현재 선택된 컬렉션 이름 변경">✏️ 이름 변경</button>
-            <button type="button" class="filter-btn collection-chip-btn" style="padding:2px 8px;font-size:0.73rem;color:#e11d48;border-color:#fecdd3;" onclick="deleteActiveCollectionConfirm()" title="컬렉션만 삭제 (원본 사진 및 분석 기록은 유지됨)">🗑️ 컬렉션 삭제</button>
-          </div>
-          <button type="button" id="btn-toggle-batch-select" class="filter-btn collection-chip-btn" style="padding:3px 10px;font-size:0.75rem;font-weight:800;color:#0d9488;border-color:#99f6e4;" onclick="toggleBatchSelectMode()">☑️ 사진 선택·컬렉션 정리</button>
-        </div>
+        <button type="button" id="btn-toggle-batch-select" class="filter-btn collection-chip-btn slim-btn" style="color:#0d9488;border-color:#99f6e4;" onclick="toggleBatchSelectMode()" title="사진을 다중 선택하여 컬렉션에 일괄 추가/제외">☑️ 사진 선택·컬렉션 정리</button>
+
+        <span class="slim-divider"></span>
+
+        <!-- Date Scope Drawer Trigger Button -->
+        <button type="button" id="btn-toggle-date-drawer" class="filter-btn slim-btn date-drawer-trigger" onclick="toggleDateScopeDrawer()">
+          <span>📅</span>
+          <span id="date-drawer-label">전체 기간</span>
+          <span id="date-drawer-arrow" style="font-size:0.7rem;opacity:0.8;">▾</span>
+        </button>
+        <button type="button" id="btn-clear-date-scope" class="filter-btn date-preset-btn slim-btn" style="display:none;color:#ef4444;border-color:#fca5a5;background:#fff5f5;font-weight:700;" onclick="clearDateScope()" title="기간 필터 초기화">✕ 기간 해제</button>
+        <span id="active-date-scope-summary" class="slim-scope-summary" style="display:none;"></span>
       </div>
 
-      <!-- Optional Row 1-b: Batch Selection Action Bar (shown when Batch Select Mode is active) -->
-      <div id="batch-select-bar" style="display:none;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;width:100%;padding:8px 12px;background:rgba(13,148,136,0.08);border:1px solid rgba(13,148,136,0.35);border-radius:10px;">
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-          <span style="font-size:0.82rem;font-weight:800;color:#0f766e;">☑️ 다중 선택 모드: <strong id="batch-selected-count">0</strong>장 선택됨</span>
-          <button type="button" class="filter-btn collection-chip-btn" style="padding:2px 8px;font-size:0.74rem;font-weight:700;" onclick="selectAllFilteredPhotos()">현재 필터 사진 전체 선택</button>
-          <button type="button" class="filter-btn collection-chip-btn" style="padding:2px 8px;font-size:0.74rem;" onclick="clearBatchSelection()">선택 해제</button>
-        </div>
-        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-          <select id="batch-target-collection" class="select-input" style="padding:3px 8px;font-size:0.76rem;height:auto;min-width:170px;">
-            <option value="">담을 컬렉션 선택...</option>
-          </select>
-          <button type="button" class="upload-btn" style="padding:4px 10px;font-size:0.76rem;background:#4f46e5;" onclick="applyBatchAddToCollection()">📥 선택 사진 담기</button>
-          <button type="button" id="btn-batch-remove-from-col" class="upload-btn" style="display:none;padding:4px 10px;font-size:0.76rem;background:#e11d48;" onclick="applyBatchRemoveFromCurrentCollection()">📤 현재 컬렉션에서 제외</button>
-          <button type="button" class="filter-btn collection-chip-btn" style="padding:3px 8px;font-size:0.74rem;" onclick="toggleBatchSelectMode(false)">닫기 ✕</button>
-        </div>
+      <div class="view-tabs slim-view-tabs">
+        <button class="tab-btn active" id="tab-gallery" onclick="switchView('gallery')">갤러리 뷰</button>
+        <button class="tab-btn" id="tab-compare" onclick="switchView('compare')">1:1 비교(Culling)</button>
+        <button class="tab-btn" id="tab-tournament" onclick="openTournamentModal()" style="background:#fef3c7;border-color:#fde68a;color:#b45309;font-weight:700;">🏆 블라인드 토너먼트</button>
+        <button class="tab-btn" id="tab-insights" onclick="switchView('insights')">📊 태그·화각 인사이트</button>
       </div>
+    </div>
 
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;width:100%;">
+    <!-- Optional Batch Selection Action Bar (shown when Batch Select Mode is active) -->
+    <div id="batch-select-bar" style="display:none;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;width:100%;padding:7px 12px;background:rgba(13,148,136,0.08);border:1px solid rgba(13,148,136,0.35);border-radius:10px;">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <span style="font-size:0.8rem;font-weight:800;color:#0f766e;">☑️ 다중 선택 모드: <strong id="batch-selected-count">0</strong>장 선택됨</span>
+        <button type="button" class="filter-btn collection-chip-btn slim-btn" onclick="selectAllFilteredPhotos()">현재 필터 사진 전체 선택</button>
+        <button type="button" class="filter-btn collection-chip-btn slim-btn" onclick="clearBatchSelection()">선택 해제</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+        <select id="batch-target-collection" class="select-input" style="padding:3px 8px;font-size:0.75rem;height:auto;min-width:165px;">
+          <option value="">담을 컬렉션 선택...</option>
+        </select>
+        <button type="button" class="upload-btn" style="padding:4px 10px;font-size:0.75rem;background:#4f46e5;" onclick="applyBatchAddToCollection()">📥 선택 사진 담기</button>
+        <button type="button" id="btn-batch-remove-from-col" class="upload-btn" style="display:none;padding:4px 10px;font-size:0.75rem;background:#e11d48;" onclick="applyBatchRemoveFromCurrentCollection()">📤 현재 컬렉션에서 제외</button>
+        <button type="button" class="filter-btn collection-chip-btn slim-btn" onclick="toggleBatchSelectMode(false)">닫기 ✕</button>
+      </div>
+    </div>
+
+    <!-- COLLAPSIBLE DRAWER 1: Date Range & Shooting Sessions (Toggled via #btn-toggle-date-drawer) -->
+    <div id="date-scope-drawer" class="slim-drawer" style="display:none;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;width:100%;">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-          <span style="font-size:0.84rem;font-weight:800;color:var(--navy);display:inline-flex;align-items:center;gap:4px;">📅 분석 기간 범위:</span>
+          <span style="font-size:0.78rem;font-weight:800;color:var(--navy);">📅 기준 일시:</span>
           <div style="display:inline-flex;background:var(--filter-btn-bg, #e2e8f0);border:1px solid var(--line, #cbd5e1);border-radius:8px;padding:2px;gap:2px;">
             <button type="button" id="date-basis-smart" class="toggle-logic-btn active" onclick="setDateBasis('smart')" title="EXIF 촬영일이 있으면 촬영일 기준, 없으면 AI 분석일 기준으로 자동 매칭">✨ 스마트(촬영일 우선)</button>
             <button type="button" id="date-basis-captured" class="toggle-logic-btn" onclick="setDateBasis('captured')" title="순수 카메라 EXIF 촬영 일시(captured_at) 기준">📷 촬영일(EXIF)</button>
@@ -86,129 +103,145 @@
           </div>
 
           <div style="display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;">
-            <button type="button" class="filter-btn date-preset-btn active" data-date-preset="all" onclick="setDatePreset('all', this)" style="padding:3px 9px;font-size:0.76rem;">전체 기간</button>
-            <button type="button" class="filter-btn date-preset-btn" data-date-preset="today" onclick="setDatePreset('today', this)" style="padding:3px 9px;font-size:0.76rem;">오늘</button>
-            <button type="button" class="filter-btn date-preset-btn" data-date-preset="7d" onclick="setDatePreset('7d', this)" style="padding:3px 9px;font-size:0.76rem;">최근 7일</button>
-            <button type="button" class="filter-btn date-preset-btn" data-date-preset="30d" onclick="setDatePreset('30d', this)" style="padding:3px 9px;font-size:0.76rem;">최근 30일</button>
-            <button type="button" class="filter-btn date-preset-btn" data-date-preset="this_month" onclick="setDatePreset('this_month', this)" style="padding:3px 9px;font-size:0.76rem;">이번 달</button>
-            <button type="button" class="filter-btn date-preset-btn" data-date-preset="missing_exif" onclick="setDatePreset('missing_exif', this)" style="padding:3px 9px;font-size:0.76rem;" title="EXIF 촬영 일시가 없는 사진만 보기">EXIF 날짜 미기록</button>
+            <button type="button" class="filter-btn date-preset-btn active slim-btn" data-date-preset="all" onclick="setDatePreset('all', this)">전체 기간</button>
+            <button type="button" class="filter-btn date-preset-btn slim-btn" data-date-preset="today" onclick="setDatePreset('today', this)">오늘</button>
+            <button type="button" class="filter-btn date-preset-btn slim-btn" data-date-preset="7d" onclick="setDatePreset('7d', this)">최근 7일</button>
+            <button type="button" class="filter-btn date-preset-btn slim-btn" data-date-preset="30d" onclick="setDatePreset('30d', this)">최근 30일</button>
+            <button type="button" class="filter-btn date-preset-btn slim-btn" data-date-preset="this_month" onclick="setDatePreset('this_month', this)">이번 달</button>
+            <button type="button" class="filter-btn date-preset-btn slim-btn" data-date-preset="missing_exif" onclick="setDatePreset('missing_exif', this)" title="EXIF 촬영 일시가 없는 사진만 보기">EXIF 날짜 미기록</button>
           </div>
         </div>
 
         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-          <span style="font-size:0.75rem;font-weight:700;color:var(--muted);">직접 지정:</span>
-          <input type="date" id="date-scope-from" class="select-input" style="padding:2px 6px;font-size:0.76rem;height:auto;" onchange="onCustomDateRangeChange()">
-          <span style="color:var(--muted);font-size:0.78rem;">~</span>
-          <input type="date" id="date-scope-to" class="select-input" style="padding:2px 6px;font-size:0.76rem;height:auto;" onchange="onCustomDateRangeChange()">
-          <button type="button" id="btn-clear-date-scope" class="filter-btn date-preset-btn" style="display:none;padding:2px 8px;font-size:0.74rem;color:#ef4444;border-color:#fca5a5;background:#fff5f5;font-weight:700;" onclick="clearDateScope()">✕ 기간 해제</button>
+          <span style="font-size:0.74rem;font-weight:700;color:var(--muted);">직접 지정:</span>
+          <input type="date" id="date-scope-from" class="select-input" style="padding:2px 6px;font-size:0.75rem;height:auto;" onchange="onCustomDateRangeChange()">
+          <span style="color:var(--muted);font-size:0.76rem;">~</span>
+          <input type="date" id="date-scope-to" class="select-input" style="padding:2px 6px;font-size:0.75rem;height:auto;" onchange="onCustomDateRangeChange()">
         </div>
       </div>
 
-      <!-- Auto-detected Shooting / Analysis Date Session Chips -->
-      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;width:100%;">
-        <span style="font-size:0.75rem;font-weight:700;color:var(--muted);">🗓️ 일자별 세션 빠른 선택:</span>
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;width:100%;margin-top:6px;padding-top:6px;border-top:1px dashed var(--line);">
+        <span style="font-size:0.74rem;font-weight:700;color:var(--muted);">🗓️ 일자별 세션 빠른 선택:</span>
         <div id="date-session-chips" style="display:inline-flex;gap:5px;flex-wrap:wrap;align-items:center;"></div>
-        <span id="active-date-scope-summary" style="margin-left:auto;font-size:0.76rem;font-weight:800;color:#4f46e5;display:none;"></span>
       </div>
     </div>
 
-    <div class="filter-group" style="width:100%;justify-content:space-between;">
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-        <span style="font-size:0.84rem;font-weight:700;color:var(--muted)">등급:</span>
-        <button class="filter-btn active" onclick="setFilter('all', this)">전체</button>
-        <button class="filter-btn" onclick="setFilter('pro', this)">프로작가급 (9.0+)</button>
-        <button class="filter-btn" onclick="setFilter('very_good', this)">매우 우수 (8.0+)</button>
-        <button class="filter-btn" onclick="setFilter('good', this)">우수 (7.0+)</button>
-        <button class="filter-btn" onclick="setFilter('normal', this)">보통 스냅 (5.0~6.9)</button>
-        <span id="active-bin-filter-badge" style="display:none;align-items:center;gap:6px;background:#e0f2fe;color:#0369a1;border:1px solid #bae6fd;padding:4px 10px;border-radius:999px;font-size:0.78rem;font-weight:800;">
+    <!-- ROW 2: Quick Grade Filter + Advanced Filter Drawer Trigger + Active Filter Badges + Sort & Score Dist Toggle -->
+    <div class="slim-toolbar-row slim-row-bottom">
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+        <span class="slim-section-label">등급:</span>
+        <button class="filter-btn slim-btn active" onclick="setFilter('all', this)">전체</button>
+        <button class="filter-btn slim-btn" onclick="setFilter('pro', this)">9.0+ (프로급)</button>
+        <button class="filter-btn slim-btn" onclick="setFilter('very_good', this)">8.0+ (매우우수)</button>
+        <button class="filter-btn slim-btn" onclick="setFilter('good', this)">7.0+ (우수)</button>
+        <button class="filter-btn slim-btn" onclick="setFilter('normal', this)">5.0~6.9 (보통)</button>
+
+        <span id="active-bin-filter-badge" style="display:none;align-items:center;gap:5px;background:#e0f2fe;color:#0369a1;border:1px solid #bae6fd;padding:2px 8px;border-radius:999px;font-size:0.74rem;font-weight:800;">
           <span id="active-bin-filter-text"></span>
-          <button type="button" onclick="clearScoreBinFilter()" style="border:none;background:transparent;color:#0369a1;font-weight:900;cursor:pointer;padding:0 2px;font-size:0.84rem;" title="구간 필터 해제">✕</button>
+          <button type="button" onclick="clearScoreBinFilter()" style="border:none;background:transparent;color:#0369a1;font-weight:900;cursor:pointer;padding:0 2px;font-size:0.8rem;" title="구간 필터 해제">✕</button>
+        </span>
+
+        <span class="slim-divider"></span>
+
+        <!-- Collapsible Advanced Filter Drawer Toggle -->
+        <button type="button" id="btn-toggle-adv-filters" class="filter-btn slim-btn adv-filter-trigger" onclick="toggleAdvFilterDrawer()">
+          <span>🎛️ 상세 필터 <small style="font-weight:600;opacity:0.85;">(유형·화각·연사·태그)</small></span>
+          <span id="adv-filter-count-badge" class="adv-filter-badge" style="display:none;">0</span>
+          <span id="adv-filter-arrow" style="font-size:0.7rem;opacity:0.8;">▾</span>
+        </button>
+
+        <!-- Inline Active Filter Chips when Drawer is Closed/Open -->
+        <div id="active-adv-filter-pills" style="display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;"></div>
+        <span id="active-focal-exact-badge" style="display:none;align-items:center;gap:5px;background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;padding:2px 8px;border-radius:999px;font-size:0.74rem;font-weight:800;">
+          <span id="active-focal-exact-text"></span>
+          <button type="button" onclick="clearFocalFilter()" style="border:none;background:transparent;color:#15803d;font-weight:900;cursor:pointer;padding:0 2px;font-size:0.8rem;" title="단일 화각 필터 해제">✕</button>
         </span>
       </div>
-      <button type="button" id="btn-toggle-score-dist" class="filter-btn active" onclick="toggleScoreDistPanel()" style="display:inline-flex;align-items:center;gap:5px;font-weight:700;">
-        📊 점수 분포표 <span id="score-dist-toggle-arrow">▴</span>
-      </button>
-    </div>
-    <div class="filter-group" style="margin-top:8px;">
-      <span style="font-size:0.84rem;font-weight:700;color:var(--muted)">피규어 유형:</span>
-      <button class="filter-btn active cat-btn" onclick="setCatFilter('all', this)">전체 유형</button>
-      <button class="filter-btn cat-btn" onclick="setCatFilter('접사/디테일', this)">🔍 접사/디테일</button>
-      <button class="filter-btn cat-btn" onclick="setCatFilter('일상/야외 스냅', this)">🌿 일상/야외 스냅</button>
-      <button class="filter-btn cat-btn" onclick="setCatFilter('스튜디오 연출/디오라마', this)">🎬 스튜디오 연출</button>
-      <button class="filter-btn cat-btn" onclick="setCatFilter('일반 피규어 촬영', this)">📷 일반 촬영</button>
-    </div>
-    <div class="filter-group" style="margin-top:8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-      <span style="font-size:0.84rem;font-weight:700;color:var(--muted)">🔭 화각(초점거리):</span>
-      <button class="filter-btn active focal-btn" data-focal-key="all" onclick="setFocalFilter('all', this)">전체 화각</button>
-      <button class="filter-btn focal-btn" data-focal-key="wide_24" onclick="setFocalFilter('wide_24', this)">24mm 이하 (광각)</button>
-      <button class="filter-btn focal-btn" data-focal-key="semi_wide_35" onclick="setFocalFilter('semi_wide_35', this)">35mm 부근 (준광각)</button>
-      <button class="filter-btn focal-btn" data-focal-key="standard_50" onclick="setFocalFilter('standard_50', this)">50mm 부근 (표준)</button>
-      <button class="filter-btn focal-btn" data-focal-key="portrait_85" onclick="setFocalFilter('portrait_85', this)">70~85mm (준망원)</button>
-      <button class="filter-btn focal-btn" data-focal-key="tele_100" onclick="setFocalFilter('tele_100', this)">100mm+ (망원/접사)</button>
-      <button class="filter-btn focal-btn" data-focal-key="unknown" onclick="setFocalFilter('unknown', this)">화각 미식별</button>
-      <span id="active-focal-exact-badge" style="display:none;align-items:center;gap:6px;background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;padding:4px 10px;border-radius:999px;font-size:0.78rem;font-weight:800;">
-        <span id="active-focal-exact-text"></span>
-        <button type="button" onclick="clearFocalFilter()" style="border:none;background:transparent;color:#15803d;font-weight:900;cursor:pointer;padding:0 2px;font-size:0.84rem;" title="단일 화각 필터 해제">✕</button>
-      </span>
-    </div>
-    <div class="filter-group" style="margin-top:8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-      <span style="font-size:0.84rem;font-weight:700;color:var(--muted)">연사 선별(B-1):</span>
-      <button class="filter-btn active burst-btn" onclick="setBurstFilter('all', this)">전체 컷</button>
-      <button class="filter-btn burst-btn" onclick="setBurstFilter('best_only', this)" style="color:#065f46;">👑 Best Pick만 보기</button>
-      <button class="filter-btn burst-btn" onclick="setBurstFilter('stack', this)" style="color:#0369a1;">🗂️ 연사 묶어보기 (Stack)</button>
-      <div style="display:inline-flex;align-items:center;gap:4px;margin-left:8px;background:#f1f5f9;padding:3px 10px;border-radius:8px;border:1px solid #e2e8f0;">
-        <span style="font-size:0.75rem;font-weight:700;color:#64748b;">연사 감도:</span>
-        <select id="burst-dist-select" class="select-input" style="padding:1px 6px;font-size:0.75rem;height:auto;border:none;background:transparent;font-weight:700;color:#0284c7;cursor:pointer;" onchange="changeBurstSensitivity(this.value)">
-          <option value="12">엄격 (삼각대 연사: 12)</option>
-          <option value="15" selected>표준 (핸드헬드 연사: 15 - 권장)</option>
-          <option value="18">여유 (유사 앵글 묶기: 18)</option>
-          <option value="20">최대 (동일 피규어 넓게: 20)</option>
-        </select>
+
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:auto;">
+        <div style="display:inline-flex;gap:5px;align-items:center;">
+          <span class="slim-section-label">정렬:</span>
+          <select class="select-input slim-select" id="sort-select" onchange="renderGallery()">
+            <option value="score_desc">AI 점수 높은 순</option>
+            <option value="score_asc">AI 점수 낮은 순</option>
+            <option value="user_score_desc">👤 내 점수 높은 순</option>
+            <option value="user_score_asc">👤 내 점수 낮은 순</option>
+            <option value="gap_desc">⚖️ AI와 점수 차이 큰 순</option>
+            <option value="newest">최신 분석 순</option>
+            <option value="captured_desc">📷 최신 촬영 순</option>
+            <option value="name">파일명 순</option>
+          </select>
+        </div>
+
+        <button type="button" id="btn-toggle-score-dist" class="filter-btn slim-btn active" onclick="toggleScoreDistPanel()" style="display:inline-flex;align-items:center;gap:5px;font-weight:700;">
+          📊 점수 분포표 <span id="score-dist-toggle-arrow">▴</span>
+        </button>
       </div>
     </div>
 
-    <div class="filter-group tag-filter-group" style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);width:100%;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-      <span style="font-size:0.84rem;font-weight:700;color:var(--muted)">🏷️ 태그 필터:</span>
-      
-      <div class="tag-logic-toggle" style="display:inline-flex;background:#e2e8f0;border-radius:8px;padding:2px;gap:2px;">
-        <button id="tag-logic-and" class="toggle-logic-btn active" onclick="setTagLogic('AND')" title="선택한 모든 태그를 만족하는 사진만 표시">AND (모두 포함)</button>
-        <button id="tag-logic-or" class="toggle-logic-btn" onclick="setTagLogic('OR')" title="선택한 태그 중 하나라도 있는 사진 표시">OR (하나라도 포함)</button>
+    <!-- COLLAPSIBLE DRAWER 2: Category, Focal Length, Burst, and Tag Filters -->
+    <div id="adv-filter-drawer" class="slim-drawer adv-filter-drawer" style="display:none;">
+      <div class="adv-filter-grid">
+        <!-- Col 1: Figure Category -->
+        <div class="adv-filter-cell">
+          <span class="slim-section-label">피규어 유형:</span>
+          <button class="filter-btn slim-btn active cat-btn" data-cat-val="all" onclick="setCatFilter('all', this)">전체 유형</button>
+          <button class="filter-btn slim-btn cat-btn" data-cat-val="접사/디테일" onclick="setCatFilter('접사/디테일', this)">🔍 접사/디테일</button>
+          <button class="filter-btn slim-btn cat-btn" data-cat-val="일상/야외 스냅" onclick="setCatFilter('일상/야외 스냅', this)">🌿 일상/야외 스냅</button>
+          <button class="filter-btn slim-btn cat-btn" data-cat-val="스튜디오 연출/디오라마" onclick="setCatFilter('스튜디오 연출/디오라마', this)">🎬 스튜디오 연출</button>
+          <button class="filter-btn slim-btn cat-btn" data-cat-val="일반 피규어 촬영" onclick="setCatFilter('일반 피규어 촬영', this)">📷 일반 촬영</button>
+        </div>
+
+        <!-- Col 2: Burst Culling -->
+        <div class="adv-filter-cell">
+          <span class="slim-section-label">연사 선별:</span>
+          <button class="filter-btn slim-btn active burst-btn" data-burst-val="all" onclick="setBurstFilter('all', this)">전체 컷</button>
+          <button class="filter-btn slim-btn burst-btn" data-burst-val="best_only" onclick="setBurstFilter('best_only', this)" style="color:#065f46;">👑 Best Pick만</button>
+          <button class="filter-btn slim-btn burst-btn" data-burst-val="stack" onclick="setBurstFilter('stack', this)" style="color:#0369a1;">🗂️ 연사 묶기(Stack)</button>
+          <div style="display:inline-flex;align-items:center;gap:4px;background:var(--filter-btn-bg);padding:2px 8px;border-radius:8px;border:1px solid var(--line);">
+            <span style="font-size:0.72rem;font-weight:700;color:var(--muted);">감도:</span>
+            <select id="burst-dist-select" class="select-input" style="padding:1px 4px;font-size:0.73rem;height:auto;border:none;background:transparent;font-weight:700;color:#0284c7;cursor:pointer;" onchange="changeBurstSensitivity(this.value)">
+              <option value="12">엄격 (12)</option>
+              <option value="15" selected>표준 (15·권장)</option>
+              <option value="18">여유 (18)</option>
+              <option value="20">최대 (20)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Row 2 Full Width: Focal Length -->
+        <div class="adv-filter-cell" style="grid-column: 1 / -1;">
+          <span class="slim-section-label">🔭 화각(초점거리):</span>
+          <button class="filter-btn slim-btn active focal-btn" data-focal-key="all" onclick="setFocalFilter('all', this)">전체 화각</button>
+          <button class="filter-btn slim-btn focal-btn" data-focal-key="wide_24" onclick="setFocalFilter('wide_24', this)">24mm 이하 (광각)</button>
+          <button class="filter-btn slim-btn focal-btn" data-focal-key="semi_wide_35" onclick="setFocalFilter('semi_wide_35', this)">35mm 부근 (준광각)</button>
+          <button class="filter-btn slim-btn focal-btn" data-focal-key="standard_50" onclick="setFocalFilter('standard_50', this)">50mm 부근 (표준)</button>
+          <button class="filter-btn slim-btn focal-btn" data-focal-key="portrait_85" onclick="setFocalFilter('portrait_85', this)">70~85mm (준망원)</button>
+          <button class="filter-btn slim-btn focal-btn" data-focal-key="tele_100" onclick="setFocalFilter('tele_100', this)">100mm+ (망원/접사)</button>
+          <button class="filter-btn slim-btn focal-btn" data-focal-key="unknown" onclick="setFocalFilter('unknown', this)">화각 미식별</button>
+        </div>
+
+        <!-- Row 3 Full Width: Aesthetic Tags -->
+        <div class="adv-filter-cell tag-filter-group" style="grid-column: 1 / -1; padding-top:6px; border-top:1px dashed var(--line);">
+          <span class="slim-section-label">🏷️ 태그 필터:</span>
+          <div class="tag-logic-toggle" style="display:inline-flex;background:var(--filter-btn-bg);border:1px solid var(--line);border-radius:8px;padding:2px;gap:2px;">
+            <button id="tag-logic-and" class="toggle-logic-btn active" onclick="setTagLogic('AND')" title="선택한 모든 태그를 만족하는 사진만 표시">AND</button>
+            <button id="tag-logic-or" class="toggle-logic-btn" onclick="setTagLogic('OR')" title="선택한 태그 중 하나라도 있는 사진 표시">OR</button>
+          </div>
+
+          <select id="tag-select-box" class="select-input slim-select" onchange="onTagSelectChange(this)" style="max-width:195px;">
+            <option value="">+ 전체 태그 선택...</option>
+          </select>
+
+          <div id="quick-popular-tags" style="display:inline-flex;gap:4px;flex-wrap:wrap;align-items:center;"></div>
+
+          <button id="btn-clear-tag-filter" class="filter-btn slim-btn" style="display:none;color:#ef4444;border-color:#fca5a5;background:#fff5f5;" onclick="clearAllSelectedTags()">✕ 태그 해제</button>
+        </div>
       </div>
 
-      <select id="tag-select-box" class="select-input" onchange="onTagSelectChange(this)" style="max-width:210px;font-size:0.78rem;padding:3px 6px;">
-        <option value="">+ 전체 태그 목록에서 선택...</option>
-      </select>
-
-      <div id="quick-popular-tags" style="display:inline-flex;gap:4px;flex-wrap:wrap;align-items:center;"></div>
-
-      <button id="btn-clear-tag-filter" class="filter-btn" style="display:none;padding:2px 8px;font-size:0.74rem;color:#ef4444;border-color:#fca5a5;background:#fff5f5;" onclick="clearAllSelectedTags()">✕ 태그 해제</button>
-    </div>
-
-    <div id="active-tags-container" style="display:none;width:100%;margin-top:4px;gap:6px;align-items:center;flex-wrap:wrap;">
-      <span style="font-size:0.75rem;font-weight:700;color:#0284c7;">적용 중인 태그:</span>
-      <div id="active-tags-pills" style="display:inline-flex;gap:4px;flex-wrap:wrap;"></div>
-    </div>
-
-    <div style="display:flex;gap:12px;align-items:center;width:100%;justify-content:space-between;margin-top:4px;flex-wrap:wrap;">
-      <div style="display:flex;gap:8px;align-items:center;">
-        <span style="font-size:0.84rem;font-weight:700;color:var(--muted)">정렬:</span>
-        <select class="select-input" id="sort-select" onchange="renderGallery()">
-          <option value="score_desc">AI 점수 높은 순</option>
-          <option value="score_asc">AI 점수 낮은 순</option>
-          <option value="user_score_desc">👤 내 점수 높은 순</option>
-          <option value="user_score_asc">👤 내 점수 낮은 순</option>
-          <option value="gap_desc">⚖️ AI와 점수 차이 큰 순</option>
-          <option value="newest">최신 분석 순</option>
-          <option value="captured_desc">📷 최신 촬영 순</option>
-          <option value="name">파일명 순</option>
-        </select>
-      </div>
-
-      <div class="view-tabs">
-        <button class="tab-btn active" id="tab-gallery" onclick="switchView('gallery')">갤러리 뷰</button>
-        <button class="tab-btn" id="tab-compare" onclick="switchView('compare')">1:1 비교(Culling)</button>
-        <button class="tab-btn" id="tab-tournament" onclick="openTournamentModal()" style="background:#fef3c7;border-color:#fde68a;color:#b45309;font-weight:700;">🏆 블라인드 토너먼트</button>
-        <button class="tab-btn" id="tab-insights" onclick="switchView('insights')">📊 태그·화각 인사이트</button>
+      <div id="active-tags-container" style="display:none;width:100%;margin-top:6px;gap:6px;align-items:center;flex-wrap:wrap;">
+        <span style="font-size:0.74rem;font-weight:700;color:#0284c7;">적용 중인 태그:</span>
+        <div id="active-tags-pills" style="display:inline-flex;gap:4px;flex-wrap:wrap;"></div>
       </div>
     </div>
   </div>

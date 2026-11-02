@@ -608,9 +608,51 @@ function renderDateSessionChips() {
   }).join('');
 }
 
+let dateScopeDrawerOpen = false;
+let advFilterDrawerOpen = false;
+
+function toggleDateScopeDrawer(forceState) {
+  dateScopeDrawerOpen = (typeof forceState === 'boolean') ? forceState : !dateScopeDrawerOpen;
+  const drawer = document.getElementById('date-scope-drawer');
+  const arrow = document.getElementById('date-drawer-arrow');
+  if (drawer) drawer.style.display = dateScopeDrawerOpen ? 'block' : 'none';
+  if (arrow) arrow.textContent = dateScopeDrawerOpen ? '▴' : '▾';
+  updateDateScopeUI();
+}
+window.toggleDateScopeDrawer = toggleDateScopeDrawer;
+
+function toggleAdvFilterDrawer(forceState) {
+  advFilterDrawerOpen = (typeof forceState === 'boolean') ? forceState : !advFilterDrawerOpen;
+  const drawer = document.getElementById('adv-filter-drawer');
+  const arrow = document.getElementById('adv-filter-arrow');
+  const btn = document.getElementById('btn-toggle-adv-filters');
+  if (drawer) drawer.style.display = advFilterDrawerOpen ? 'block' : 'none';
+  if (arrow) arrow.textContent = advFilterDrawerOpen ? '▴' : '▾';
+  if (btn) btn.classList.toggle('active', advFilterDrawerOpen);
+}
+window.toggleAdvFilterDrawer = toggleAdvFilterDrawer;
+
+function getDateOnlyShortLabel() {
+  if (!isDateOnlyScopeActive()) return '전체 기간';
+  const presetLabels = {
+    today: '오늘',
+    '7d': '최근 7일',
+    '30d': '최근 30일',
+    this_month: '이번 달',
+    missing_exif: 'EXIF 미기록'
+  };
+  if (presetLabels[currentDatePreset]) return presetLabels[currentDatePreset];
+  if (currentDateFrom && currentDateTo) {
+    if (currentDateFrom === currentDateTo) return currentDateFrom.slice(5).replace('-', '/');
+    return `${currentDateFrom.slice(5)}~${currentDateTo.slice(5)}`;
+  }
+  if (currentDateFrom) return `${currentDateFrom.slice(5)}~`;
+  if (currentDateTo) return `~${currentDateTo.slice(5)}`;
+  return '기간 지정됨';
+}
+
 function updateDateScopeUI() {
   const dateActive = isDateOnlyScopeActive();
-  const anyActive = isDateScopeActive();
   document.querySelectorAll('.date-preset-btn[data-date-preset]').forEach(btn => {
     const p = btn.getAttribute('data-date-preset');
     btn.classList.toggle('active', p === currentDatePreset);
@@ -618,10 +660,14 @@ function updateDateScopeUI() {
   const clearBtn = document.getElementById('btn-clear-date-scope');
   if (clearBtn) clearBtn.style.display = dateActive ? 'inline-flex' : 'none';
 
-  const panelEl = document.getElementById('date-scope-panel');
-  if (panelEl) {
-    panelEl.style.borderColor = anyActive ? '#818cf8' : 'var(--line, #e2e8f0)';
-    panelEl.style.boxShadow = anyActive ? '0 0 0 2px rgba(99,102,241,0.12)' : 'none';
+  const triggerBtn = document.getElementById('btn-toggle-date-drawer');
+  const labelEl = document.getElementById('date-drawer-label');
+  if (labelEl) {
+    labelEl.textContent = getDateOnlyShortLabel();
+  }
+  if (triggerBtn) {
+    triggerBtn.classList.toggle('has-active-scope', dateActive);
+    triggerBtn.classList.toggle('active', dateScopeDrawerOpen);
   }
 }
 
@@ -943,10 +989,106 @@ const GALLERY_PAGE_SIZE = 40;
 let currentGalleryRenderCount = GALLERY_PAGE_SIZE;
 let galleryObserver = null;
 
+const FOCAL_BAND_SHORT_LABELS = {
+  wide_24: '24mm 이하',
+  semi_wide_35: '35mm 부근',
+  standard_50: '50mm 부근',
+  portrait_85: '70~85mm',
+  tele_100: '100mm+',
+  unknown: '화각 미식별'
+};
+
+const BURST_SHORT_LABELS = {
+  best_only: '👑 Best Pick만',
+  stack: '🗂️ 연사 묶기',
+  burst_only: '연사 컷만'
+};
+
+function updateAdvFilterSummaryUI() {
+  const pillsEl = document.getElementById('active-adv-filter-pills');
+  const countBadge = document.getElementById('adv-filter-count-badge');
+  const triggerBtn = document.getElementById('btn-toggle-adv-filters');
+
+  let activeCount = 0;
+  const pills = [];
+
+  if (currentCatFilter && currentCatFilter !== 'all') {
+    activeCount += 1;
+    pills.push(`
+      <span class="active-adv-pill" title="활성 피규어 유형 필터">
+        <span>${escapeHtml(currentCatFilter)}</span>
+        <button type="button" onclick="setCatFilter('all')" title="유형 필터 해제">✕</button>
+      </span>
+    `);
+  }
+
+  if (currentFocalFilter && currentFocalFilter !== 'all' && !currentFocalFilter.startsWith('mm:')) {
+    activeCount += 1;
+    const flLabel = FOCAL_BAND_SHORT_LABELS[currentFocalFilter] || currentFocalFilter;
+    pills.push(`
+      <span class="active-adv-pill" title="활성 화각 구간 필터">
+        <span>🔭 ${escapeHtml(flLabel)}</span>
+        <button type="button" onclick="clearFocalFilter()" title="화각 필터 해제">✕</button>
+      </span>
+    `);
+  } else if (currentFocalFilter && currentFocalFilter.startsWith('mm:')) {
+    activeCount += 1;
+  }
+
+  if (currentBurstFilter && currentBurstFilter !== 'all') {
+    activeCount += 1;
+    const bLabel = BURST_SHORT_LABELS[currentBurstFilter] || currentBurstFilter;
+    pills.push(`
+      <span class="active-adv-pill" title="활성 연사 선별 필터">
+        <span>${escapeHtml(bLabel)}</span>
+        <button type="button" onclick="setBurstFilter('all')" title="연사 필터 해제">✕</button>
+      </span>
+    `);
+  }
+
+  if (typeof selectedTags !== 'undefined' && selectedTags && selectedTags.size > 0) {
+    activeCount += selectedTags.size;
+    Array.from(selectedTags).forEach(tag => {
+      const escTag = escapeHtml(tag);
+      pills.push(`
+        <span class="active-adv-pill" style="background:rgba(14,165,233,0.12);color:#0284c7;border-color:rgba(14,165,233,0.35);" title="활성 미학 태그 필터">
+          <span>#${escTag}</span>
+          <button type="button" data-tag-action="toggle" data-tag="${escTag}" title="태그 필터 해제">✕</button>
+        </span>
+      `);
+    });
+  }
+
+  if (pillsEl) {
+    pillsEl.innerHTML = pills.join('');
+  }
+  if (countBadge) {
+    if (activeCount > 0) {
+      countBadge.textContent = String(activeCount);
+      countBadge.style.display = 'inline-flex';
+    } else {
+      countBadge.style.display = 'none';
+    }
+  }
+  if (triggerBtn) {
+    triggerBtn.classList.toggle('has-active-filter', activeCount > 0);
+  }
+}
+window.updateAdvFilterSummaryUI = updateAdvFilterSummaryUI;
+
 function setCatFilter(cat, btn) {
-  currentCatFilter = cat;
-  document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('active'));
-  if (btn) btn.classList.add('active');
+  currentCatFilter = cat || 'all';
+  document.querySelectorAll('.cat-btn').forEach(b => {
+    const cVal = b.getAttribute ? b.getAttribute('data-cat-val') : null;
+    if (btn) {
+      b.classList.toggle('active', b === btn);
+    } else if (cVal) {
+      b.classList.toggle('active', cVal === currentCatFilter);
+    } else {
+      b.classList.remove('active');
+    }
+  });
+  updateAdvFilterSummaryUI();
   renderScoreDistPanel();
   renderGallery();
 }
@@ -1026,6 +1168,7 @@ function setFocalFilter(focalKey, btn) {
     }
   });
   updateFocalExactBadge();
+  updateAdvFilterSummaryUI();
   renderScoreDistPanel();
   renderGallery();
 }
@@ -1114,9 +1257,18 @@ function updateStats() {
 }
 
 function setBurstFilter(mode, btn) {
-  currentBurstFilter = mode;
-  document.querySelectorAll('.burst-btn, .burst-filter-btn').forEach(b => b.classList.remove('active'));
-  if (btn) btn.classList.add('active');
+  currentBurstFilter = mode || 'all';
+  document.querySelectorAll('.burst-btn, .burst-filter-btn').forEach(b => {
+    const bVal = b.getAttribute ? b.getAttribute('data-burst-val') : null;
+    if (btn) {
+      b.classList.toggle('active', b === btn);
+    } else if (bVal) {
+      b.classList.toggle('active', bVal === currentBurstFilter);
+    } else {
+      b.classList.remove('active');
+    }
+  });
+  updateAdvFilterSummaryUI();
   renderScoreDistPanel();
   renderGallery();
 }
@@ -1138,7 +1290,7 @@ function setFilter(filter, btn) {
     updateScoreBinFilterBadge();
     renderScoreDistPanel();
   }
-  document.querySelectorAll('.filter-btn:not(.burst-btn):not(.cat-btn):not(.focal-btn):not(.date-preset-btn):not(.date-session-chip):not(.collection-chip-btn):not(#btn-toggle-score-dist)').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.filter-btn:not(.burst-btn):not(.cat-btn):not(.focal-btn):not(.date-preset-btn):not(.date-session-chip):not(.collection-chip-btn):not(#btn-toggle-score-dist):not(#btn-toggle-date-drawer):not(#btn-toggle-adv-filters):not(#btn-clear-tag-filter)').forEach(b => b.classList.remove('active'));
   if (btn) btn.classList.add('active');
   renderGallery();
 }

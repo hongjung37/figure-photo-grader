@@ -153,6 +153,9 @@ function updateTagFilterUI() {
     const t = btn.getAttribute('data-tag');
     btn.classList.toggle('active', selectedTags.has(t));
   });
+  if (typeof updateAdvFilterSummaryUI === 'function') {
+    updateAdvFilterSummaryUI();
+  }
 }
 
 // Global Event Delegation for tag clicks

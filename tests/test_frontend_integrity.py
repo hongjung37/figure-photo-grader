@@ -113,7 +113,16 @@ const mockElements = {
   'btn-toggle-batch-select': { style: {}, textContent: '' },
   'upload-collection-select': { innerHTML: '', value: '' },
   'upload-new-collection-name': { style: {}, value: '', focus: () => {} },
-  'upload-auto-folder-collection': { checked: true }
+  'upload-auto-folder-collection': { checked: true },
+  'btn-toggle-date-drawer': { classList: { toggle: () => {} } },
+  'date-drawer-label': { textContent: '' },
+  'date-drawer-arrow': { textContent: '' },
+  'date-scope-drawer': { style: {} },
+  'btn-toggle-adv-filters': { classList: { toggle: () => {} } },
+  'adv-filter-count-badge': { style: {}, textContent: '' },
+  'adv-filter-arrow': { textContent: '' },
+  'adv-filter-drawer': { style: {} },
+  'active-adv-filter-pills': { innerHTML: '' }
 };
 
 const windowObj = { addEventListener: () => {} };
@@ -364,6 +373,22 @@ if (scopedUncollected.length !== 1 || scopedUncollected[0].id !== 2) {
   throw new Error('setCollectionFilter("uncollected") failed to scope to uncollected item #2');
 }
 vm.runInContext('setCollectionFilter("all");', ctx);
+
+// 10) Option A Slim Toolbar & Collapsible Drawers
+vm.runInContext('toggleDateScopeDrawer(true);', ctx);
+if (mockElements['date-scope-drawer'].style.display !== 'block') {
+  throw new Error('toggleDateScopeDrawer(true) failed to open date drawer');
+}
+vm.runInContext('toggleDateScopeDrawer(false);', ctx);
+vm.runInContext('toggleAdvFilterDrawer(true);', ctx);
+if (mockElements['adv-filter-drawer'].style.display !== 'block') {
+  throw new Error('toggleAdvFilterDrawer(true) failed to open adv filter drawer');
+}
+vm.runInContext('setCatFilter("접사/디테일"); setFocalFilter("portrait_85");', ctx);
+if (mockElements['adv-filter-count-badge'].textContent !== '2' || !mockElements['active-adv-filter-pills'].innerHTML.includes('접사/디테일')) {
+  throw new Error('updateAdvFilterSummaryUI failed to render active filter count badge and pills');
+}
+vm.runInContext('setCatFilter("all"); clearFocalFilter(); toggleAdvFilterDrawer(false);', ctx);
 
 process.stdout.write('OK');
 """
