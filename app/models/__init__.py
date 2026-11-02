@@ -5,6 +5,7 @@ from app.models.analysis import (
     AESTHETIC_TAG_OPTIONS,
     SCORE_GRADE_BENCHMARKS,
     AestheticTags,
+    FastPhotoAnalysis,
     PhotoAnalysis,
     get_score_grade,
 )
@@ -21,6 +22,7 @@ __all__ = [
     "AESTHETIC_TAG_OPTIONS",
     "SCORE_GRADE_BENCHMARKS",
     "AestheticTags",
+    "FastPhotoAnalysis",
     "PhotoAnalysis",
     "get_score_grade",
     "CropBox",

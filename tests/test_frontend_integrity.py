@@ -90,7 +90,11 @@ const mockElements = {
   'active-bin-filter-badge': { style: {} },
   'active-bin-filter-text': { textContent: '' },
   'btn-toggle-score-dist': { classList: { toggle: () => {} } },
-  'score-dist-toggle-arrow': { textContent: '' }
+  'score-dist-toggle-arrow': { textContent: '' },
+  'upload-analysis-mode': { value: 'full' },
+  'upload-mode-full-btn': { style: {} },
+  'upload-mode-fast-btn': { style: {} },
+  'upload-mode-hint': { innerHTML: '' }
 };
 
 const windowObj = { addEventListener: () => {} };
@@ -283,6 +287,32 @@ if (filteredByExactMm.length !== 1 || filteredByExactMm[0].id !== 1) {
   throw new Error('setFocalFilter("mm:85") failed to filter exact 85mm item');
 }
 vm.runInContext('clearFocalFilter(); setInsightsDimension("tag");', ctx);
+
+// 7) Fast Mode (경량 분석) UI toggle & card/detail detection
+vm.runInContext('selectUploadAnalysisMode("fast");', ctx);
+if (mockElements['upload-analysis-mode'].value !== 'fast' || !mockElements['upload-mode-hint'].innerHTML.includes('경량 분석')) {
+  throw new Error('selectUploadAnalysisMode("fast") failed to update mode input and hint');
+}
+vm.runInContext('selectUploadAnalysisMode("full");', ctx);
+if (mockElements['upload-analysis-mode'].value !== 'full') {
+  throw new Error('selectUploadAnalysisMode("full") failed to reset mode input');
+}
+const fastItem = {
+  id: 99, filename: 'fast_shot.jpg', final_score: 8.4, grade: '매우 우수',
+  figure_category: '일반 피규어 촬영', focus_status: '완벽 칼초점', analysis_mode: 'fast',
+  composition_score: 8.5, lighting_score: 8.2, color_score: 8.4, technique_score: 8.5,
+  composition_notes: '', lighting_notes: '', color_notes: '', technique_notes: '',
+  final_reason: '눈동자 칼핀이 선명하나 배경 여백이 다소 좁음.',
+  strengths: [], improvements: [], aesthetic_tags: {}
+};
+const isFastDetected = vm.runInContext('isFastAnalysisItem(' + JSON.stringify(fastItem) + ')', ctx);
+if (!isFastDetected) {
+  throw new Error('isFastAnalysisItem failed to identify fast analysis item');
+}
+const fastCardHtml = vm.runInContext('renderGalleryCard(' + JSON.stringify(fastItem) + ')', ctx);
+if (!fastCardHtml.includes('⚡ 경량')) {
+  throw new Error('renderGalleryCard did not render ⚡ 경량 badge for fast item');
+}
 
 process.stdout.write('OK');
 """

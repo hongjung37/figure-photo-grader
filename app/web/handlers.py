@@ -271,6 +271,7 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             "tier": "standard",
             "provider": "gemini",
             "category": "auto",
+            "analysis_mode": "full",
             "filename": "uploaded.webp",
             "image": None,
         }
@@ -298,6 +299,10 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 result["provider"] = data.decode("utf-8", errors="replace").strip()
             elif b'name="category"' in header:
                 result["category"] = data.decode("utf-8", errors="replace").strip()
+            elif b'name="analysis_mode"' in header:
+                result["analysis_mode"] = data.decode("utf-8", errors="replace").strip()
+            elif b'name="sample_count"' in header:
+                result["sample_count"] = data.decode("utf-8", errors="replace").strip()
             elif b'name="image"' in header:
                 result["image"] = data
                 for line in header.split(b"\r\n"):
@@ -527,6 +532,8 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         tier = form_data.get("tier", "standard")
         provider = form_data.get("provider", "gemini")
         category_param = form_data.get("category", "auto")
+        raw_analysis_mode = str(form_data.get("analysis_mode", "full")).strip().lower()
+        analysis_mode = "fast" if raw_analysis_mode == "fast" else "full"
 
         if not file_bytes:
             raise ValueError("사진 파일이 전달되지 않았습니다.")
@@ -559,17 +566,20 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         else:
             category_hint = category_param if category_param != "auto" else None
             clear_effective_analysis_model()
-            analysis = analyze_photo(
-                prepared,
-                provider=active_provider,
-                model=model,
-                category_hint=category_hint,
-                sample_count=sample_count,
-            )
+            analyze_kwargs: dict[str, Any] = {
+                "provider": active_provider,
+                "model": model,
+                "category_hint": category_hint,
+                "sample_count": sample_count,
+            }
+            if analysis_mode == "fast":
+                analyze_kwargs["analysis_mode"] = "fast"
+            analysis = analyze_photo(prepared, **analyze_kwargs)
             effective_model = get_effective_analysis_model(model)
             record_id = save_analysis(self.db_path, prepared, effective_model, analysis)
             analysis_dict = analysis.model_dump(mode="json")
             analysis_dict["model"] = effective_model
+            analysis_dict["analysis_mode"] = analysis.analysis_mode
             duplicate = False
 
         sampled_scores = get_last_sampled_scores()
@@ -630,15 +640,19 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
 
             updated_record = update_cross_check_opinion(self.db_path, record_id, opinion)
         else:
+            raw_depth = str(data.get("analysis_mode", "fast" if mode == "fast" else "full")).strip().lower()
+            target_analysis_mode = "fast" if raw_depth == "fast" else "full"
             active_provider, model = resolve_task_model(tier, default_tier="standard")
             clear_effective_analysis_model()
-            new_analysis = analyze_photo(
-                prepared,
-                provider=active_provider,
-                model=model,
-                category_hint=category_hint,
-                sample_count=sample_count,
-            )
+            reanalyze_kwargs: dict[str, Any] = {
+                "provider": active_provider,
+                "model": model,
+                "category_hint": category_hint,
+                "sample_count": sample_count,
+            }
+            if target_analysis_mode == "fast":
+                reanalyze_kwargs["analysis_mode"] = "fast"
+            new_analysis = analyze_photo(prepared, **reanalyze_kwargs)
             effective_model = get_effective_analysis_model(model)
             updated_record = update_analysis(self.db_path, record_id, effective_model, new_analysis)
 

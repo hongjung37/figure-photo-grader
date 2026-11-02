@@ -21,13 +21,14 @@ from app.config import (
     OPENAI_MODEL_PRESETS,
     SNS_CROP_RATIO_CONFIGS,
 )
-from app.models.analysis import OpenAICrossCheck, PhotoAnalysis
+from app.models.analysis import FastPhotoAnalysis, OpenAICrossCheck, PhotoAnalysis
 from app.models.crop import CropBox, CropSet, SNSAdvice, SNSCaptionAndTags
 from app.models.lightroom import LightroomAdvice
 from app.prompts import (
     build_all_sns_crops_prompt,
     build_caption_and_tags_prompt,
     build_cross_check_prompt,
+    build_fast_grader_prompt,
     build_grader_prompt,
     build_lightroom_prompt,
     build_single_crop_prompt,
@@ -277,11 +278,38 @@ def analyze_with_openai(
     model: str = DEFAULT_OPENAI_MODEL,
     category_hint: str | None = None,
     api_key: str | None = None,
+    analysis_mode: str = "full",
 ) -> PhotoAnalysis:
     """Analyze figure photo with OpenAI and return strictly validated PhotoAnalysis."""
     key = _resolve_api_key(api_key)
     client = _get_client(key)
     resolved_model = OPENAI_MODEL_PRESETS.get(model, model)
+    is_fast = (analysis_mode or "full").strip().lower() == "fast"
+    if is_fast:
+        prompt_text = build_fast_grader_prompt(photo, category_hint=category_hint)
+        fast_res = _call_openai_structured(
+            client=client,
+            model=resolved_model,
+            prompt_text=prompt_text,
+            photo=photo,
+            response_model=FastPhotoAnalysis,
+            task_desc="OpenAI 사진 경량 분석",
+        )
+        if isinstance(fast_res, FastPhotoAnalysis):
+            return fast_res.to_photo_analysis()
+        if isinstance(fast_res, PhotoAnalysis):
+            return fast_res.model_copy(
+                update={
+                    "composition_notes": "",
+                    "lighting_notes": "",
+                    "color_notes": "",
+                    "technique_notes": "",
+                    "focus_notes": "",
+                    "strengths": [],
+                    "improvements": [],
+                }
+            )
+
     prompt_text = build_grader_prompt(photo, category_hint=category_hint, compact_tags=True)
 
     return _call_openai_structured(

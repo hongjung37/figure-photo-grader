@@ -328,6 +328,28 @@
       <option value="ensemble-pro">🤝 앙상블: Flash 3.8 (Pro) + GPT-6 Luna 크로스 체크</option>
     </select>
 
+    <label style="font-weight:700;font-size:0.84rem;display:block;margin-bottom:6px;">분석 깊이 (모드 선택):</label>
+    <input type="hidden" id="upload-analysis-mode" value="full">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:6px;">
+      <button type="button" id="upload-mode-full-btn" onclick="selectUploadAnalysisMode('full')" style="text-align:left;padding:10px 12px;border-radius:10px;border:2px solid #4f46e5;background:rgba(79,70,229,0.08);cursor:pointer;transition:all 0.15s;">
+        <div style="font-weight:800;font-size:0.86rem;color:#4f46e5;display:flex;align-items:center;justify-content:space-between;">
+          <span>🔍 정밀 분석 (기본)</span>
+          <span style="font-size:0.7rem;background:#4f46e5;color:#fff;padding:1px 6px;border-radius:999px;">Full</span>
+        </div>
+        <div style="font-size:0.74rem;color:var(--muted);margin-top:3px;line-height:1.35;">장단점 · 4대 영역 노트 · 8종 미학 태그 전체</div>
+      </button>
+      <button type="button" id="upload-mode-fast-btn" onclick="selectUploadAnalysisMode('fast')" style="text-align:left;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--card-sub);cursor:pointer;transition:all 0.15s;">
+        <div style="font-weight:800;font-size:0.86rem;color:var(--text);display:flex;align-items:center;justify-content:space-between;">
+          <span>⚡ 경량 분석 (대량 선별용)</span>
+          <span style="font-size:0.7rem;background:#fef3c7;color:#b45309;border:1px solid #fde68a;padding:1px 6px;border-radius:999px;">Fast</span>
+        </div>
+        <div style="font-size:0.74rem;color:var(--muted);margin-top:3px;line-height:1.35;">5대 점수 · 초점 판정 · 1줄 총평 (속도 3배)</div>
+      </button>
+    </div>
+    <div id="upload-mode-hint" style="font-size:0.76rem;color:var(--muted);background:var(--card-sub);border:1px solid var(--line);border-radius:8px;padding:7px 10px;margin-bottom:12px;line-height:1.4;">
+      🔍 <strong>정밀 분석 모드:</strong> 구도·조명·색감·기술 상세 비평과 강점/개선점, 8대 미학 태그를 모두 생성합니다.
+    </div>
+
     <label style="font-weight:700;font-size:0.84rem;display:block;margin-bottom:6px;">피규어 촬영 세부 유형:</label>
     <select class="select-input" id="upload-category" style="width:100%;margin-bottom:14px;">
       <option value="auto">자동 판별 (Gemini가 사진을 분석하여 자동 분류)</option>

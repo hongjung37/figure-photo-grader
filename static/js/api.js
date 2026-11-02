@@ -184,11 +184,11 @@ const API = {
     return await res.json();
   },
 
-  async reanalyzePhoto(id, mode = 'cross_check_only', tier = 'standard', category = 'auto', sampleCount = 1) {
+  async reanalyzePhoto(id, mode = 'cross_check_only', tier = 'standard', category = 'auto', sampleCount = 1, analysisMode = 'full') {
     const res = await fetch('/api/reanalyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, mode, tier, category, sample_count: sampleCount })
+      body: JSON.stringify({ id, mode, tier, category, sample_count: sampleCount, analysis_mode: analysisMode })
     });
     return await res.json();
   }

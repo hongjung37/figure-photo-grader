@@ -23,13 +23,20 @@ from app.services.multi_llm import analyze_photo, resolve_task_model
 from app.services.xmp_service import write_xmp_sidecar
 
 
-def _dispatch_analyze(photo, model: str, category: str | None):
+def _dispatch_analyze(photo, model: str, category: str | None, analysis_mode: str = "full"):
     mod = sys.modules.get("photo_analyzer")
     if mod is not None and hasattr(mod, "analyze_with_gemini"):
         fn = getattr(mod, "analyze_with_gemini")
         if fn is not analyze_with_gemini:
+            if analysis_mode == "fast":
+                try:
+                    return fn(photo, model=model, category_hint=category, analysis_mode="fast")
+                except TypeError:
+                    return fn(photo, model=model, category_hint=category)
             return fn(photo, model=model, category_hint=category)
     provider, resolved_model = resolve_task_model(model)
+    if analysis_mode == "fast":
+        return analyze_photo(photo, provider=provider, model=resolved_model, category_hint=category, analysis_mode="fast")
     return analyze_photo(photo, provider=provider, model=resolved_model, category_hint=category)
 
 
@@ -102,6 +109,17 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Lightroom / Capture One 호환 XMP 사이드카 파일(*.xmp)을 원본 사진 옆에 자동 생성",
     )
+    parser.add_argument(
+        "--fast",
+        action="store_true",
+        help="대량 선별용 경량 분석 모드 (5대 점수 + 초점/유형 + 1줄 핵심 사유만 빠르게 추출, 상세 노트·태그 생략)",
+    )
+    parser.add_argument(
+        "--analysis-mode",
+        choices=["full", "fast"],
+        default=None,
+        help="분석 깊이 모드 선택 (full: 정밀 분석, fast: 대량 선별용 경량 분석)",
+    )
     return parser
 
 
@@ -109,6 +127,7 @@ def cli_main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     target_path = args.target.expanduser().resolve()
     model = args.model if args.model else ALL_MODEL_PRESETS[args.tier]
+    analysis_mode = "fast" if (args.fast or args.analysis_mode == "fast") else "full"
     db_path = args.db.expanduser().resolve()
     ensure_db_columns(db_path)
     set_usage_log_db(db_path)
@@ -132,16 +151,19 @@ def cli_main(argv: list[str] | None = None) -> int:
         )
         report_dir = args.report_dir.expanduser().resolve() if args.report_dir else target_path / "reports"
 
-        return run_batch_pipeline(
-            photo_paths=photo_paths,
-            model=model,
-            db_path=db_path,
-            report_dir=report_dir,
-            summary_html_path=summary_html,
-            max_workers=args.workers,
-            category=args.category,
-            generate_xmp=args.xmp,
-        )
+        batch_kwargs = {
+            "photo_paths": photo_paths,
+            "model": model,
+            "db_path": db_path,
+            "report_dir": report_dir,
+            "summary_html_path": summary_html,
+            "max_workers": args.workers,
+            "category": args.category,
+            "generate_xmp": args.xmp,
+        }
+        if analysis_mode == "fast":
+            batch_kwargs["analysis_mode"] = "fast"
+        return run_batch_pipeline(**batch_kwargs)
 
     # Single file mode
     try:
@@ -164,7 +186,11 @@ def cli_main(argv: list[str] | None = None) -> int:
             if report_output in protected_paths:
                 raise ValueError("HTML 보고서 경로가 입력 사진, SQLite DB 또는 .env 경로와 같을 수 없습니다.")
         photo = prepare_photo(target_path)
-        analysis = _dispatch_analyze(photo, model=model, category=args.category if args.category != "auto" else None)
+        cat_arg = args.category if args.category != "auto" else None
+        if analysis_mode == "fast":
+            analysis = _dispatch_analyze(photo, model=model, category=cat_arg, analysis_mode="fast")
+        else:
+            analysis = _dispatch_analyze(photo, model=model, category=cat_arg)
         record_id = save_analysis(db_path, photo, model, analysis)
         report_path = None
         if report_output is not None:

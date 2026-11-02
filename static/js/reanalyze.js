@@ -106,6 +106,12 @@ function renderReanalyzePanel(item) {
                 <option value="ensemble-3.7" ${savedTier === 'ensemble-3.7' ? 'selected' : ''}>🤝 앙상블: Flash 3.7 + GPT-6 Luna 크로스체크</option>
                 <option value="ensemble-pro" ${savedTier === 'ensemble-pro' ? 'selected' : ''}>🤝 앙상블: Flash 3.8 (Pro) + GPT-6 Luna 크로스체크</option>
               </select>
+
+              <label class="reanalyze-sublabel" for="reanalyze-depth-${item.id}" style="margin-top:8px;display:block;">분석 깊이 (모드):</label>
+              <select id="reanalyze-depth-${item.id}" class="select-input reanalyze-select" onclick="event.stopPropagation()">
+                <option value="full" selected>🔍 정밀 분석 (장단점 · 4대 영역 노트 · 8대 미학 태그 전체)</option>
+                <option value="fast">⚡ 경량 분석 (5대 점수 · 초점 판정 · 1줄 핵심 사유만 빠르게)</option>
+              </select>
             </div>
           </div>
         </div>
@@ -170,6 +176,9 @@ async function executeReanalyze(id) {
   const tierSelect = document.getElementById(`reanalyze-tier-${id}`);
   const tier = tierSelect ? tierSelect.value : 'standard';
 
+  const depthSelect = document.getElementById(`reanalyze-depth-${id}`);
+  const analysisMode = (depthSelect && depthSelect.value === 'fast') ? 'fast' : 'full';
+
   const catSelect = document.getElementById(`reanalyze-category-${id}`);
   const category = catSelect ? catSelect.value : 'auto';
 
@@ -193,15 +202,16 @@ async function executeReanalyze(id) {
     const chosenLabel = tierSelect && tierSelect.selectedOptions && tierSelect.selectedOptions[0]
       ? tierSelect.selectedOptions[0].textContent
       : tier;
+    const depthLabel = analysisMode === 'fast' ? '⚡ 경량 재평가' : '🔍 정밀 재평가';
     const modeName = mode === 'cross_check_only'
       ? 'OpenAI GPT-6 Luna 크로스체크 단독'
-      : `AI 전체 재평가 (${_escapeReanalyzeHtml(chosenLabel)})`;
+      : `AI ${depthLabel} (${_escapeReanalyzeHtml(chosenLabel)})`;
     const samplingText = (sampleCount > 1 && mode === 'full') ? ' [🎯 3회 중앙값 정밀 채점]' : '';
     statusEl.innerHTML = `⏳ <b>${modeName}${samplingText}</b> 실행 중... (단독 모델 약 5~10초, 앙상블 약 10~25초 소요)`;
   }
 
   try {
-    const res = await API.reanalyzePhoto(id, mode, tier, category, sampleCount);
+    const res = await API.reanalyzePhoto(id, mode, tier, category, sampleCount, analysisMode);
     if (!res || !res.success) {
       throw new Error((res && res.error) || '알 수 없는 오류');
     }
@@ -254,9 +264,63 @@ async function executeReanalyze(id) {
   }
 }
 
+async function upgradeFastToFullAnalysis(id, btn) {
+  const initialList = (typeof allData !== 'undefined' && Array.isArray(allData)) ? allData : (window.allData || []);
+  const beforeItem = initialList.find(d => d.id === id);
+  const tier = (beforeItem && beforeItem.model)
+    ? beforeItem.model
+    : ((window.ModelSettings && window.ModelSettings.get('photo_grading')) || 'luna');
+  const category = beforeItem ? getCategoryKeyFromTitle(beforeItem.figure_category) : 'auto';
+  const prevScore = beforeItem ? Number(beforeItem.final_score) : null;
+  const prevModel = beforeItem ? beforeItem.model : null;
+
+  const origText = btn ? btn.innerHTML : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '⏳ 정밀(Full) 분석 업그레이드 중... (약 5~10초)';
+  }
+  try {
+    const res = await API.reanalyzePhoto(id, 'full', tier, category, 1, 'full');
+    if (!res || !res.success) {
+      throw new Error((res && res.error) || '알 수 없는 오류');
+    }
+    if (typeof loadData === 'function') {
+      await loadData();
+    }
+    const dataList = (typeof allData !== 'undefined' && Array.isArray(allData)) ? allData : (window.allData || []);
+    const targetItem = dataList.find(d => d.id === id);
+    if (targetItem && res.analysis) {
+      Object.assign(targetItem, res.analysis);
+      if (typeof updateStats === 'function') updateStats();
+      if (typeof renderScoreDistPanel === 'function') renderScoreDistPanel();
+      if (typeof renderGallery === 'function') renderGallery();
+    }
+    const updatedAnalysis = res.analysis || targetItem || {};
+    window._lastReanalyzeDiff = {
+      id: id,
+      mode: 'full',
+      prevScore: prevScore,
+      newScore: updatedAnalysis.final_score != null ? Number(updatedAnalysis.final_score) : prevScore,
+      prevModel: prevModel,
+      newModel: updatedAnalysis.model || prevModel,
+      timestamp: Date.now()
+    };
+    if (typeof openDetailModal === 'function') {
+      openDetailModal(id);
+    }
+  } catch (err) {
+    alert(`정밀 분석 업그레이드 실패: ${err.message}`);
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = origText;
+    }
+  }
+}
+
 // Global scope export
 window.getCategoryKeyFromTitle = getCategoryKeyFromTitle;
 window.toggleReanalyzePanel = toggleReanalyzePanel;
 window.selectReanalyzeMode = selectReanalyzeMode;
 window.renderReanalyzePanel = renderReanalyzePanel;
 window.executeReanalyze = executeReanalyze;
+window.upgradeFastToFullAnalysis = upgradeFastToFullAnalysis;

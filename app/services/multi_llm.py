@@ -142,6 +142,7 @@ def analyze_photo(
     category_hint: str | None = None,
     api_key: str | None = None,
     sample_count: int = 1,
+    analysis_mode: str = "full",
 ) -> PhotoAnalysis:
     """Unified entry point for photo evaluation with Gemini or Gemini+OpenAI Cross-Check Ensemble.
 
@@ -149,6 +150,7 @@ def analyze_photo(
     the analysis corresponding to the median final_score, filtering out transient evaluation outliers.
     """
     normalized_provider = (provider or "gemini").strip().lower()
+    normalized_mode = "fast" if (analysis_mode or "full").strip().lower() == "fast" else "full"
     clear_effective_analysis_model()
 
     if normalized_provider == "ensemble":
@@ -175,6 +177,7 @@ def analyze_photo(
                 model=target_gemini_model,
                 category_hint=category_hint,
                 sample_count=sample_count,
+                analysis_mode=normalized_mode,
             )
             actual = get_last_used_gemini_model()
             if actual:
@@ -211,6 +214,7 @@ def analyze_photo(
                 category_hint=category_hint,
                 api_key=api_key,
                 sample_count=1,
+                analysis_mode=normalized_mode,
             )
             eff = get_effective_analysis_model(model or DEFAULT_MODEL)
             used_model_holder.append(eff)
@@ -252,23 +256,40 @@ def analyze_photo(
     # Standalone evaluation: dispatch to OpenAI or Gemini based on provider
     if normalized_provider == "openai" or (model and (model.lower().startswith("gpt") or "luna" in model.lower())):
         target_openai = OPENAI_MODEL_PRESETS.get((model or "").lower(), model or DEFAULT_OPENAI_MODEL)
-        res = analyze_with_openai(
-            photo=photo,
-            model=target_openai,
-            category_hint=category_hint,
-            api_key=api_key,
-        )
+        if normalized_mode == "fast":
+            res = analyze_with_openai(
+                photo=photo,
+                model=target_openai,
+                category_hint=category_hint,
+                api_key=api_key,
+                analysis_mode="fast",
+            )
+        else:
+            res = analyze_with_openai(
+                photo=photo,
+                model=target_openai,
+                category_hint=category_hint,
+                api_key=api_key,
+            )
         _MULTI_THREAD_LOCAL.effective_model = target_openai
         return res
 
     # Gemini evaluation (fallback to DEFAULT_MODEL if non-Gemini model name passed)
     target_model = model if (model and model.lower().startswith("gemini")) else DEFAULT_MODEL
     clear_last_used_gemini_model()
-    res = analyze_with_gemini(
-        photo=photo,
-        model=target_model,
-        category_hint=category_hint,
-    )
+    if normalized_mode == "fast":
+        res = analyze_with_gemini(
+            photo=photo,
+            model=target_model,
+            category_hint=category_hint,
+            analysis_mode="fast",
+        )
+    else:
+        res = analyze_with_gemini(
+            photo=photo,
+            model=target_model,
+            category_hint=category_hint,
+        )
     actual_gemini = get_last_used_gemini_model() or target_model
     _MULTI_THREAD_LOCAL.effective_model = actual_gemini
     return res

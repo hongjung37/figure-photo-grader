@@ -1573,6 +1573,56 @@ class PhotoAnalyzerTests(unittest.TestCase):
             self.assertIn("세컨드 오피니언 테스트 총평", html)
             self.assertIn("구도 비평 내용", html)
 
+    def test_fast_photo_analysis_schema_prompt_and_conversion(self) -> None:
+        from app.models.analysis import FastPhotoAnalysis
+        from app.prompts.grader_prompts import build_fast_grader_prompt, build_grader_prompt
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            image_path = Path(temporary_directory) / "fast.jpg"
+            self._make_jpeg(image_path, with_exif=True)
+            photo = prepare_photo(image_path)
+
+            fast_prompt = build_fast_grader_prompt(photo, category_hint="macro")
+            self.assertIn("접사/디테일", fast_prompt)
+            self.assertIn("1문장(80자 이내)", fast_prompt)
+            self.assertNotIn("viewpoint (시점):", fast_prompt)
+            self.assertEqual(fast_prompt, build_grader_prompt(photo, category_hint="macro", analysis_mode="fast"))
+
+            schema = FastPhotoAnalysis.model_json_schema()
+            self.assertIn("figure_category", schema["required"])
+            self.assertIn("focus_status", schema["required"])
+            self.assertNotIn("aesthetic_tags", schema.get("properties", {}))
+            self.assertNotIn("composition_notes", schema.get("properties", {}))
+
+            raw_json = json.dumps({
+                "figure_category": "접사",
+                "focus_status": "칼초점",
+                "composition_score": 8.5,
+                "lighting_score": 8.0,
+                "color_score": 8.2,
+                "technique_score": 9.0,
+                "final_score": 8.5,
+                "final_reason": "눈동자 칼초점과 보케가 우수하나 우측 여백이 다소 좁음.",
+            }, ensure_ascii=False)
+            fast_obj = FastPhotoAnalysis.from_llm_json(raw_json)
+            self.assertEqual(fast_obj.figure_category, "접사/디테일")
+            self.assertEqual(fast_obj.focus_status, "완벽 칼초점")
+
+            full_obj = fast_obj.to_photo_analysis()
+            self.assertEqual(full_obj.analysis_mode, "fast")
+            self.assertEqual(full_obj.final_score, 8.5)
+            self.assertEqual(full_obj.composition_notes, "")
+            self.assertEqual(full_obj.strengths, [])
+            self.assertEqual(full_obj.aesthetic_tags.viewpoint, [])
+
+            db_path = Path(temporary_directory) / "fast_test.sqlite3"
+            rec_id = save_analysis(db_path, photo, "gpt-6-luna", full_obj)
+            from app.db.repository import get_analysis_by_id
+            saved_row = get_analysis_by_id(db_path, rec_id)
+            self.assertIsNotNone(saved_row)
+            self.assertEqual(saved_row["analysis_mode"], "fast")
+            self.assertEqual(saved_row["final_score"], 8.5)
+
 
 if __name__ == "__main__":
     unittest.main()

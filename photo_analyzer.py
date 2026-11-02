@@ -51,6 +51,7 @@ from app.models.analysis import (
     SCORE_GRADE_BENCHMARKS,
     AestheticTags,
     CrossCheckOpinion,
+    FastPhotoAnalysis,
     PhotoAnalysis,
     get_score_grade,
 )
@@ -71,6 +72,7 @@ from app.prompts.crop_prompts import (
 )
 from app.prompts.grader_prompts import (
     _build_prompt,
+    build_fast_grader_prompt,
     build_grader_prompt,
 )
 from app.prompts.lightroom_prompts import build_lightroom_prompt

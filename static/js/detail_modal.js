@@ -120,6 +120,9 @@ function openDetailModal(id) {
   const reanalyzePanelFn = typeof renderReanalyzePanel === 'function' ? renderReanalyzePanel : (window.renderReanalyzePanel || (() => ''));
 
   const fmtModel = (m) => (window.ModelSettings && m) ? window.ModelSettings.formatBadge(m) : (m || '-');
+  const isFastItem = (typeof isFastAnalysisItem === 'function')
+    ? isFastAnalysisItem(item)
+    : (item.analysis_mode === 'fast');
   const reanalyzeDiff = (window._lastReanalyzeDiff && window._lastReanalyzeDiff.id === item.id) ? window._lastReanalyzeDiff : null;
   let reanalyzeBannerHtml = '';
   if (reanalyzeDiff) {
@@ -290,6 +293,11 @@ function openDetailModal(id) {
             <span style="display:inline-flex;align-items:center;gap:4px;font-size:0.78rem;font-weight:700;color:#4f46e5;background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.3);padding:3px 10px;border-radius:999px;" title="적용된 평가 모델 ID: ${_escapeDetailHtml(item.model)}">
               🤖 ${_escapeDetailHtml(fmtModel(item.model))}
             </span>
+            ${isFastItem ? `
+              <span style="display:inline-flex;align-items:center;gap:4px;font-size:0.76rem;font-weight:800;color:#b45309;background:#fef3c7;border:1px solid #fde68a;padding:3px 10px;border-radius:999px;" title="대량 선별용 경량 분석 모드">
+                ⚡ 경량 선별본
+              </span>
+            ` : ''}
           </div>
         </div>
         <div style="text-align:right;">
@@ -384,68 +392,86 @@ function openDetailModal(id) {
         </div>
       </div>
 
-      <!-- 세부 평가 요소별 코멘트 (2x2 그리드 컴팩트 배치) -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px;">
-        <div class="note-item-compact" style="border-left: 3px solid #3b82f6;">
-          <div class="note-header">
-            <span>📐 구도 평가</span>
-            <strong style="color:#2563eb;">${item.composition_score.toFixed(1)}</strong>
-          </div>
-          <div class="note-body">${_escapeDetailHtml(item.composition_notes)}</div>
-        </div>
-        <div class="note-item-compact" style="border-left: 3px solid #f59e0b;">
-          <div class="note-header">
-            <span>💡 조명/노출 평가</span>
-            <strong style="color:#d97706;">${item.lighting_score.toFixed(1)}</strong>
-          </div>
-          <div class="note-body">${_escapeDetailHtml(item.lighting_notes)}</div>
-        </div>
-        <div class="note-item-compact" style="border-left: 3px solid #ec4899;">
-          <div class="note-header">
-            <span>🎨 색감/톤 평가</span>
-            <strong style="color:#db2777;">${item.color_score.toFixed(1)}</strong>
-          </div>
-          <div class="note-body">${_escapeDetailHtml(item.color_notes)}</div>
-        </div>
-        <div class="note-item-compact" style="border-left: 3px solid #10b981;">
-          <div class="note-header">
-            <span>📷 촬영 기술 평가</span>
-            <strong style="color:#059669;">${item.technique_score.toFixed(1)}</strong>
-          </div>
-          <div class="note-body">${_escapeDetailHtml(item.technique_notes)}</div>
-        </div>
-      </div>
-
       <!-- 초점 핀 상태 인라인 슬림 바 -->
       <div class="note-item-compact" style="border-left: 3px solid #6366f1;margin-bottom:6px;">
         <div class="note-header">
           <span>🎯 피규어 눈동자/페이스 초점 핀</span>
           <strong style="color:#4f46e5;">${_escapeDetailHtml(item.focus_status || '완벽 칼초점')}</strong>
         </div>
-        <div class="note-body">${_escapeDetailHtml(item.focus_notes ? item.focus_notes : '눈동자 아이 데칼 및 안면 조형 핀 상태 양호')}</div>
+        <div class="note-body">${_escapeDetailHtml(item.focus_notes ? item.focus_notes : (isFastItem ? '경량 선별 모드 초점 판정 완료' : '눈동자 아이 데칼 및 안면 조형 핀 상태 양호'))}</div>
       </div>
 
-      <!-- 주요 장점 및 단점/개선점 (좌우 2열 배치로 세로 공간 50% 절약) -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px;">
-        <div class="strengths-box">
-          <h4>✓ 주요 장점</h4>
-          <ul>${item.strengths.map(s => `<li>${_escapeDetailHtml(s)}</li>`).join('')}</ul>
+      ${isFastItem ? `
+        <!-- 경량 분석 모드 안내 및 원클릭 정밀 업그레이드 배너 -->
+        <div style="background:linear-gradient(135deg, rgba(254,243,199,0.55), rgba(238,242,255,0.65));border:1px solid #fcd34d;border-radius:12px;padding:14px 16px;margin-top:8px;margin-bottom:8px;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+            <span style="font-size:1.25rem;">⚡</span>
+            <strong style="font-size:0.9rem;color:#92400e;">경량 모드(Fast Culling)로 1차 선별된 사진입니다</strong>
+          </div>
+          <p style="margin:0 0 12px;font-size:0.81rem;color:var(--text);line-height:1.45;">
+            대량 고속 선별을 위해 <b>5대 점수 · 초점 판정 · 1줄 핵심 사유</b>만 추출되었습니다.<br>
+            A컷으로 선정된 사진이라면 아래 버튼을 눌러 <b>4대 영역 상세 비평, 장단점 리스트, 8대 미학 태그</b>를 채워 넣으세요.
+          </p>
+          <button type="button" class="upload-btn" style="width:100%;background:#4f46e5;padding:9px 14px;font-size:0.85rem;font-weight:800;border-radius:8px;cursor:pointer;" onclick="upgradeFastToFullAnalysis(${item.id}, this)">
+            🔍 현재 모델(${_escapeDetailHtml(fmtModel(item.model))})로 정밀(Full) 분석 실행하기
+          </button>
         </div>
-        <div class="improvements-box">
-          <h4>✗ 단점 및 촬영 개선점</h4>
-          <ul>${item.improvements.map(i => `<li>${_escapeDetailHtml(i)}</li>`).join('')}</ul>
+        ${renderCrossCheckOpinion(item.cross_check_opinion)}
+      ` : `
+        <!-- 세부 평가 요소별 코멘트 (2x2 그리드 컴팩트 배치) -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px;">
+          <div class="note-item-compact" style="border-left: 3px solid #3b82f6;">
+            <div class="note-header">
+              <span>📐 구도 평가</span>
+              <strong style="color:#2563eb;">${item.composition_score.toFixed(1)}</strong>
+            </div>
+            <div class="note-body">${_escapeDetailHtml(item.composition_notes)}</div>
+          </div>
+          <div class="note-item-compact" style="border-left: 3px solid #f59e0b;">
+            <div class="note-header">
+              <span>💡 조명/노출 평가</span>
+              <strong style="color:#d97706;">${item.lighting_score.toFixed(1)}</strong>
+            </div>
+            <div class="note-body">${_escapeDetailHtml(item.lighting_notes)}</div>
+          </div>
+          <div class="note-item-compact" style="border-left: 3px solid #ec4899;">
+            <div class="note-header">
+              <span>🎨 색감/톤 평가</span>
+              <strong style="color:#db2777;">${item.color_score.toFixed(1)}</strong>
+            </div>
+            <div class="note-body">${_escapeDetailHtml(item.color_notes)}</div>
+          </div>
+          <div class="note-item-compact" style="border-left: 3px solid #10b981;">
+            <div class="note-header">
+              <span>📷 촬영 기술 평가</span>
+              <strong style="color:#059669;">${item.technique_score.toFixed(1)}</strong>
+            </div>
+            <div class="note-body">${_escapeDetailHtml(item.technique_notes)}</div>
+          </div>
         </div>
-      </div>
 
-      <!-- OpenAI 크로스 체크 독립 비평 의견 (앙상블 시) -->
-      ${renderCrossCheckOpinion(item.cross_check_opinion)}
-
-      <div style="margin-top:8px;">
-        <span style="font-size:0.78rem;font-weight:700;color:var(--muted);display:block;margin-bottom:4px;">🏷️ 분위기 & 스타일 태그</span>
-        <div class="tag-pills">
-          ${typeof renderTagPills === 'function' ? renderTagPills(item.aesthetic_tags, 50) : ''}
+        <!-- 주요 장점 및 단점/개선점 (좌우 2열 배치로 세로 공간 50% 절약) -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px;">
+          <div class="strengths-box">
+            <h4>✓ 주요 장점</h4>
+            <ul>${item.strengths.map(s => `<li>${_escapeDetailHtml(s)}</li>`).join('')}</ul>
+          </div>
+          <div class="improvements-box">
+            <h4>✗ 단점 및 촬영 개선점</h4>
+            <ul>${item.improvements.map(i => `<li>${_escapeDetailHtml(i)}</li>`).join('')}</ul>
+          </div>
         </div>
-      </div>
+
+        <!-- OpenAI 크로스 체크 독립 비평 의견 (앙상블 시) -->
+        ${renderCrossCheckOpinion(item.cross_check_opinion)}
+
+        <div style="margin-top:8px;">
+          <span style="font-size:0.78rem;font-weight:700;color:var(--muted);display:block;margin-bottom:4px;">🏷️ 분위기 & 스타일 태그</span>
+          <div class="tag-pills">
+            ${typeof renderTagPills === 'function' ? renderTagPills(item.aesthetic_tags, 50) : ''}
+          </div>
+        </div>
+      `}
     </div>
   `;
   modal.style.display = 'flex';

@@ -32,7 +32,7 @@ def _get_env_file_path() -> Path:
     return ENV_FILE_PATH
 
 from app.db.connection import get_db_connection
-from app.models.analysis import PhotoAnalysis
+from app.models.analysis import FastPhotoAnalysis, PhotoAnalysis
 from app.models.crop import (
     CropBox,
     CropSet,
@@ -43,6 +43,7 @@ from app.models.lightroom import LightroomAdvice
 from app.prompts import (
     build_all_sns_crops_prompt,
     build_caption_and_tags_prompt,
+    build_fast_grader_prompt,
     build_grader_prompt,
     build_lightroom_prompt,
     build_single_crop_prompt,
@@ -320,6 +321,7 @@ def analyze_with_gemini(
     photo: PreparedPhoto,
     model: str = DEFAULT_MODEL,
     category_hint: str | None = None,
+    analysis_mode: str = "full",
 ) -> PhotoAnalysis:
     """Analyze figure photo and return strictly validated PhotoAnalysis."""
     load_dotenv(dotenv_path=_get_env_file_path(), override=False)
@@ -327,9 +329,18 @@ def analyze_with_gemini(
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY를 .env 파일 또는 환경변수에 설정해 주세요.")
 
+    is_fast = (analysis_mode or "full").strip().lower() == "fast"
+    prompt_text = (
+        build_fast_grader_prompt(photo, category_hint=category_hint)
+        if is_fast
+        else build_grader_prompt(photo, category_hint=category_hint)
+    )
+    target_schema = FastPhotoAnalysis.model_json_schema() if is_fast else PhotoAnalysis.model_json_schema()
+    task_label = "사진 경량 분석" if is_fast else "사진 분석"
+
     client = _dispatch_get_client(api_key)
     input_payload = [
-        {"type": "text", "text": build_grader_prompt(photo, category_hint=category_hint)},
+        {"type": "text", "text": prompt_text},
         {
             "type": "image",
             "data": base64.b64encode(photo.upload_bytes).decode("ascii"),
@@ -340,9 +351,11 @@ def analyze_with_gemini(
         client=client,
         model=model,
         input_payload=input_payload,
-        schema=PhotoAnalysis.model_json_schema(),
-        task_desc="사진 분석",
+        schema=target_schema,
+        task_desc=task_label,
     )
+    if is_fast:
+        return FastPhotoAnalysis.from_llm_json(output_text).to_photo_analysis()
     return PhotoAnalysis.from_llm_json(output_text)
 
 

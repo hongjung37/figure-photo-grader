@@ -381,6 +381,16 @@ def _format_analysis_row(
     focal_mm = extract_focal_length_mm(exif_data, detected_settings)
     focal_band = classify_focal_band(focal_mm)
     lens_model = extract_lens_model(exif_data, detected_settings)
+    raw_analysis_mode = analysis_data.get("analysis_mode")
+    if raw_analysis_mode in ("full", "fast"):
+        analysis_mode = raw_analysis_mode
+    else:
+        has_notes = any(
+            bool(str(analysis_data.get(k, "")).strip())
+            for k in ("composition_notes", "lighting_notes", "color_notes", "technique_notes")
+        )
+        has_lists = bool(analysis_data.get("strengths")) or bool(analysis_data.get("improvements"))
+        analysis_mode = "full" if (has_notes or has_lists) else "fast"
 
     return {
         "id": aid,
@@ -390,6 +400,7 @@ def _format_analysis_row(
         "height": row["height"],
         "format": row["image_format"],
         "model": row["model"],
+        "analysis_mode": analysis_mode,
         "created_at": row["created_at"],
         "captured_at": row["captured_at"] if "captured_at" in row.keys() else None,
         "review_status": row["review_status"] if "review_status" in row.keys() else "미검토",

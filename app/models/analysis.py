@@ -334,6 +334,61 @@ def heal_analysis_payload(data: dict[str, Any]) -> dict[str, Any]:
         elif not isinstance(v, (list, tuple)):
             healed[list_field] = []
 
+    healed.pop("analysis_mode", None)
+
+    return healed
+
+
+def heal_fast_analysis_payload(data: dict[str, Any]) -> dict[str, Any]:
+    """Defensively sanitize and repair lightweight LLM output dict before FastPhotoAnalysis validation."""
+    if not isinstance(data, dict):
+        return {}
+
+    healed: dict[str, Any] = {}
+
+    raw_focus = data.get("focus_status")
+    if raw_focus in FOCUS_STATUS_OPTIONS:
+        healed["focus_status"] = raw_focus
+    else:
+        healed["focus_status"] = _heal_choice(
+            raw_focus,
+            FOCUS_STATUS_OPTIONS,
+            fallback="판별 불가",
+            field_name="focus_status",
+            cutoff=0.6,
+        )
+
+    raw_cat = data.get("figure_category")
+    if raw_cat in FIGURE_CATEGORY_CHOICES:
+        healed["figure_category"] = raw_cat
+    else:
+        healed["figure_category"] = _heal_choice(
+            raw_cat,
+            FIGURE_CATEGORY_CHOICES,
+            fallback="일반 피규어 촬영",
+            field_name="figure_category",
+            cutoff=0.6,
+        )
+
+    for score_field in (
+        "composition_score",
+        "lighting_score",
+        "color_score",
+        "technique_score",
+        "final_score",
+    ):
+        raw_val = data.get(score_field)
+        try:
+            val = float(raw_val)
+        except (TypeError, ValueError):
+            val = 7.0
+        if 10.0 < val <= 100.0:
+            val = round(val / 10.0, 1)
+        healed[score_field] = max(0.0, min(10.0, round(val, 1)))
+
+    raw_reason = data.get("final_reason")
+    healed["final_reason"] = str(raw_reason).strip() if raw_reason is not None else ""
+
     return healed
 
 
@@ -443,6 +498,21 @@ class PhotoAnalysis(BaseModel):
         description="크로스 체크/앙상블 시 보조 LLM의 독립적인 평가 의견 (태그/점수 평균 대신 추가 의견으로 제공)",
     )
 
+    @property
+    def analysis_mode(self) -> Literal["full", "fast"]:
+        """Return 'fast' when detailed domain notes and pros/cons lists are omitted, else 'full'."""
+        has_notes = any(
+            bool(val and val.strip())
+            for val in (
+                self.composition_notes,
+                self.lighting_notes,
+                self.color_notes,
+                self.technique_notes,
+            )
+        )
+        has_lists = bool(self.strengths) or bool(self.improvements)
+        return "full" if (has_notes or has_lists) else "fast"
+
     @classmethod
     def model_json_schema(cls, *args: Any, **kwargs: Any) -> dict[str, Any]:
         schema = super().model_json_schema(*args, **kwargs)
@@ -512,5 +582,117 @@ class PhotoAnalysis(BaseModel):
         data = json.loads(cleaned)
         healed_data = heal_analysis_payload(data)
         return cls.model_validate(healed_data)
+
+
+class FastPhotoAnalysis(BaseModel):
+    """Lightweight culling schema returning 5 scores, category, focus status, and 1-sentence reason."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    figure_category: FigureCategoryType = Field(
+        default="일반 피규어 촬영",
+        description="피규어 사진 하위 유형: '접사/디테일', '일상/야외 스냅', '스튜디오 연출/디오라마', '일반 피규어 촬영' 중 택1",
+    )
+    focus_status: FocusStatusType = Field(
+        default="완벽 칼초점",
+        description="피규어 눈동자/페이스 초점 핀 정밀 판정: '완벽 칼초점', '미세 앞핀', '미세 뒤핀', '초점 이탈', '판별 불가' 중 택1",
+    )
+    composition_score: float = Field(description="구도 점수 (0~10). 7점: 우수, 8점: 매우 우수, 9점: 프로사진작가 및 전문가급")
+    lighting_score: float = Field(description="조명 점수 (0~10). 7점: 우수, 8점: 매우 우수, 9점: 프로사진작가 및 전문가급")
+    color_score: float = Field(description="색감 점수 (0~10). 7점: 우수, 8점: 매우 우수, 9점: 프로사진작가 및 전문가급")
+    technique_score: float = Field(description="촬영 기술 점수 (0~10). 7점: 우수, 8점: 매우 우수, 9점: 프로사진작가 및 전문가급")
+    final_score: float = Field(description="사진 전체 최종 종합 점수 (0~10). 7점: 우수, 8점: 매우 우수, 9점: 프로사진작가 및 전문가급")
+    final_reason: str = Field(
+        description="최종 점수 핵심 사유 1문장 (80자 이내, [핵심 강점 1개] + [결정적 감점/보완 요인 1개] 요약)"
+    )
+
+    @classmethod
+    def model_json_schema(cls, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        schema = super().model_json_schema(*args, **kwargs)
+        properties = schema.get("properties", {})
+        if "focus_status" in properties:
+            properties["focus_status"]["enum"] = list(FOCUS_STATUS_OPTIONS)
+        if "figure_category" in properties:
+            properties["figure_category"]["enum"] = list(FIGURE_CATEGORY_CHOICES)
+        required = list(schema.get("required", []))
+        for req_field in ("figure_category", "focus_status"):
+            if req_field not in required:
+                required.append(req_field)
+        schema["required"] = required
+        return schema
+
+    @field_validator(
+        "composition_score",
+        "lighting_score",
+        "color_score",
+        "technique_score",
+        "final_score",
+    )
+    @classmethod
+    def score_must_be_between_zero_and_ten(cls, value: float) -> float:
+        if not 0 <= value <= 10:
+            raise ValueError("점수는 0 이상 10 이하여야 합니다.")
+        return value
+
+    @field_validator("figure_category")
+    @classmethod
+    def validate_figure_category(cls, value: str) -> str:
+        if value not in FIGURE_CATEGORY_CHOICES:
+            raise ValueError(f"허용되지 않은 피규어 카테고리입니다: '{value}'. 허용: {FIGURE_CATEGORY_CHOICES}")
+        return value
+
+    @field_validator("focus_status")
+    @classmethod
+    def validate_focus_status(cls, value: str) -> str:
+        if value not in FOCUS_STATUS_OPTIONS:
+            raise ValueError(f"허용되지 않은 초점 상태입니다: '{value}'. 허용: {FOCUS_STATUS_OPTIONS}")
+        return value
+
+    @classmethod
+    def from_llm_json(cls, raw_text: str | bytes | bytearray) -> FastPhotoAnalysis:
+        """Parse raw lightweight LLM output text, extracting JSON and applying self-healing."""
+        if isinstance(raw_text, (bytes, bytearray)):
+            text = raw_text.decode("utf-8", errors="replace")
+        else:
+            text = str(raw_text)
+
+        cleaned = text.strip()
+        if "```" in cleaned:
+            match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", cleaned)
+            if match:
+                cleaned = match.group(1).strip()
+
+        if not (cleaned.startswith("{") and cleaned.endswith("}")):
+            start = cleaned.find("{")
+            end = cleaned.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                cleaned = cleaned[start : end + 1]
+
+        data = json.loads(cleaned)
+        healed_data = heal_fast_analysis_payload(data)
+        return cls.model_validate(healed_data)
+
+    def to_photo_analysis(self) -> PhotoAnalysis:
+        """Convert FastPhotoAnalysis into a full PhotoAnalysis record with empty notes/tags (fast mode)."""
+        return PhotoAnalysis(
+            composition_score=self.composition_score,
+            composition_notes="",
+            lighting_score=self.lighting_score,
+            lighting_notes="",
+            color_score=self.color_score,
+            color_notes="",
+            technique_score=self.technique_score,
+            technique_notes="",
+            final_score=self.final_score,
+            final_reason=self.final_reason,
+            strengths=[],
+            improvements=[],
+            figure_category=self.figure_category,
+            detected_camera_settings=None,
+            focus_status=self.focus_status,
+            focus_notes="",
+            aesthetic_tags=AestheticTags.empty(),
+        )
+
 
 

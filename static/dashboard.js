@@ -620,11 +620,30 @@ function formatCapturedAt(value) {
   return `촬영 ${date.toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'medium' })}`;
 }
 
+function isFastAnalysisItem(item) {
+  if (!item) return false;
+  if (item.analysis_mode === 'fast') return true;
+  if (item.analysis_mode === 'full') return false;
+  const hasNotes = Boolean(
+    (item.composition_notes && String(item.composition_notes).trim()) ||
+    (item.lighting_notes && String(item.lighting_notes).trim()) ||
+    (item.color_notes && String(item.color_notes).trim()) ||
+    (item.technique_notes && String(item.technique_notes).trim())
+  );
+  const hasLists = Boolean(
+    (Array.isArray(item.strengths) && item.strengths.length > 0) ||
+    (Array.isArray(item.improvements) && item.improvements.length > 0)
+  );
+  return !(hasNotes || hasLists);
+}
+
 function renderGalleryCard(item) {
   const modelBadgeText = (window.ModelSettings && item.model)
     ? window.ModelSettings.formatBadge(item.model)
     : (item.model || '');
   const focalMm = getItemFocalMm(item);
+  const isFast = isFastAnalysisItem(item);
+  const tagPillsHtml = typeof renderTagPills === 'function' ? renderTagPills(item.aesthetic_tags) : '';
   return `
     <article class="card" onclick="openDetailModal(${item.id})">
       <button class="card-delete-btn" title="이 분석 기록 삭제" onclick="event.stopPropagation(); deleteAnalysisRecord(${item.id})">🗑️</button>
@@ -638,6 +657,7 @@ function renderGalleryCard(item) {
             <span style="display:inline-block;margin-top:4px;margin-left:4px;font-size:0.75rem;font-weight:700;color:#0d9488;background:#f0fdfa;padding:2px 7px;border-radius:6px;">🎯 ${escapeHtml(item.focus_status || '완벽 칼초점')}</span>
             ${focalMm !== null ? `<span style="display:inline-block;margin-top:4px;margin-left:4px;font-size:0.74rem;font-weight:700;color:#0369a1;background:#e0f2fe;border:1px solid #bae6fd;padding:1px 7px;border-radius:6px;" title="촬영 화각(초점거리): ${focalMm}mm">🔭 ${Math.round(focalMm)}mm</span>` : ''}
             ${modelBadgeText ? `<span style="display:inline-block;margin-top:4px;margin-left:4px;font-size:0.73rem;font-weight:700;color:#334155;background:rgba(148,163,184,0.16);border:1px solid rgba(148,163,184,0.35);padding:1px 7px;border-radius:6px;" title="평가 모델: ${escapeHtml(item.model)}">🤖 ${escapeHtml(modelBadgeText)}</span>` : ''}
+            ${isFast ? `<span style="display:inline-block;margin-top:4px;margin-left:4px;font-size:0.73rem;font-weight:800;color:#b45309;background:#fef3c7;border:1px solid #fde68a;padding:1px 7px;border-radius:6px;" title="대량 선별용 경량 분석 모드 (상세 비평·미학 태그 생략)">⚡ 경량</span>` : ''}
             ${item.is_burst ? (item.is_best_pick ?
               `<span class="badge-best-pick" style="display:inline-block;margin-top:4px;margin-left:4px;">👑 Best Pick (${item.burst_total}장 1위)</span>` :
               `<span class="badge-b-cut" style="display:inline-block;margin-top:4px;margin-left:4px;" title="${escapeHtml(item.drop_reason)}">⚠️ B컷 (${escapeHtml(item.drop_reason)})</span>`
@@ -666,9 +686,7 @@ function renderGalleryCard(item) {
           <div><span>기술</span><strong>${item.technique_score.toFixed(1)}</strong></div>
         </div>
         <div class="reason-box">${escapeHtml(item.final_reason)}</div>
-        <div class="tag-pills">
-          ${typeof renderTagPills === 'function' ? renderTagPills(item.aesthetic_tags) : ''}
-        </div>
+        ${tagPillsHtml ? `<div class="tag-pills">${tagPillsHtml}</div>` : ''}
         ${currentBurstFilter === 'stack' && item.is_burst && item.is_best_pick ? `
           <div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);display:flex;justify-content:space-between;align-items:center;" onclick="event.stopPropagation()">
             <span style="font-size:0.74rem;color:var(--muted);font-weight:600;">🗂️ 연사 묶음 (${item.burst_total}장)</span>
@@ -859,6 +877,7 @@ window.clearFocalFilter = clearFocalFilter;
 window.getItemFocalMm = getItemFocalMm;
 window.getItemFocalBandKey = getItemFocalBandKey;
 window.matchFocalFilter = matchFocalFilter;
+window.isFastAnalysisItem = isFastAnalysisItem;
 window.setBurstFilter = setBurstFilter;
 window.toggleExpandBurstGroup = toggleExpandBurstGroup;
 window.initTheme = initTheme;

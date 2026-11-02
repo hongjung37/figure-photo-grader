@@ -16,12 +16,74 @@ from app.models.analysis import (
 )
 
 
+def build_fast_grader_prompt(
+    photo: Any,
+    category_hint: str | None = None,
+) -> str:
+    """Build lightweight culling prompt for fast batch photo evaluation (scores, focus, category, 1-line reason)."""
+    safe_exif = getattr(photo, "safe_exif", {})
+    camera_settings = json.dumps(safe_exif, ensure_ascii=False, sort_keys=True)
+    if not safe_exif:
+        camera_settings = "{} (사용 가능한 안전한 EXIF 촬영 설정 없음)"
+
+    if category_hint and category_hint in FIGURE_CATEGORIES:
+        cat_info = FIGURE_CATEGORIES[category_hint]
+        category_instruction = f"""[지정된 피규어 촬영 유형: {cat_info['label']}]
+figure_category 값에 반드시 '{cat_info['label']}'을 입력하고 아래 특화 기준을 적용하세요:
+- 특화 포인트: {cat_info['focus']}"""
+    else:
+        category_instruction = """[피규어 촬영 세부 유형 자동 판별]
+사진의 촬영 환경을 판별하여 figure_category에 아래 4가지 중 하나를 정확히 입력하고 해당 트랙 기준을 적용하세요:
+1. '일상/야외 스냅' → [Track A: 비통제 일상·야외 스냅 트랙] (야외 출사, 여행지, 카페·식당·방 안 일상 스냅)
+2. '스튜디오 연출/디오라마' → [Track B: 통제된 전용 촬영 세팅 트랙] (배경지, 다각도 조명, 디오라마/미니어처 세트, 거울/수면 반영)
+3. '접사/디테일' → [Track B: 통제된 전용 촬영 세팅 트랙] (얼굴, 눈동자 데칼, 조형/도색 초근접 매크로 촬영)
+4. '일반 피규어 촬영' → [Track B: 통제된 전용 촬영 세팅 트랙] (본체 전신/상반신 중심 스탠다드 촬영)"""
+
+    return f"""당신은 대량 촬영된 피규어 사진(Figure Photography)에서 베스트 A컷과 탈락 B/C컷을 신속·정확하게 선별(Culling)하는 전문 심사위원입니다. 첨부 이미지의 시각적·광학적 근거를 바탕으로 객관적으로 채점하세요.
+
+{category_instruction}
+
+[핵심 심사 원칙: 변별력 및 세부 점수 선행 연동]
+1. 억지 칭찬 및 억지 트집 금지: 기술적 결함이 없는 수작은 8.5~9.5점대를 부여하고, 초점 미스나 배경 산만함이 있는 컷은 5~6점대로 명확히 변별하세요.
+2. 세부 점수 선행 연동 (자기모순 금지): 감점 사유가 있다면 반드시 `composition_score`, `lighting_score`, `color_score`, `technique_score`부터 먼저 해당 점수대로 책정한 뒤 `final_score`를 산출하세요.
+   - 모니터 베젤·받침대 노출 시: `composition_score`, `technique_score`, `final_score` 모두 4.0~4.9점 강제.
+   - 단순 보케·단순 클로즈업 후광 주의: 입체 조명(사광/역광/림라이트)이나 전·후경 레이어링 없는 단순 아웃포커싱 샷은 7.4~8.3점 상한.
+
+[환경별 점수 기준 요약]
+■ Track A (일상·야외 스냅):
+• 4.0~4.9: 심한 흔들림, 극단적 노출 실패 | • 5.0~5.9: 전경 소품에만 핀이 맞고 피규어 흐림, 한낮 직사광 실패
+• 6.0~6.9: 피규어 핀은 맞았으나 배경 일상 잡기류/행인 시선 분산(팬포커스 한계), 유리창 얼룩, 단순 식기 병렬 배치 (최대 6.9 상한)
+• 7.0~7.9: 피규어 칼초점 + 정돈된 배경의 준수한 스냅 (7.0~7.4 평이한 보케 스냅, 7.5~7.9 탄탄한 야외 거치 샷)
+• 8.0~8.9: 골든아워/역광 림라이트, 전경 보케 액자, 스케일이 맞물린 카페/소품 스토리텔링 수작
+• 9.0~10.0: 시네마틱 풍경+빛 완전 통제, 눈/비/수면·유리 반영 등 고난도 광학 상호작용, 지면 밀착 초저각 스케일 일체화
+
+■ Track B (통제된 전용 세팅 / 스튜디오 / 접사):
+• 4.0~4.9: 모니터 베젤/받침대 노출, 세트장 밖 방 바닥/벽면 노출 | • 5.0~5.9: 안면 초점 이탈, 심각한 WB 왜곡
+• 6.0~6.9: 플라스틱 핫스팟 반사광 미제어, 과도한 얕은 심도로 조형 뭉개짐, 평면적 실내등 정면 직사광
+• 7.0~7.9: 눈동자 칼핀 + 단색 배경 스탠다드 샷 (입체 조명/소품 기교 없는 정직한 프로필은 7.5~7.9)
+• 8.0~8.9: 다각도 입체 조명(명암비·림라이트), 초정밀 칼초점 접사, 미니어처 상황극 (단일 평면 확산광은 최대 7.8~8.3 상한)
+• 9.0~10.0: 전·중·후경 3D 완벽 레이어링, 거울/수면/창공 하이키 반영, 마이크로 림라이트 예술 접사
+
+[출력 항목 지침 (경량 선별 모드)]
+- figure_category: '접사/디테일', '일상/야외 스냅', '스튜디오 연출/디오라마', '일반 피규어 촬영' 중 택1
+- focus_status: 피규어 눈동자 데칼 초점 상태 ('완벽 칼초점', '미세 앞핀', '미세 뒤핀', '초점 이탈', '판별 불가' 중 택1)
+- composition_score, lighting_score, color_score, technique_score, final_score: 0.0~10.0 숫자 (소수점 첫째 자리)
+- final_reason: 반드시 1문장(80자 이내)으로 "[핵심 강점 1가지] + [결정적 감점/아쉬운 요인 1가지(결함 없을 시 완성도 총평)]"만 간결하게 요약하세요. (하단 EXIF 워터마크 프레임은 감점 사유 아님)
+
+촬영 관련 안전 EXIF:
+{camera_settings}
+"""
+
+
 def build_grader_prompt(
     photo: Any,
     category_hint: str | None = None,
     compact_tags: bool = False,
+    analysis_mode: str = "full",
 ) -> str:
     """Build the prompt for figure photo evaluation."""
+    if analysis_mode == "fast":
+        return build_fast_grader_prompt(photo, category_hint=category_hint)
     safe_exif = getattr(photo, "safe_exif", {})
     camera_settings = json.dumps(safe_exif, ensure_ascii=False, sort_keys=True)
     if not safe_exif:
@@ -265,4 +327,4 @@ def build_cross_check_prompt(
 
 _build_prompt = build_grader_prompt
 
-__all__ = ["build_grader_prompt", "_build_prompt", "build_cross_check_prompt"]
+__all__ = ["build_grader_prompt", "build_fast_grader_prompt", "_build_prompt", "build_cross_check_prompt"]

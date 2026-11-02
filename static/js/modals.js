@@ -248,12 +248,46 @@ function saveModelSettingsFromModal() {
 
 let isBatchUploading = false;
 
+function selectUploadAnalysisMode(mode) {
+  const normalized = mode === 'fast' ? 'fast' : 'full';
+  const inputEl = document.getElementById('upload-analysis-mode');
+  if (inputEl) inputEl.value = normalized;
+
+  const fullBtn = document.getElementById('upload-mode-full-btn');
+  const fastBtn = document.getElementById('upload-mode-fast-btn');
+  const hintEl = document.getElementById('upload-mode-hint');
+
+  if (fullBtn && fastBtn) {
+    if (normalized === 'fast') {
+      fastBtn.style.border = '2px solid #d97706';
+      fastBtn.style.background = 'rgba(245,158,11,0.10)';
+      fullBtn.style.border = '1px solid var(--line)';
+      fullBtn.style.background = 'var(--card-sub)';
+    } else {
+      fullBtn.style.border = '2px solid #4f46e5';
+      fullBtn.style.background = 'rgba(79,70,229,0.08)';
+      fastBtn.style.border = '1px solid var(--line)';
+      fastBtn.style.background = 'var(--card-sub)';
+    }
+  }
+
+  if (hintEl) {
+    if (normalized === 'fast') {
+      hintEl.innerHTML = '⚡ <strong>경량 분석(Fast Culling) 모드:</strong> 50~100장 대량 셀렉용으로 <b>5대 점수 · 초점 판정 · 1줄 핵심 사유</b>만 빠르게 추출합니다. (세부 노트·미학 태그 생략, 추후 A컷만 정밀 업그레이드 가능)';
+    } else {
+      hintEl.innerHTML = '🔍 <strong>정밀 분석(Full) 모드:</strong> 구도·조명·색감·기술 상세 비평과 강점/개선점, 8대 미학 태그를 모두 생성합니다.';
+    }
+  }
+}
+
 function openUploadModal() {
   document.getElementById('upload-modal').style.display = 'flex';
   const uploadTierEl = document.getElementById('upload-tier');
   if (uploadTierEl && window.ModelSettings) {
     uploadTierEl.value = window.ModelSettings.get('photo_grading');
   }
+  const currentModeEl = document.getElementById('upload-analysis-mode');
+  selectUploadAnalysisMode(currentModeEl && currentModeEl.value === 'fast' ? 'fast' : 'full');
   document.getElementById('upload-status').textContent = '';
   document.getElementById('progress-container').style.display = 'none';
   document.getElementById('progress-bar').style.width = '0%';
@@ -322,6 +356,8 @@ async function processBatchUpload(files) {
   try {
     const tier = document.getElementById('upload-tier').value;
     const category = document.getElementById('upload-category').value;
+    const modeInput = document.getElementById('upload-analysis-mode');
+    const analysisMode = (modeInput && modeInput.value === 'fast') ? 'fast' : 'full';
     const force = document.getElementById('upload-force').checked;
     const progContainer = document.getElementById('progress-container');
     const progText = document.getElementById('progress-text');
@@ -336,6 +372,7 @@ async function processBatchUpload(files) {
     const total = files.length;
     let successCount = 0;
     let failCount = 0;
+    const modeTag = analysisMode === 'fast' ? '⚡ 경량 선별' : '🔍 정밀 분석';
 
     for (let i = 0; i < total; i++) {
       const file = files[i];
@@ -343,13 +380,14 @@ async function processBatchUpload(files) {
       const pct = Math.round(((i) / total) * 100);
       progPercent.textContent = `${pct}%`;
       progBar.style.width = `${pct}%`;
-      progText.textContent = `[${currentNum} / ${total}장] AI 모델 분석 진행 중...`;
+      progText.textContent = `[${currentNum} / ${total}장] AI 모델 ${modeTag} 진행 중...`;
       progFile.textContent = `현재 분석 파일: ${file.name} (${(file.size / 1024 / 1024).toFixed(1)}MB)`;
 
       const formData = new FormData();
       formData.append('image', file, file.name);
       formData.append('tier', tier);
       formData.append('category', category);
+      formData.append('analysis_mode', analysisMode);
 
       try {
         const result = await API.uploadPhoto(formData, force);
