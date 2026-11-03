@@ -451,6 +451,20 @@ function updateBatchSelectBarUI() {
     toggleBtn.textContent = isBatchSelectMode ? `☑️ 선택 모드 중 (${selectedBatchIds.size}장)` : '☑️ 사진 선택·컬렉션 정리';
   }
   if (countEl) countEl.textContent = String(selectedBatchIds.size);
+
+  const reanalyzeBtn = document.getElementById('btn-batch-reanalyze');
+  const reanalyzeLabel = document.getElementById('btn-batch-reanalyze-label');
+  if (reanalyzeBtn) {
+    const hasSelection = selectedBatchIds.size > 0;
+    reanalyzeBtn.disabled = !hasSelection;
+    reanalyzeBtn.style.opacity = hasSelection ? '1' : '0.5';
+    reanalyzeBtn.style.pointerEvents = hasSelection ? 'auto' : 'none';
+  }
+  if (reanalyzeLabel) {
+    reanalyzeLabel.textContent = selectedBatchIds.size > 0
+      ? `선택한 사진 일괄 재평가 (${selectedBatchIds.size}장)`
+      : '선택한 사진 일괄 재평가';
+  }
 }
 
 function toggleBatchSelectMode(forceState) {
@@ -1668,3 +1682,6 @@ window.setBurstFilter = setBurstFilter;
 window.toggleExpandBurstGroup = toggleExpandBurstGroup;
 window.initTheme = initTheme;
 window.toggleTheme = toggleTheme;
+window.selectedBatchIds = selectedBatchIds;
+window.isBatchSelectMode = isBatchSelectMode;
+window.updateBatchSelectBarUI = updateBatchSelectBarUI;

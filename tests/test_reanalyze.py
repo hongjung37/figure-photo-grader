@@ -225,6 +225,40 @@ class ReanalyzeFeatureTests(unittest.TestCase):
             # The median score among [8.1, 8.4, 8.8] is 8.4
             self.assertEqual(result.final_score, 8.4)
 
+    def test_batch_reanalyze_ui_and_flow(self):
+        html_path = PROJECT_ROOT / "templates/index.html"
+        reanalyze_path = PROJECT_ROOT / "static/js/reanalyze.js"
+        dash_path = PROJECT_ROOT / "static/dashboard.js"
+
+        html = html_path.read_text(encoding="utf-8")
+        reanalyze_js = reanalyze_path.read_text(encoding="utf-8")
+        dash_js = dash_path.read_text(encoding="utf-8")
+
+        # Check batch reanalyze button in batch-select-bar
+        self.assertIn('id="btn-batch-reanalyze"', html)
+        self.assertIn('openBatchReanalyzeModal()', html)
+
+        # Check batch reanalyze modal elements
+        self.assertIn('id="batch-reanalyze-modal"', html)
+        self.assertIn('id="batch-reanalyze-tier"', html)
+        self.assertIn('id="batch-reanalyze-depth"', html)
+        self.assertIn('id="batch-reanalyze-category"', html)
+        self.assertIn('id="batch-reanalyze-concurrency"', html)
+        self.assertIn('id="batch-reanalyze-median"', html)
+        self.assertIn('id="batch-reanalyze-progress-bar"', html)
+        self.assertIn('id="batch-reanalyze-summary-section"', html)
+
+        # Check JS functions
+        self.assertIn("function openBatchReanalyzeModal", reanalyze_js)
+        self.assertIn("function closeBatchReanalyzeModal", reanalyze_js)
+        self.assertIn("function executeBatchReanalyze", reanalyze_js)
+        self.assertIn("function cancelBatchReanalyze", reanalyze_js)
+        self.assertIn("function finishBatchReanalyze", reanalyze_js)
+        self.assertIn("window.openBatchReanalyzeModal", reanalyze_js)
+
+        # Check dashboard.js button updates
+        self.assertIn("btn-batch-reanalyze", dash_js)
+
     def test_ui_and_css_integrity(self):
         js_path = PROJECT_ROOT / "static/dashboard.js"
         reanalyze_path = PROJECT_ROOT / "static/js/reanalyze.js"

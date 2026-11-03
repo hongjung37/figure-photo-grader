@@ -87,6 +87,9 @@
         </select>
         <button type="button" class="upload-btn" style="padding:4px 10px;font-size:0.75rem;background:#4f46e5;" onclick="applyBatchAddToCollection()">📥 선택 사진 담기</button>
         <button type="button" id="btn-batch-remove-from-col" class="upload-btn" style="display:none;padding:4px 10px;font-size:0.75rem;background:#e11d48;" onclick="applyBatchRemoveFromCurrentCollection()">📤 현재 컬렉션에서 제외</button>
+        <button type="button" id="btn-batch-reanalyze" class="upload-btn" style="padding:4px 11px;font-size:0.75rem;background:#0d9488;display:inline-flex;align-items:center;gap:4px;" onclick="openBatchReanalyzeModal()">
+          <span>🔄</span> <span id="btn-batch-reanalyze-label">선택한 사진 일괄 재평가</span>
+        </button>
         <button type="button" class="filter-btn collection-chip-btn slim-btn" onclick="toggleBatchSelectMode(false)">닫기 ✕</button>
       </div>
     </div>
@@ -505,6 +508,145 @@
       <div id="progress-current-file" style="font-size:0.78rem;color:var(--muted);margin-top:6px;overflow-wrap:anywhere;"></div>
     </div>
     <div id="upload-status" style="font-size:0.88rem;font-weight:600;text-align:center;margin-top:12px;"></div>
+  </div>
+</div>
+
+
+<!-- Batch Reanalyze Modal -->
+<div class="modal-overlay" id="batch-reanalyze-modal" onclick="closeBatchReanalyzeModal(event)">
+  <div class="modal-content" style="max-width:680px;max-height:92vh;overflow-y:auto;" onclick="event.stopPropagation()">
+    <button class="close-btn" onclick="closeBatchReanalyzeModal()">&times;</button>
+    <div style="display:flex;align-items:center;gap:10px;margin:0 0 6px;">
+      <span style="font-size:1.6rem;">🔄</span>
+      <h2 style="margin:0;font-size:1.25rem;">선택한 사진 AI 일괄 재평가</h2>
+    </div>
+    <p style="color:var(--muted);font-size:0.84rem;margin:0 0 14px;line-height:1.45;">
+      선택된 <strong id="batch-reanalyze-target-count" style="color:var(--blue);">0</strong>장의 사진에 새로운 AI 모델, 분석 깊이(정밀/경량), 3회 중앙값 옵션을 일괄 적용하여 재평가합니다.
+    </p>
+
+    <!-- SECTION A: Configuration (Visible before running) -->
+    <div id="batch-reanalyze-config-section">
+      <!-- Target Photos Preview Strip -->
+      <div style="margin-bottom:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <span style="font-size:0.78rem;font-weight:700;color:var(--text);">📸 재평가 대상 사진 목록</span>
+          <span id="batch-reanalyze-preview-count" style="font-size:0.74rem;color:var(--muted);"></span>
+        </div>
+        <div id="batch-reanalyze-preview-strip" style="display:flex;gap:8px;overflow-x:auto;padding:8px;background:var(--card-sub, #f8fafc);border:1px solid var(--line, #e2e8f0);border-radius:10px;max-height:120px;">
+        </div>
+      </div>
+
+      <!-- Settings Grid -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+        <div>
+          <label class="reanalyze-sublabel" for="batch-reanalyze-tier">적용할 AI 모델:</label>
+          <select id="batch-reanalyze-tier" class="select-input" style="width:100%;font-size:0.8rem;padding:6px 10px;">
+            <option value="standard" selected>🔍 Gemini Flash-Lite 3.5 (표준 화질 - 권장)</option>
+            <option value="luna">🌙 OpenAI GPT-6 Luna (최고 정확도 엄격 심사)</option>
+            <option value="lite">⚡ Gemini Flash-Lite 3.1 (초고속 대량 스크리닝)</option>
+            <option value="flash-3.6">🧪 Gemini Flash 3.6 (실험적 고성능)</option>
+            <option value="flash-3.7">🚀 Gemini Flash 3.7 (차세대 고속 비평)</option>
+            <option value="pro">💎 Gemini Flash 3.8 (고화질 디테일 심층 비평)</option>
+            <option value="ensemble">🤝 앙상블: Flash-Lite 3.5 + GPT-6 Luna</option>
+            <option value="ensemble-3.7">🤝 앙상블: Flash 3.7 + GPT-6 Luna</option>
+            <option value="ensemble-pro">🤝 앙상블: Flash 3.8 + GPT-6 Luna</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="reanalyze-sublabel" for="batch-reanalyze-depth">분석 깊이 (모드):</label>
+          <select id="batch-reanalyze-depth" class="select-input" style="width:100%;font-size:0.8rem;padding:6px 10px;">
+            <option value="fast" selected>⚡ 경량 분석 (5대 점수 · 초점 · 1줄 사유 고속 처리)</option>
+            <option value="full">🔍 정밀 분석 (장단점 · 4대 영역 노트 · 8대 미학 태그)</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
+        <div>
+          <label class="reanalyze-sublabel" for="batch-reanalyze-category">피규어 세부 유형 (카테고리):</label>
+          <select id="batch-reanalyze-category" class="select-input" style="width:100%;font-size:0.8rem;padding:6px 10px;">
+            <option value="keep" selected>📌 [권장] 각 사진의 기존 카테고리 유지</option>
+            <option value="auto">🔄 전체 사진별 자동 재판별</option>
+            <option value="general">📷 일반 피규어 촬영</option>
+            <option value="macro">🔍 접사/디테일</option>
+            <option value="snap">🌿 일상/야외 스냅</option>
+            <option value="staging">🎬 스튜디오 연출/디오라마</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="reanalyze-sublabel" for="batch-reanalyze-concurrency">동시 처리 병렬 수:</label>
+          <select id="batch-reanalyze-concurrency" class="select-input" style="width:100%;font-size:0.8rem;padding:6px 10px;">
+            <option value="2" selected>⚡ 2장씩 병렬 진행 (안정성 권장)</option>
+            <option value="3">🚀 3장씩 병렬 진행 (고속)</option>
+            <option value="1">🐢 1장씩 순차 진행 (할당량 극보수)</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Median Sampling Checkbox -->
+      <div style="margin-bottom:16px;padding:9px 12px;background:rgba(99,102,241,0.06);border:1px dashed rgba(99,102,241,0.32);border-radius:8px;">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:0.83rem;font-weight:600;color:var(--text);user-select:none;">
+          <input type="checkbox" id="batch-reanalyze-median" checked style="width:16px;height:16px;accent-color:#4f46e5;cursor:pointer;">
+          <span>🎯 3회 병렬 채점 후 중앙값(Median) 채택</span>
+          <span style="background:rgba(99,102,241,0.15);color:#4f46e5;padding:2px 6px;border-radius:4px;font-size:0.72rem;font-weight:700;">아웃라이어 튐 방지</span>
+        </label>
+        <div style="font-size:0.74rem;color:var(--muted);margin-top:3px;padding-left:24px;line-height:1.4;">
+          동일 사진을 3회 독립 채점하여 단발성 튀는 점수(예: 4점대 튐)를 배제하고 가장 신뢰도 높은 중앙값 분석을 저장합니다.
+        </div>
+      </div>
+
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:10px;">
+        <button type="button" class="filter-btn" onclick="closeBatchReanalyzeModal()">취소</button>
+        <button type="button" id="btn-batch-reanalyze-start" class="upload-btn" style="background:#0d9488;padding:8px 18px;font-weight:700;" onclick="executeBatchReanalyze()">
+          🚀 일괄 재평가 시작
+        </button>
+      </div>
+    </div>
+
+    <!-- SECTION B: Progress (Visible while running) -->
+    <div id="batch-reanalyze-progress-section" style="display:none;margin-top:8px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.86rem;margin-bottom:6px;">
+        <span id="batch-reanalyze-progress-title" style="font-weight:800;color:var(--navy);">일괄 재평가 진행 중...</span>
+        <span id="batch-reanalyze-progress-pct" style="font-weight:800;color:var(--blue);">0%</span>
+      </div>
+      <div style="background:#e2e8f0;border-radius:999px;height:10px;overflow:hidden;margin-bottom:10px;">
+        <div id="batch-reanalyze-progress-bar" style="background:linear-gradient(90deg, #3b82f6, #0d9488);height:100%;width:0%;transition:width 0.25s;"></div>
+      </div>
+      <div id="batch-reanalyze-progress-status" style="font-size:0.8rem;color:var(--text);margin-bottom:12px;"></div>
+
+      <!-- Live Items Queue Status -->
+      <div id="batch-reanalyze-live-list" style="max-height:220px;overflow-y:auto;background:var(--card-sub, #f8fafc);border:1px solid var(--line, #e2e8f0);border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px;font-size:0.78rem;">
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;margin-top:14px;">
+        <button type="button" id="btn-batch-reanalyze-cancel" class="filter-btn" style="color:#e11d48;border-color:#fda4af;" onclick="cancelBatchReanalyze()">
+          ⏹️ 작업 중단
+        </button>
+      </div>
+    </div>
+
+    <!-- SECTION C: Finished Summary (Visible when complete) -->
+    <div id="batch-reanalyze-summary-section" style="display:none;margin-top:8px;">
+      <div style="padding:12px 16px;background:rgba(16,185,129,0.1);border:1px solid #34d399;border-radius:10px;margin-bottom:14px;">
+        <div style="font-size:0.95rem;font-weight:800;color:#065f46;margin-bottom:4px;">
+          🎉 일괄 재평가가 성공적으로 완료되었습니다!
+        </div>
+        <div id="batch-reanalyze-summary-stats" style="font-size:0.82rem;color:var(--text);display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
+        </div>
+      </div>
+
+      <div style="font-size:0.8rem;font-weight:700;margin-bottom:6px;color:var(--text);">📊 사진별 점수 변화 결과 (Before → After):</div>
+      <div id="batch-reanalyze-diff-list" style="max-height:220px;overflow-y:auto;background:var(--card-sub, #f8fafc);border:1px solid var(--line, #e2e8f0);border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px;font-size:0.78rem;">
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;margin-top:16px;">
+        <button type="button" class="upload-btn" style="background:#4f46e5;padding:8px 20px;font-weight:700;" onclick="finishBatchReanalyze()">
+          ✅ 확인 및 갤러리 갱신
+        </button>
+      </div>
+    </div>
   </div>
 </div>
 
