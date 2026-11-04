@@ -59,6 +59,8 @@ let currentCollectionFilter = 'all'; // 'all' | 'unassigned' | '<collection_id>'
 let isBatchSelectMode = false;
 let selectedBatchIds = new Set();
 let currentFilter = 'all';
+let isHideExcluded = true;
+window.isHideExcluded = isHideExcluded;
 let currentCatFilter = 'all';
 let currentFocalFilter = 'all'; // 'all' | 'wide_24' | 'semi_wide_35' | 'standard_50' | 'portrait_85' | 'tele_100' | 'unknown' | 'mm:<int>'
 let currentDateBasis = 'smart'; // 'smart' | 'captured' | 'created'
@@ -943,6 +945,7 @@ function renderScoreDistPanel() {
 
   // Filter items by current global scope (collection + date) + category/focal/tag/burst (excluding grade & bin filter so full distribution is visible)
   const baseList = allData.filter(item => {
+    if (isHideExcluded && item.is_excluded) return false;
     if (!matchGlobalScope(item)) return false;
     if (currentCatFilter !== 'all' && item.figure_category !== currentCatFilter) return false;
     if (currentFocalFilter !== 'all' && !matchFocalFilter(item, currentFocalFilter)) return false;
@@ -1359,7 +1362,10 @@ function setFilter(filter, btn) {
 
 function filterList(list) {
   return list.filter(item => {
-    // 0. Global Scope filter (Collection + Date)
+    // 0. Prompt test / statistical exclusion filter
+    if (isHideExcluded && item.is_excluded) return false;
+
+    // 0-b. Global Scope filter (Collection + Date)
     if (!matchGlobalScope(item)) return false;
 
     // 1. Grade filter
@@ -1484,7 +1490,7 @@ function renderGalleryCard(item) {
     return `<span style="display:inline-block;margin-top:4px;margin-left:4px;font-size:0.72rem;font-weight:800;color:#0f766e;background:#f0fdfa;border:1px solid #99f6e4;padding:1px 7px;border-radius:6px;" title="소속 컬렉션: ${escapeHtml(col.name)}">📁 ${escapeHtml(col.name)}</span>`;
   }).join('');
   return `
-    <article class="card" style="${isBatchChecked ? 'box-shadow:0 0 0 3px #0d9488;border-color:#0d9488;' : ''}" onclick="onGalleryCardClick(${item.id}, event)">
+    <article class="card ${item.is_excluded ? 'card-excluded' : ''}" style="${isBatchChecked ? 'box-shadow:0 0 0 3px #0d9488;border-color:#0d9488;' : ''}" onclick="onGalleryCardClick(${item.id}, event)">
       ${isBatchSelectMode ? `
         <div style="position:absolute;top:10px;left:10px;z-index:6;display:flex;align-items:center;gap:6px;">
           <span style="background:${isBatchChecked ? '#0d9488' : 'rgba(15,23,42,0.75)'};color:white;padding:4px 9px;border-radius:8px;font-size:0.75rem;font-weight:800;box-shadow:0 2px 6px rgba(0,0,0,0.25);">
@@ -1493,6 +1499,7 @@ function renderGalleryCard(item) {
           <button type="button" class="filter-btn" style="padding:3px 7px;font-size:0.7rem;background:rgba(255,255,255,0.92);color:#0f172a;border:1px solid #cbd5e1;" onclick="event.stopPropagation(); openDetailModal(${item.id})">🔍 상세</button>
         </div>
       ` : ''}
+      <button class="card-exclude-btn" title="${item.is_excluded ? '통계에 다시 포함' : '프롬프트 테스트/통계에서 제외'}" onclick="event.stopPropagation(); toggleExcludeRecord(${item.id})">${item.is_excluded ? '↩️' : '🚫'}</button>
       <button class="card-delete-btn" title="이 분석 기록 삭제" onclick="event.stopPropagation(); deleteAnalysisRecord(${item.id})">🗑️</button>
       <img class="card-thumb" src="/api/image/${item.id}" alt="${escapeHtml(item.filename)}" loading="lazy">
       <div class="card-body">
@@ -1501,6 +1508,7 @@ function renderGalleryCard(item) {
             <h3 class="card-title">${escapeHtml(item.filename)}</h3>
             <div style="margin-top:4px;font-size:0.72rem;color:var(--muted);">📷 ${escapeHtml(formatCapturedAt(item.captured_at))}</div>
             <span style="display:inline-block;margin-top:4px;font-size:0.75rem;font-weight:700;color:#4f46e5;background:#eef2ff;padding:2px 7px;border-radius:6px;">${escapeHtml(item.figure_category)}</span>
+            ${item.is_excluded ? '<span class="badge-excluded" title="프롬프트 테스트/통계 제외">🚫 통계 제외</span>' : ''}
             <span style="display:inline-block;margin-top:4px;margin-left:4px;font-size:0.75rem;font-weight:700;color:#0d9488;background:#f0fdfa;padding:2px 7px;border-radius:6px;">🎯 ${escapeHtml(item.focus_status || '완벽 칼초점')}</span>
             ${focalMm !== null ? `<span style="display:inline-block;margin-top:4px;margin-left:4px;font-size:0.74rem;font-weight:700;color:#0369a1;background:#e0f2fe;border:1px solid #bae6fd;padding:1px 7px;border-radius:6px;" title="촬영 화각(초점거리): ${focalMm}mm">🔭 ${Math.round(focalMm)}mm</span>` : ''}
             ${modelBadgeText ? `<span style="display:inline-block;margin-top:4px;margin-left:4px;font-size:0.73rem;font-weight:700;color:#334155;background:rgba(148,163,184,0.16);border:1px solid rgba(148,163,184,0.35);padding:1px 7px;border-radius:6px;" title="평가 모델: ${escapeHtml(item.model)}">🤖 ${escapeHtml(modelBadgeText)}</span>` : ''}
@@ -1732,4 +1740,110 @@ window.initTheme = initTheme;
 window.toggleTheme = toggleTheme;
 window.selectedBatchIds = selectedBatchIds;
 window.isBatchSelectMode = isBatchSelectMode;
+
+function toggleHideExcluded() {
+  isHideExcluded = !isHideExcluded;
+  window.isHideExcluded = isHideExcluded;
+  updateHideExcludedButtonUI();
+  renderGallery();
+  renderScoreDistPanel();
+}
+
+function updateHideExcludedButtonUI() {
+  const btn = document.getElementById('btn-toggle-hide-excluded');
+  const label = document.getElementById('label-hide-excluded');
+  if (!btn || !label) return;
+  if (isHideExcluded) {
+    btn.classList.add('active');
+    btn.style.background = '#fef2f2';
+    btn.style.color = '#991b1b';
+    btn.style.borderColor = '#fca5a5';
+    label.textContent = '🧪 테스트 숨김 ON';
+  } else {
+    btn.classList.remove('active');
+    btn.style.background = '';
+    btn.style.color = '';
+    btn.style.borderColor = '';
+    label.textContent = '🧪 테스트 숨김 OFF';
+  }
+}
+
+async function toggleExcludeRecord(id, targetState = null) {
+  const item = allData.find(d => Number(d.id) === Number(id));
+  if (!item) return;
+  const newState = (targetState !== null) ? targetState : !item.is_excluded;
+  try {
+    const res = await fetch('/api/toggle-exclude', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, is_excluded: newState })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      alert(data.error || '제외 상태 변경에 실패했습니다.');
+      return;
+    }
+    item.is_excluded = newState;
+    renderGallery(false);
+    renderScoreDistPanel();
+    if (typeof renderTagInsights === 'function' && window.currentView === 'insights') {
+      renderTagInsights();
+    }
+    if (typeof renderGrowthTimeline === 'function' && window.currentView === 'timeline') {
+      renderGrowthTimeline();
+    }
+    if (typeof currentDetailId !== 'undefined' && Number(currentDetailId) === Number(id)) {
+      if (typeof openDetailModal === 'function') openDetailModal(id);
+    }
+  } catch (err) {
+    console.error(err);
+    alert('서버 통신 오류가 발생했습니다.');
+  }
+}
+
+async function applyBatchExclude(isExcluded) {
+  if (!selectedBatchIds || selectedBatchIds.size === 0) {
+    alert('선택된 사진이 없습니다.');
+    return;
+  }
+  const ids = Array.from(selectedBatchIds);
+  const actionText = isExcluded ? '통계에서 제외' : '통계에 다시 포함';
+  if (!confirm(`선택한 ${ids.length}장의 사진을 ${actionText}하시겠습니까?`)) {
+    return;
+  }
+  try {
+    const res = await fetch('/api/batch-exclude', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids, is_excluded: isExcluded })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      alert(data.error || '일괄 처리에 실패했습니다.');
+      return;
+    }
+    ids.forEach(id => {
+      const item = allData.find(d => Number(d.id) === Number(id));
+      if (item) item.is_excluded = isExcluded;
+    });
+    renderGallery(false);
+    renderScoreDistPanel();
+    if (typeof renderTagInsights === 'function' && window.currentView === 'insights') {
+      renderTagInsights();
+    }
+    if (typeof renderGrowthTimeline === 'function' && window.currentView === 'timeline') {
+      renderGrowthTimeline();
+    }
+    alert(`총 ${data.count}장의 사진이 ${actionText}되었습니다.`);
+  } catch (err) {
+    console.error(err);
+    alert('일괄 처리 중 오류가 발생했습니다.');
+  }
+}
+
 window.updateBatchSelectBarUI = updateBatchSelectBarUI;
+window.toggleHideExcluded = toggleHideExcluded;
+window.updateHideExcludedButtonUI = updateHideExcludedButtonUI;
+window.toggleExcludeRecord = toggleExcludeRecord;
+window.applyBatchExclude = applyBatchExclude;
+window.isHideExcluded = isHideExcluded;

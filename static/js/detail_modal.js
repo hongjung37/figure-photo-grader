@@ -237,7 +237,14 @@ function openDetailModal(id) {
           <button class="filter-btn" style="background:#312e81;color:white;border-color:#312e81;padding:5px 12px;font-size:0.8rem;" onclick="document.getElementById('lr-advice-box-section').scrollIntoView({behavior:'smooth'})">🛠️ 라이트룸 보정값 바로가기</button>
           <button class="filter-btn" style="background:#0284c7;color:white;border-color:#0284c7;padding:5px 12px;font-size:0.8rem;" onclick="document.getElementById('sns-advice-box-section').scrollIntoView({behavior:'smooth'})">📱 SNS 크롭 & 캡션 바로가기</button>
         </div>
-        <button class="filter-btn" style="background:#fee2e2;color:#b91c1c;border-color:#fca5a5;padding:5px 12px;font-size:0.8rem;font-weight:700;" onclick="deleteAnalysisRecord(${item.id})">🗑️ 이 평가 기록 삭제</button>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+          ${item.is_excluded ? `
+            <button class="filter-btn" style="background:#ecfdf5;color:#047857;border-color:#a7f3d0;padding:5px 12px;font-size:0.8rem;font-weight:700;" onclick="toggleExcludeRecord(${item.id}, false)" title="통계 분석 및 인사이트에 이 사진을 다시 포함합니다.">↩️ 통계 포함</button>
+          ` : `
+            <button class="filter-btn" style="background:#fef2f2;color:#b91c1c;border-color:#fca5a5;padding:5px 12px;font-size:0.8rem;font-weight:700;" onclick="toggleExcludeRecord(${item.id}, true)" title="프롬프트 테스트용 또는 비피규어 컷으로 지정하여 통계에서 제외합니다.">🧪 통계 제외</button>
+          `}
+          <button class="filter-btn" style="background:#fee2e2;color:#b91c1c;border-color:#fca5a5;padding:5px 12px;font-size:0.8rem;font-weight:700;" onclick="deleteAnalysisRecord(${item.id})">🗑️ 이 평가 기록 삭제</button>
+        </div>
       </div>
 
       <!-- 재평가 패널 (기본 숨김, 🔄 재평가 버튼 클릭 시 토글) -->
@@ -287,7 +294,7 @@ function openDetailModal(id) {
     <div>
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;">
         <div>
-          <h2 style="margin:0;">${_escapeDetailHtml(item.filename)}</h2>
+          <h2 style="margin:0;display:inline-flex;align-items:center;flex-wrap:wrap;gap:8px;">${_escapeDetailHtml(item.filename)} ${item.is_excluded ? '<span class="badge-excluded" style="font-size:0.78rem;font-weight:800;">🚫 통계 제외</span>' : ''}</h2>
           <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:6px;">
             <span class="score-grade" style="font-size:0.86rem;padding:4px 12px;margin:0;">${_escapeDetailHtml(item.grade)}</span>
             <span style="display:inline-flex;align-items:center;gap:4px;font-size:0.78rem;font-weight:700;color:#4f46e5;background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.3);padding:3px 10px;border-radius:999px;" title="적용된 평가 모델 ID: ${_escapeDetailHtml(item.model)}">

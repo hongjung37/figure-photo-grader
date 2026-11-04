@@ -55,6 +55,8 @@ from app.db import (
     update_review_status,
     update_sns_advice,
     update_user_score,
+    update_analysis_excluded,
+    batch_update_excluded,
 )
 from app.models.analysis import (
     AESTHETIC_TAG_CATEGORIES,
@@ -533,6 +535,10 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 return self._handle_post_collection_items()
             if path == "/api/export-xmp":
                 return self._handle_post_export_xmp()
+            if path == "/api/toggle-exclude":
+                return self._handle_post_toggle_exclude()
+            if path == "/api/batch-exclude":
+                return self._handle_post_batch_exclude()
 
             if path.startswith("/api/post-process-advice/"):
                 record_id = int(path.rstrip("/").split("/")[-1])
@@ -828,6 +834,35 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             self._send_json_error(HTTPStatus.NOT_FOUND, f"존재하지 않는 레코드 ID입니다: {missing_ids}")
             return
         self._send_json_ok({"success": True, "deleted_ids": deleted_ids, "count": len(deleted_ids)})
+
+    def _handle_post_toggle_exclude(self) -> None:
+        data = self._read_json_body()
+        record_id = int(data.get("id"))
+        is_excluded = data.get("is_excluded")
+        if is_excluded is None:
+            curr = get_analysis_row_by_id(self.db_path, record_id)
+            if not curr:
+                self._send_json_error(HTTPStatus.NOT_FOUND, f"레코드 ID {record_id}를 찾을 수 없습니다.")
+                return
+            is_excluded = not bool(curr.get("is_excluded", 0))
+        else:
+            is_excluded = bool(is_excluded)
+
+        if not update_analysis_excluded(self.db_path, record_id, is_excluded):
+            self._send_json_error(HTTPStatus.NOT_FOUND, f"레코드 ID {record_id}를 찾을 수 없습니다.")
+            return
+        self._send_json_ok({"success": True, "id": record_id, "is_excluded": is_excluded})
+
+    def _handle_post_batch_exclude(self) -> None:
+        data = self._read_json_body()
+        raw_ids = data.get("ids", [])
+        if not isinstance(raw_ids, list):
+            self._send_json_error(HTTPStatus.BAD_REQUEST, "ids는 리스트 형태여야 합니다.")
+            return
+        record_ids = [int(i) for i in raw_ids if str(i).isdigit()]
+        is_excluded = bool(data.get("is_excluded", True))
+        count = batch_update_excluded(self.db_path, record_ids, is_excluded)
+        self._send_json_ok({"success": True, "count": count, "is_excluded": is_excluded})
 
     def _handle_post_export_xmp(self) -> None:
         from app.services.xmp_service import write_xmp_sidecar

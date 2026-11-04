@@ -32,6 +32,8 @@ from app.db import (
     update_review_status,
     update_sns_advice,
     update_user_score,
+    update_analysis_excluded,
+    batch_update_excluded,
 )
 from app.models import (
     AESTHETIC_TAG_CATEGORIES,

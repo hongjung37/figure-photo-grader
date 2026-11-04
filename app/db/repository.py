@@ -66,6 +66,7 @@ def save_analysis(
             ("user_score", "REAL"),
             ("captured_at", "TEXT"),
             ("color_sig", "INTEGER"),
+            ("is_excluded", "INTEGER DEFAULT 0"),
         ):
             if col_name not in existing_cols:
                 try:
@@ -155,7 +156,8 @@ def get_all_analyses(db_path: Path, max_hamming_dist: int = 15) -> list[dict]:
             """SELECT id, sha256, source_filename, width, height, image_format,
                       model, exif_json, analysis_json, created_at,
                       lr_advice_json, sns_advice_json, review_status,
-                      user_notes, dhash, user_score, captured_at, color_sig
+                      user_notes, dhash, user_score, captured_at, color_sig,
+                      is_excluded
                FROM photo_analyses ORDER BY id DESC"""
         ).fetchall()
 
@@ -447,6 +449,7 @@ def _format_analysis_row(
         "exif": exif_data,
         "dhash": dhash_val,
         "color_sig": color_sig_val,
+        "is_excluded": bool(row["is_excluded"]) if "is_excluded" in row.keys() and row["is_excluded"] is not None else False,
         "collection_ids": list(collection_ids) if collection_ids is not None else [],
     }
 
@@ -630,6 +633,10 @@ def get_tag_stats(
     analyses = filter_analyses_by_collection(all_analyses, collection_id=collection_id)
     analyses = filter_analyses_by_date(analyses, date_basis=date_basis, date_from=date_from, date_to=date_to)
 
+    raw_total_photos = len(analyses)
+    excluded_photos = sum(1 for a in analyses if a.get("is_excluded"))
+    analyses = [a for a in analyses if not a.get("is_excluded")]
+
     total_photos = len(analyses)
     user_rated_photos = sum(1 for a in analyses if a.get("user_score") is not None)
 
@@ -715,6 +722,8 @@ def get_tag_stats(
 
     return {
         "total_photos": total_photos,
+        "excluded_photos": excluded_photos,
+        "raw_total_photos": raw_total_photos,
         "user_rated_photos": user_rated_photos,
         "total_unique_tags": len(tag_data),
         "filtered_tags_count": len(items),
@@ -778,6 +787,10 @@ def get_focal_stats(
     all_analyses = get_all_analyses(db_path)
     analyses = filter_analyses_by_collection(all_analyses, collection_id=collection_id)
     analyses = filter_analyses_by_date(analyses, date_basis=date_basis, date_from=date_from, date_to=date_to)
+
+    raw_total_photos = len(analyses)
+    excluded_photos = sum(1 for a in analyses if a.get("is_excluded"))
+    analyses = [a for a in analyses if not a.get("is_excluded")]
 
     total_photos = len(analyses)
     identified_photos = sum(1 for a in analyses if a.get("focal_length_mm") is not None)
@@ -960,6 +973,8 @@ def get_focal_stats(
 
     return {
         "total_photos": total_photos,
+        "excluded_photos": excluded_photos,
+        "raw_total_photos": raw_total_photos,
         "identified_photos": identified_photos,
         "unknown_photos": unknown_photos,
         "user_rated_photos": user_rated_photos,
@@ -1005,6 +1020,29 @@ def update_user_score(db_path: Path, record_id: int, user_score: float | None) -
     with closing(get_db_connection(db_path)) as conn, conn:
         cursor = conn.execute("UPDATE photo_analyses SET user_score = ? WHERE id = ?", (user_score, record_id))
         return cursor.rowcount > 0
+
+
+def update_analysis_excluded(db_path: Path | str, record_id: int, is_excluded: bool) -> bool:
+    """Update is_excluded flag (0 or 1) for a single record."""
+    database = Path(db_path)
+    ensure_db_columns(database)
+    val = 1 if is_excluded else 0
+    with closing(get_db_connection(database)) as conn, conn:
+        cursor = conn.execute("UPDATE photo_analyses SET is_excluded = ? WHERE id = ?", (val, record_id))
+        return cursor.rowcount > 0
+
+
+def batch_update_excluded(db_path: Path | str, record_ids: list[int], is_excluded: bool) -> int:
+    """Batch update is_excluded flag for multiple records."""
+    database = Path(db_path)
+    if not database.is_file() or not record_ids:
+        return 0
+    ensure_db_columns(database)
+    val = 1 if is_excluded else 0
+    with closing(get_db_connection(database)) as conn, conn:
+        placeholders = ",".join("?" for _ in record_ids)
+        cursor = conn.execute(f"UPDATE photo_analyses SET is_excluded = ? WHERE id IN ({placeholders})", [val, *record_ids])
+        return cursor.rowcount
 
 
 def delete_analyses(db_path: Path, record_ids: list[int]) -> list[int]:

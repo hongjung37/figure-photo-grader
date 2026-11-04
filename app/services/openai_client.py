@@ -28,11 +28,17 @@ from app.prompts import (
     build_all_sns_crops_prompt,
     build_caption_and_tags_prompt,
     build_cross_check_prompt,
+    build_cross_check_user_prompt,
     build_fast_grader_prompt,
+    build_fast_grader_user_prompt,
     build_grader_prompt,
+    build_grader_user_prompt,
     build_lightroom_prompt,
     build_single_crop_prompt,
     build_sns_advice_prompt,
+    get_cross_check_system_prompt,
+    get_fast_grader_system_prompt,
+    get_grader_system_prompt,
 )
 from app.services.gemini_client import (
     _get_env_file_path,
@@ -120,13 +126,19 @@ def _prepare_openai_image_payload(
 def _call_openai_structured(
     client: OpenAI,
     model: str,
-    prompt_text: str,
-    photo: PreparedPhoto | None,
-    response_model: type[T],
-    task_desc: str,
+    prompt_text: str | None = None,
+    photo: PreparedPhoto | None = None,
+    response_model: type[T] = Any,
+    task_desc: str = "OpenAI 태스크",
     max_retries: int = 3,
+    system_prompt: str | None = None,
+    user_prompt: str | None = None,
 ) -> T:
-    """Call OpenAI chat completion with Structured Outputs, concurrency control, and backoff retries."""
+    """Call OpenAI chat completion with Structured Outputs, concurrency control, and backoff retries.
+
+    Supports 2-tier prompt structure (static system prompt + dynamic user payload)
+    for high-efficiency OpenAI Prompt Caching prefix matching.
+    """
     t0 = time.perf_counter()
     attempts = 0
     backoff = 2.0
@@ -134,18 +146,36 @@ def _call_openai_structured(
     def _elapsed_ms() -> int:
         return int((time.perf_counter() - t0) * 1000)
 
-    # Build multimodal content payload with optimized image resolution
-    content: list[dict[str, Any]] = [{"type": "text", "text": prompt_text}]
-    if photo is not None:
-        b64_image, mime_type = _prepare_openai_image_payload(photo)
-        content.append({
-            "type": "image_url",
-            "image_url": {
-                "url": f"data:{mime_type};base64,{b64_image}",
-            },
-        })
-
-    messages = [{"role": "user", "content": content}]
+    # Build multimodal messages payload:
+    # 2-Tier structure: system prompt (static 100% cacheable) + user content (dynamic EXIF & image)
+    if system_prompt:
+        user_content: list[dict[str, Any]] = []
+        u_text = user_prompt or prompt_text or ""
+        if u_text:
+            user_content.append({"type": "text", "text": u_text})
+        if photo is not None:
+            b64_image, mime_type = _prepare_openai_image_payload(photo)
+            user_content.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:{mime_type};base64,{b64_image}",
+                },
+            })
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
+        ]
+    else:
+        content: list[dict[str, Any]] = [{"type": "text", "text": prompt_text or user_prompt or ""}]
+        if photo is not None:
+            b64_image, mime_type = _prepare_openai_image_payload(photo)
+            content.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:{mime_type};base64,{b64_image}",
+                },
+            })
+        messages = [{"role": "user", "content": content}]
 
     for attempt in range(1, max_retries + 1):
         attempts = attempt
@@ -168,16 +198,20 @@ def _call_openai_structured(
                         raise
                     # Fallback to standard chat completions with JSON mode for custom gateways
                     import json as _json
-                    fallback_messages = [
-                        {
-                            "role": "system",
-                            "content": (
-                                "반드시 아래 JSON 스키마를 준수하는 순수 JSON 객체만 응답하세요:\n"
-                                f"{_json.dumps(response_model.model_json_schema(), ensure_ascii=False)}"
-                            ),
-                        },
-                        *messages,
-                    ]
+                    schema_instruction = (
+                        "반드시 아래 JSON 스키마를 준수하는 순수 JSON 객체만 응답하세요:\n"
+                        f"{_json.dumps(response_model.model_json_schema(), ensure_ascii=False)}"
+                    )
+                    if system_prompt and len(messages) >= 2:
+                        fallback_messages = [
+                            {"role": "system", "content": f"{system_prompt}\n\n{schema_instruction}"},
+                            messages[1],
+                        ]
+                    else:
+                        fallback_messages = [
+                            {"role": "system", "content": schema_instruction},
+                            *messages,
+                        ]
                     completion = client.chat.completions.create(
                         model=model,
                         messages=fallback_messages,
@@ -193,8 +227,25 @@ def _call_openai_structured(
             if parsed is None:
                 raise RuntimeError(f"OpenAI가 {task_desc} 정형 결과를 생성하지 못했습니다.")
 
-            in_tok = completion.usage.prompt_tokens if completion.usage else None
-            out_tok = completion.usage.completion_tokens if completion.usage else None
+            in_tok = completion.usage.prompt_tokens if (completion.usage and isinstance(completion.usage.prompt_tokens, int)) else None
+            out_tok = completion.usage.completion_tokens if (completion.usage and isinstance(completion.usage.completion_tokens, int)) else None
+            cached_tok = None
+            if completion.usage and hasattr(completion.usage, "prompt_tokens_details") and completion.usage.prompt_tokens_details:
+                raw_cached = getattr(completion.usage.prompt_tokens_details, "cached_tokens", None)
+                if isinstance(raw_cached, int):
+                    cached_tok = raw_cached
+                elif raw_cached is not None:
+                    try:
+                        cached_tok = int(raw_cached)
+                    except (ValueError, TypeError):
+                        cached_tok = None
+
+            if isinstance(cached_tok, int) and isinstance(in_tok, int) and in_tok > 0:
+                cache_pct = (cached_tok / in_tok) * 100
+                print(
+                    f"[OpenAI Cache] {task_desc} ({model}) | 총 입력: {in_tok:,} 토큰 | 캐시 적중: {cached_tok:,} 토큰 ({cache_pct:.1f}%)",
+                    file=sys.stderr,
+                )
 
             _log_api_usage(
                 task=task_desc,
@@ -206,6 +257,7 @@ def _call_openai_structured(
                 output_tokens=out_tok,
                 success=True,
                 error=None,
+                cached_tokens=cached_tok,
             )
             return parsed
 
@@ -257,19 +309,25 @@ def cross_check_with_openai(
     category_hint: str | None = None,
     api_key: str | None = None,
 ) -> OpenAICrossCheck:
-    """Generate a lightweight second-opinion critique from OpenAI without aesthetic tags."""
+    """Generate a lightweight second-opinion critique from OpenAI without aesthetic tags.
+
+    Uses 2-tier prompt structure (static system instructions + dynamic user payload)
+    to achieve maximum OpenAI Prompt Caching efficiency across batch evaluations.
+    """
     key = _resolve_api_key(api_key)
     client = _get_client(key)
     resolved_model = OPENAI_MODEL_PRESETS.get(model, model)
-    prompt_text = build_cross_check_prompt(photo, category_hint=category_hint)
+    system_prompt = get_cross_check_system_prompt()
+    user_prompt = build_cross_check_user_prompt(photo, category_hint=category_hint)
 
     return _call_openai_structured(
         client=client,
         model=resolved_model,
-        prompt_text=prompt_text,
         photo=photo,
         response_model=OpenAICrossCheck,
         task_desc="OpenAI 크로스 체크 비평",
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
     )
 
 
@@ -280,20 +338,26 @@ def analyze_with_openai(
     api_key: str | None = None,
     analysis_mode: str = "full",
 ) -> PhotoAnalysis:
-    """Analyze figure photo with OpenAI and return strictly validated PhotoAnalysis."""
+    """Analyze figure photo with OpenAI and return strictly validated PhotoAnalysis.
+
+    Uses 2-tier prompt structure (static system instructions + dynamic user payload)
+    to achieve maximum OpenAI Prompt Caching efficiency across batch evaluations.
+    """
     key = _resolve_api_key(api_key)
     client = _get_client(key)
     resolved_model = OPENAI_MODEL_PRESETS.get(model, model)
     is_fast = (analysis_mode or "full").strip().lower() == "fast"
     if is_fast:
-        prompt_text = build_fast_grader_prompt(photo, category_hint=category_hint)
+        system_prompt = get_fast_grader_system_prompt()
+        user_prompt = build_fast_grader_user_prompt(photo, category_hint=category_hint)
         fast_res = _call_openai_structured(
             client=client,
             model=resolved_model,
-            prompt_text=prompt_text,
             photo=photo,
             response_model=FastPhotoAnalysis,
             task_desc="OpenAI 사진 경량 분석",
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
         )
         if isinstance(fast_res, FastPhotoAnalysis):
             return fast_res.to_photo_analysis()
@@ -310,15 +374,17 @@ def analyze_with_openai(
                 }
             )
 
-    prompt_text = build_grader_prompt(photo, category_hint=category_hint, compact_tags=True)
+    system_prompt = get_grader_system_prompt(compact_tags=True, analysis_mode="full")
+    user_prompt = build_grader_user_prompt(photo, category_hint=category_hint)
 
     return _call_openai_structured(
         client=client,
         model=resolved_model,
-        prompt_text=prompt_text,
         photo=photo,
         response_model=PhotoAnalysis,
         task_desc="OpenAI 사진 분석",
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
     )
 
 

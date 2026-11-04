@@ -210,7 +210,8 @@ function setInsightsRatingMode(mode) {
 
 function getInsightsSourceList() {
   const rawList = (typeof allData !== 'undefined' && Array.isArray(allData)) ? allData : [];
-  return (typeof getScopedData === 'function') ? getScopedData(rawList) : rawList;
+  const scoped = (typeof getScopedData === 'function') ? getScopedData(rawList) : rawList;
+  return scoped.filter(d => !d.is_excluded);
 }
 
 function computeClientTagStats(minCount) {
@@ -982,7 +983,9 @@ function renderTagInsights() {
   const topAi = stats.allTags.length ? [...stats.allTags].sort((a, b) => b.avg_ai_score - a.avg_ai_score)[0] : null;
   const userRatePct = stats.totalPhotos ? Math.round((stats.userRatedPhotos / stats.totalPhotos) * 100) : 0;
   const categoriesMap = (typeof TAG_CATEGORIES !== 'undefined' ? TAG_CATEGORIES : (window.TAG_CATEGORIES || {}));
-  const isFocalMode = insightsDimension === 'focal';
+  const isFocalMode = insightsDimension === 'focal';
+  const scopedForExclude = (typeof getScopedData === 'function') ? getScopedData(rawAll) : rawAll;
+  const excludedCount = scopedForExclude.filter(d => d.is_excluded).length;
 
   const scopeBannerHtml = scopeActive ? `
     <div style="margin-bottom:14px;padding:10px 14px;background:rgba(79,70,229,0.08);border:1px solid rgba(99,102,241,0.35);border-radius:12px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
@@ -1014,6 +1017,11 @@ function renderTagInsights() {
       </div>
 
       <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        ${excludedCount > 0 ? `
+          <div style="display:inline-flex;align-items:center;gap:5px;background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;padding:4px 10px;border-radius:10px;font-size:0.78rem;font-weight:800;" title="프롬프트 테스트/통계 제외로 지정된 ${excludedCount}장의 사진이 분석에서 배제되었습니다.">
+            <span>🚫 통계 제외 ${excludedCount}장 배제됨</span>
+          </div>
+        ` : ''}
         <!-- Sample Min Count Filter -->
         <div style="display:inline-flex;align-items:center;gap:6px;background:var(--card-sub, #f1f5f9);padding:4px 10px;border-radius:10px;border:1px solid var(--line, #e2e8f0);">
           <span style="font-size:0.78rem;font-weight:700;color:var(--muted);">최소 사진 수:</span>

@@ -184,6 +184,7 @@ function computeGrowthTimelineData(grouping = timelineGrouping) {
   // Filter source items respecting Category, Focal Length, Collection, and Tags
   const sourceItems = rawAll.filter(item => {
     if (!item) return false;
+    if (item.is_excluded) return false;
     if (typeof matchCollectionScope === 'function' && !matchCollectionScope(item)) return false;
     if (typeof currentCatFilter !== 'undefined' && currentCatFilter !== 'all' && item.figure_category !== currentCatFilter) return false;
     if (typeof currentFocalFilter !== 'undefined' && currentFocalFilter !== 'all' && typeof matchFocalFilter === 'function' && !matchFocalFilter(item, currentFocalFilter)) return false;

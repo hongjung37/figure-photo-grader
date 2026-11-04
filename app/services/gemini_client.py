@@ -113,9 +113,16 @@ def _log_api_usage(
     output_tokens: int | None,
     success: bool,
     error: str | None,
+    cached_tokens: int | None = None,
 ) -> None:
     """Best-effort usage record; logging failures must never break an analysis."""
     db_path = _USAGE_LOG_DB
+    if db_path is None:
+        try:
+            from app.config import DEFAULT_DB_PATH
+            db_path = DEFAULT_DB_PATH if DEFAULT_DB_PATH.exists() else None
+        except Exception:
+            db_path = None
     if db_path is None:
         return
     try:
@@ -132,15 +139,31 @@ def _log_api_usage(
                     duration_ms INTEGER NOT NULL,
                     input_tokens INTEGER,
                     output_tokens INTEGER,
+                    cached_tokens INTEGER,
                     success INTEGER NOT NULL,
                     error TEXT
                 )"""
             )
+            try:
+                connection.execute("ALTER TABLE api_usage_log ADD COLUMN cached_tokens INTEGER")
+            except Exception:
+                pass
+
+            def _clean_int(val: Any) -> int | None:
+                if val is None or isinstance(val, bool):
+                    return None
+                if isinstance(val, (int, float)):
+                    return int(val)
+                try:
+                    return int(val)
+                except (ValueError, TypeError):
+                    return None
+
             connection.execute(
                 """INSERT INTO api_usage_log (
                     created_at, task, requested_model, used_model, fallback, attempts,
-                    duration_ms, input_tokens, output_tokens, success, error
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    duration_ms, input_tokens, output_tokens, cached_tokens, success, error
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     datetime.now(timezone.utc).isoformat(timespec="seconds"),
                     task,
@@ -149,8 +172,9 @@ def _log_api_usage(
                     1 if used_model != requested_model else 0,
                     attempts,
                     duration_ms,
-                    input_tokens,
-                    output_tokens,
+                    _clean_int(input_tokens),
+                    _clean_int(output_tokens),
+                    _clean_int(cached_tokens),
                     1 if success else 0,
                     (error or "")[:500] or None,
                 ),
@@ -182,6 +206,7 @@ def get_usage_stats(db_path: str | Path) -> dict[str, Any]:
                           SUM(attempts - 1) AS retries,
                           COALESCE(SUM(input_tokens), 0) AS input_tokens,
                           COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                          COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
                           CAST(AVG(duration_ms) AS INTEGER) AS avg_ms
                    FROM api_usage_log GROUP BY task ORDER BY calls DESC"""
             ).fetchall()
@@ -196,6 +221,7 @@ def get_usage_stats(db_path: str | Path) -> dict[str, Any]:
                           SUM(attempts - 1) AS retries,
                           COALESCE(SUM(input_tokens), 0) AS input_tokens,
                           COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                          COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
                           CAST(AVG(duration_ms) AS INTEGER) AS avg_ms
                    FROM api_usage_log GROUP BY used_model ORDER BY calls DESC"""
             ).fetchall()
@@ -204,12 +230,17 @@ def get_usage_stats(db_path: str | Path) -> dict[str, Any]:
             dict(r)
             for r in connection.execute(
                 """SELECT created_at, task, requested_model, used_model, fallback, attempts, duration_ms,
-                          input_tokens, output_tokens, success, error
+                          input_tokens, output_tokens, cached_tokens, success, error
                    FROM api_usage_log ORDER BY id DESC LIMIT 30"""
             ).fetchall()
         ]
+        total_in = sum(t["input_tokens"] for t in by_task)
+        total_cached = sum(t["cached_tokens"] for t in by_task)
+        cache_hit_rate = round((total_cached / total_in * 100), 1) if total_in > 0 else 0.0
         return {
             "total_calls": sum(t["calls"] for t in by_task),
+            "total_cached_tokens": total_cached,
+            "cache_hit_rate": cache_hit_rate,
             "by_task": by_task,
             "by_model": by_model,
             "recent": recent,

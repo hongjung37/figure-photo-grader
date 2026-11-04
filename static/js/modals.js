@@ -87,6 +87,8 @@ async function refreshUsageStats() {
     const sum = (k) => d.by_task.reduce((a, t) => a + (t[k] || 0), 0);
     const totalIn = sum('input_tokens');
     const totalOut = sum('output_tokens');
+    const totalCached = d.total_cached_tokens != null ? d.total_cached_tokens : sum('cached_tokens');
+    const cacheHitPct = totalIn > 0 ? ((totalCached / totalIn) * 100).toFixed(1) : '0.0';
     const failures = d.by_task.reduce((a, t) => a + (t.calls - (t.successes || 0)), 0);
     const card = (label, value) => `<div style="background:rgba(148,163,184,0.12);border-radius:10px;padding:10px 14px;min-width:110px;"><div style="font-size:0.72rem;color:var(--muted);">${label}</div><div style="font-size:1.25rem;font-weight:800;">${value}</div></div>`;
     const th = 'text-align:left;padding:6px 8px;border-bottom:1px solid rgba(148,163,184,0.3);font-size:0.78rem;color:var(--muted);';
@@ -98,52 +100,75 @@ async function refreshUsageStats() {
       const color = isLuna ? '#4f46e5' : '#0284c7';
       return `<span style="background:${bg};color:${color};padding:2px 7px;border-radius:999px;font-weight:700;font-size:0.75rem;">${escapeUsageHtml(label)}</span> <small style="color:var(--muted);font-size:0.72rem;">(${escapeUsageHtml(m)})</small>`;
     };
-    const modelRows = (d.by_model || []).map(m => `<tr>
-      <td style="${td}">${fmtModelBadge(m.used_model)}</td>
-      <td style="${td}">${m.calls}</td>
-      <td style="${td}">${m.calls - (m.successes || 0)}</td>
-      <td style="${td}">${m.fallbacks || 0}</td>
-      <td style="${td}">${(m.input_tokens || 0).toLocaleString()}</td>
-      <td style="${td}">${(m.output_tokens || 0).toLocaleString()}</td>
-      <td style="${td}">${((m.avg_ms || 0) / 1000).toFixed(1)}s</td>
-    </tr>`).join('');
-    const taskRows = d.by_task.map(t => `<tr>
-      <td style="${td}">${escapeUsageHtml(t.task)}</td>
-      <td style="${td}">${t.calls}</td>
-      <td style="${td}">${t.calls - (t.successes || 0)}</td>
-      <td style="${td}">${t.fallbacks || 0}</td>
-      <td style="${td}">${t.retries || 0}</td>
-      <td style="${td}">${(t.input_tokens || 0).toLocaleString()}</td>
-      <td style="${td}">${(t.output_tokens || 0).toLocaleString()}</td>
-      <td style="${td}">${((t.avg_ms || 0) / 1000).toFixed(1)}s</td>
-    </tr>`).join('');
-    const recentRows = d.recent.map(r => `<tr>
-      <td style="${td}">${escapeUsageHtml((r.created_at || '').replace('T', ' ').slice(5, 19))}</td>
-      <td style="${td}">${escapeUsageHtml(r.task)}</td>
-      <td style="${td}">${fmtModelBadge(r.used_model)}${r.fallback ? ` <span style="color:#d97706;font-size:0.73rem;">(폴백: ${escapeUsageHtml(r.requested_model || '')}→)</span>` : ''}</td>
-      <td style="${td}">${((r.duration_ms || 0) / 1000).toFixed(1)}s</td>
-      <td style="${td}">${r.input_tokens == null ? '-' : r.input_tokens.toLocaleString()} / ${r.output_tokens == null ? '-' : r.output_tokens.toLocaleString()}</td>
-      <td style="${td}color:${r.success ? 'var(--teal)' : '#e11d48'};" title="${escapeUsageHtml(r.error || '')}">${r.success ? '성공' : '실패'}</td>
-    </tr>`).join('');
+    const modelRows = (d.by_model || []).map(m => {
+      const inTok = m.input_tokens || 0;
+      const cachedTok = m.cached_tokens || 0;
+      const hitRate = inTok > 0 ? ((cachedTok / inTok) * 100).toFixed(1) + '%' : '-';
+      return `<tr>
+        <td style="${td}">${fmtModelBadge(m.used_model)}</td>
+        <td style="${td}">${m.calls}</td>
+        <td style="${td}">${m.calls - (m.successes || 0)}</td>
+        <td style="${td}">${inTok.toLocaleString()}</td>
+        <td style="${td};font-weight:700;color:${cachedTok > 0 ? '#10b981' : 'inherit'};">${cachedTok ? '⚡ ' + cachedTok.toLocaleString() : '-'}</td>
+        <td style="${td}">${hitRate}</td>
+        <td style="${td}">${(m.output_tokens || 0).toLocaleString()}</td>
+        <td style="${td}">${((m.avg_ms || 0) / 1000).toFixed(1)}s</td>
+      </tr>`;
+    }).join('');
+    const taskRows = d.by_task.map(t => {
+      const cachedTok = t.cached_tokens || 0;
+      return `<tr>
+        <td style="${td}">${escapeUsageHtml(t.task)}</td>
+        <td style="${td}">${t.calls}</td>
+        <td style="${td}">${t.calls - (t.successes || 0)}</td>
+        <td style="${td}">${t.fallbacks || 0}</td>
+        <td style="${td}">${t.retries || 0}</td>
+        <td style="${td}">${(t.input_tokens || 0).toLocaleString()}</td>
+        <td style="${td};font-weight:700;color:${cachedTok > 0 ? '#10b981' : 'inherit'};">${cachedTok ? '⚡ ' + cachedTok.toLocaleString() : '-'}</td>
+        <td style="${td}">${(t.output_tokens || 0).toLocaleString()}</td>
+        <td style="${td}">${((t.avg_ms || 0) / 1000).toFixed(1)}s</td>
+      </tr>`;
+    }).join('');
+    const recentRows = d.recent.map(r => {
+      const inTok = r.input_tokens;
+      const cached = r.cached_tokens;
+      let tokStr = '-';
+      if (inTok != null) {
+        if (cached && cached > 0) {
+          const pct = Math.round((cached / inTok) * 100);
+          tokStr = `${inTok.toLocaleString()} <span style="color:#10b981;font-size:0.75rem;font-weight:700;">(⚡${cached.toLocaleString()} ${pct}%)</span> / ${(r.output_tokens || 0).toLocaleString()}`;
+        } else {
+          tokStr = `${inTok.toLocaleString()} / ${(r.output_tokens || 0).toLocaleString()}`;
+        }
+      }
+      return `<tr>
+        <td style="${td}">${escapeUsageHtml((r.created_at || '').replace('T', ' ').slice(5, 19))}</td>
+        <td style="${td}">${escapeUsageHtml(r.task)}</td>
+        <td style="${td}">${fmtModelBadge(r.used_model)}${r.fallback ? ` <span style="color:#d97706;font-size:0.73rem;">(폴백)</span>` : ''}</td>
+        <td style="${td}">${((r.duration_ms || 0) / 1000).toFixed(1)}s</td>
+        <td style="${td}">${tokStr}</td>
+        <td style="${td}color:${r.success ? 'var(--teal)' : '#e11d48'};" title="${escapeUsageHtml(r.error || '')}">${r.success ? '성공' : '실패'}</td>
+      </tr>`;
+    }).join('');
     body.innerHTML = `
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;">
-        ${card('총 호출', d.total_calls)}${card('실패', failures)}${card('입력 토큰', totalIn.toLocaleString())}${card('출력 토큰', totalOut.toLocaleString())}
+        ${card('총 호출', d.total_calls)}${card('실패', failures)}${card('총 입력 토큰', totalIn.toLocaleString())}${card('⚡ 캐시 적중', `${totalCached.toLocaleString()} <span style="font-size:0.74rem;color:#10b981;font-weight:700;">(${cacheHitPct}%)</span>`)}${card('출력 토큰', totalOut.toLocaleString())}
       </div>
       ${modelRows ? `
-        <h3 style="margin:0 0 6px;font-size:0.95rem;">🤖 모델별 사용량</h3>
+        <h3 style="margin:0 0 6px;font-size:0.95rem;">🤖 모델별 사용량 & 캐시 적중률</h3>
         <table style="width:100%;border-collapse:collapse;margin-bottom:18px;">
-          <thead><tr><th style="${th}">사용 모델</th><th style="${th}">호출</th><th style="${th}">실패</th><th style="${th}">폴백</th><th style="${th}">입력 tok</th><th style="${th}">출력 tok</th><th style="${th}">평균 시간</th></tr></thead>
+          <thead><tr><th style="${th}">사용 모델</th><th style="${th}">호출</th><th style="${th}">실패</th><th style="${th}">총 입력</th><th style="${th}">⚡ 캐시 적중</th><th style="${th}">적중률</th><th style="${th}">출력</th><th style="${th}">평균 시간</th></tr></thead>
           <tbody>${modelRows}</tbody>
         </table>
       ` : ''}
       <h3 style="margin:0 0 6px;font-size:0.95rem;">🛠️ 기능별 사용량</h3>
       <table style="width:100%;border-collapse:collapse;margin-bottom:18px;">
-        <thead><tr><th style="${th}">작업</th><th style="${th}">호출</th><th style="${th}">실패</th><th style="${th}">폴백</th><th style="${th}">재시도</th><th style="${th}">입력 tok</th><th style="${th}">출력 tok</th><th style="${th}">평균 시간</th></tr></thead>
+        <thead><tr><th style="${th}">작업</th><th style="${th}">호출</th><th style="${th}">실패</th><th style="${th}">폴백</th><th style="${th}">재시도</th><th style="${th}">총 입력</th><th style="${th}">⚡ 캐시 적중</th><th style="${th}">출력</th><th style="${th}">평균 시간</th></tr></thead>
         <tbody>${taskRows}</tbody>
       </table>
       <h3 style="margin:0 0 6px;font-size:0.95rem;">🕒 최근 호출 (30건)</h3>
       <table style="width:100%;border-collapse:collapse;">
-        <thead><tr><th style="${th}">시각(UTC)</th><th style="${th}">작업</th><th style="${th}">모델</th><th style="${th}">소요</th><th style="${th}">입력/출력 tok</th><th style="${th}">결과</th></tr></thead>
+        <thead><tr><th style="${th}">시각(UTC)</th><th style="${th}">작업</th><th style="${th}">모델</th><th style="${th}">소요</th><th style="${th}">입력(⚡캐시) / 출력 tok</th><th style="${th}">결과</th></tr></thead>
         <tbody>${recentRows}</tbody>
       </table>`;
   } catch (err) {

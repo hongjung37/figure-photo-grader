@@ -11,6 +11,8 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.models.analysis import AestheticTags, PhotoAnalysis
 from app.models.lightroom import LightroomAdvice
+import tempfile
+from app.services.gemini_client import set_usage_log_db
 from app.services.image_processor import PreparedPhoto
 from app.services.multi_llm import _merge_analyses, analyze_photo
 from app.services.openai_client import (
@@ -21,6 +23,8 @@ from app.services.openai_client import (
 
 class OpenAIClientTests(unittest.TestCase):
     def setUp(self) -> None:
+        self._tmp_usage_dir = tempfile.TemporaryDirectory()
+        set_usage_log_db(Path(self._tmp_usage_dir.name) / "test_usage.sqlite3")
         self.sample_photo = PreparedPhoto(
             source_filename="test.jpg",
             sha256="abcdef1234567890" * 4,
@@ -31,6 +35,12 @@ class OpenAIClientTests(unittest.TestCase):
             upload_bytes=b"\xFF\xD8\xFF\xE0dummy_jpeg_data",
             upload_mime_type="image/jpeg",
         )
+
+
+    def tearDown(self) -> None:
+        set_usage_log_db(None)
+        if hasattr(self, "_tmp_usage_dir"):
+            self._tmp_usage_dir.cleanup()
 
     def _sample_analysis(self, score: float = 8.0, reason: str = "Good") -> PhotoAnalysis:
         return PhotoAnalysis(

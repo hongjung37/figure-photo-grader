@@ -1,7 +1,7 @@
 """app.prompts.grader_prompts - Figure photography grading prompt builder.
 
-Provides the comprehensive aesthetic evaluation prompt, including figure category
-specialized criteria, strict scoring benchmarks, pros/cons segregation, and aesthetic tagging.
+Provides modular system prompts (static prefix for high-efficiency prompt caching)
+and per-photo dynamic user prompts, alongside backwards-compatible prompt builders.
 """
 
 from __future__ import annotations
@@ -16,32 +16,16 @@ from app.models.analysis import (
 )
 
 
-def build_fast_grader_prompt(
-    photo: Any,
-    category_hint: str | None = None,
-) -> str:
-    """Build lightweight culling prompt for fast batch photo evaluation (scores, focus, category, 1-line reason)."""
-    safe_exif = getattr(photo, "safe_exif", {})
-    camera_settings = json.dumps(safe_exif, ensure_ascii=False, sort_keys=True)
-    if not safe_exif:
-        camera_settings = "{} (사용 가능한 안전한 EXIF 촬영 설정 없음)"
+def get_fast_grader_system_prompt() -> str:
+    """Return static system instructions for fast batch photo evaluation (Culling)."""
+    return """당신은 대량 촬영된 피규어 사진(Figure Photography)에서 베스트 A컷과 탈락 B/C컷을 신속·정확하게 선별(Culling)하는 전문 심사위원입니다. 첨부 이미지의 시각적·광학적 근거를 바탕으로 객관적으로 채점하세요.
 
-    if category_hint and category_hint in FIGURE_CATEGORIES:
-        cat_info = FIGURE_CATEGORIES[category_hint]
-        category_instruction = f"""[지정된 피규어 촬영 유형: {cat_info['label']}]
-figure_category 값에 반드시 '{cat_info['label']}'을 입력하고 아래 특화 기준을 적용하세요:
-- 특화 포인트: {cat_info['focus']}"""
-    else:
-        category_instruction = """[피규어 촬영 세부 유형 자동 판별]
-사진의 촬영 환경을 판별하여 figure_category에 아래 4가지 중 하나를 정확히 입력하고 해당 트랙 기준을 적용하세요:
+[피규어 촬영 세부 유형 판별 지침]
+사진의 촬영 환경을 판별하여 figure_category에 아래 4가지 중 하나를 정확히 입력하고 해당 트랙 기준을 적용하세요 (사용자가 지정한 경우 해당 유형 우선 적용):
 1. '일상/야외 스냅' → [Track A: 비통제 일상·야외 스냅 트랙] (야외 출사, 여행지, 카페·식당·방 안 일상 스냅)
 2. '스튜디오 연출/디오라마' → [Track B: 통제된 전용 촬영 세팅 트랙] (배경지, 다각도 조명, 디오라마/미니어처 세트, 거울/수면 반영)
 3. '접사/디테일' → [Track B: 통제된 전용 촬영 세팅 트랙] (얼굴, 눈동자 데칼, 조형/도색 초근접 매크로 촬영)
-4. '일반 피규어 촬영' → [Track B: 통제된 전용 촬영 세팅 트랙] (본체 전신/상반신 중심 스탠다드 촬영)"""
-
-    return f"""당신은 대량 촬영된 피규어 사진(Figure Photography)에서 베스트 A컷과 탈락 B/C컷을 신속·정확하게 선별(Culling)하는 전문 심사위원입니다. 첨부 이미지의 시각적·광학적 근거를 바탕으로 객관적으로 채점하세요.
-
-{category_instruction}
+4. '일반 피규어 촬영' → [Track B: 통제된 전용 촬영 세팅 트랙] (본체 전신/상반신 중심 스탠다드 촬영)
 
 [핵심 심사 원칙: 변별력 및 세부 점수 선행 연동]
 1. 억지 칭찬 및 억지 트집 금지: 기술적 결함이 없는 수작은 8.5~9.5점대를 부여하고, 초점 미스나 배경 산만함이 있는 컷은 5~6점대로 명확히 변별하세요.
@@ -68,26 +52,44 @@ figure_category 값에 반드시 '{cat_info['label']}'을 입력하고 아래 �
 - figure_category: '접사/디테일', '일상/야외 스냅', '스튜디오 연출/디오라마', '일반 피규어 촬영' 중 택1
 - focus_status: 피규어 눈동자 데칼 초점 상태 ('완벽 칼초점', '미세 앞핀', '미세 뒤핀', '초점 이탈', '판별 불가' 중 택1)
 - composition_score, lighting_score, color_score, technique_score, final_score: 0.0~10.0 숫자 (소수점 첫째 자리)
-- final_reason: 반드시 1문장(80자 이내)으로 "[핵심 강점 1가지] + [결정적 감점/아쉬운 요인 1가지(결함 없을 시 완성도 총평)]"만 간결하게 요약하세요. (하단 EXIF 워터마크 프레임은 감점 사유 아님)
-
-촬영 관련 안전 EXIF:
-{camera_settings}
-"""
+- final_reason: 반드시 1문장(80자 이내)으로 "[핵심 강점 1가지] + [결정적 감점/아쉬운 요인 1가지(결함 없을 시 완성도 총평)]"만 간결하게 요약하세요. (하단 EXIF 워터마크 프레임은 감점 사유 아님)"""
 
 
-def build_grader_prompt(
+def build_fast_grader_user_prompt(
     photo: Any,
     category_hint: str | None = None,
-    compact_tags: bool = False,
+) -> str:
+    """Build lightweight dynamic user payload (photo EXIF and category hint)."""
+    lines = ["[선별 대상 피규어 사진 정보]"]
+    if category_hint and category_hint in FIGURE_CATEGORIES:
+        cat_info = FIGURE_CATEGORIES[category_hint]
+        lines.append(f"[지정된 피규어 촬영 유형: {cat_info['label']}] ({cat_info['description']})")
+        lines.append(f"  (figure_category 값에 반드시 '{cat_info['label']}'을 입력하고, 특화 포인트 '{cat_info['focus']}'를 적용하세요)")
+    else:
+        lines.append("- 피규어 촬영 유형: 자동 판별 (시스템 지침의 4가지 유형 중 사진에 부합하는 항목 선택)")
+
+    safe_exif = getattr(photo, "safe_exif", {})
+    camera_settings = json.dumps(safe_exif, ensure_ascii=False, sort_keys=True) if safe_exif else "{} (사용 가능한 안전한 EXIF 촬영 설정 없음)"
+    lines.append(f"- 촬영 관련 안전 EXIF: {camera_settings}")
+    lines.append("\n위 정보와 첨부된 이미지를 바탕으로, 시스템 경량 선별 지침에 따라 신속·정확하게 채점하여 JSON으로 응답해 주세요.")
+    return "\n".join(lines)
+
+
+def build_fast_grader_prompt(
+    photo: Any,
+    category_hint: str | None = None,
+) -> str:
+    """Build unified single-string prompt for fast grader (backwards compatible)."""
+    return f"{get_fast_grader_system_prompt()}\n\n{build_fast_grader_user_prompt(photo, category_hint=category_hint)}"
+
+
+def get_grader_system_prompt(
+    compact_tags: bool = True,
     analysis_mode: str = "full",
 ) -> str:
-    """Build the prompt for figure photo evaluation."""
+    """Return static system instructions for figure photo evaluation (100% cacheable prefix)."""
     if analysis_mode == "fast":
-        return build_fast_grader_prompt(photo, category_hint=category_hint)
-    safe_exif = getattr(photo, "safe_exif", {})
-    camera_settings = json.dumps(safe_exif, ensure_ascii=False, sort_keys=True)
-    if not safe_exif:
-        camera_settings = "{} (사용 가능한 안전한 EXIF 촬영 설정 없음)"
+        return get_fast_grader_system_prompt()
 
     if compact_tags:
         tag_section = (
@@ -102,17 +104,8 @@ def build_grader_prompt(
             for category_key, options in AESTHETIC_TAG_OPTIONS.items()
         )
 
-    category_instruction = ""
-    if category_hint and category_hint in FIGURE_CATEGORIES:
-        cat_info = FIGURE_CATEGORIES[category_hint]
-        category_instruction = f"""[지정된 피규어 촬영 유형: {cat_info['label']}]
-이 사진은 사용자가 '{cat_info['label']}'({cat_info['description']}) 유형으로 지정했습니다.
-figure_category 값에 반드시 '{cat_info['label']}'을 입력하고, 아래 특화 심사 기준을 최우선 잣대로 적용하세요:
-- 특화 심사 포인트: {cat_info['focus']}
-"""
-    else:
-        category_instruction = """[피규어 촬영 세부 유형 자동 판별 및 분기 심사]
-먼저 사진의 물리적 촬영 환경을 판별하여 아래 4가지 피규어 촬영 세부 유형 중 가장 부합하는 하나를 figure_category에 정확히 입력하고, 해당하는 심사 트랙(Track A 또는 Track B)을 확정하여 심사하세요:
+    category_guide = """[피규어 촬영 세부 유형 자동 판별 및 분기 심사 지침]
+사진의 물리적 촬영 환경을 판별하여 아래 4가지 피규어 촬영 세부 유형 중 가장 부합하는 하나를 figure_category에 정확히 입력하고, 해당하는 심사 트랙(Track A 또는 Track B)을 확정하여 심사하세요 (사용자가 특정 유형을 지정한 경우 사용자 지정 지침을 우선 적용합니다):
 1. '일상/야외 스냅' → [Track A: 비통제 일상·야외 스냅 트랙]
    - 자연광 야외 출사, 여행지, 대중교통 창가, 카페·식당·방 안 일상 스냅 및 음식 동행 등 통제되지 않은 실제 외부 환경과 상호작용한 사진
    - 중점 기준: 자연광(역광/측광/그늘 확산광)의 입체적 활용, 실제 환경과 피규어의 스케일 조화, 일상적 스토리텔링, 정돈된 배경 분리
@@ -124,12 +117,11 @@ figure_category 값에 반드시 '{cat_info['label']}'을 입력하고, 아래 �
    - 중점 기준: 눈동자 데칼의 초정밀 칼초점, 코/귀/머리카락 등 주요 조형이 날아가지 않는 적절한 매크로 심도, 미세 먼지/마감 관리, 번들거리는 반사광(핫스팟) 억제
 4. '일반 피규어 촬영' → [Track B: 통제된 전용 촬영 세팅 트랙]
    - 피규어 본체 전신 또는 상반신을 중심으로 단정하게 담아낸 스탠다드 포토
-   - 중점 기준: 피규어 원형의 왜곡 없는 렌즈 화각과 프레이밍, 단정한 배경 분리, 자연스러운 광택 및 피부톤 밸런스
-"""
+   - 중점 기준: 피규어 원형의 왜곡 없는 렌즈 화각과 프레이밍, 단정한 배경 분리, 자연스러운 광택 및 피부톤 밸런스"""
 
     return f"""당신은 피규어 및 캐릭터 모델 사진(Figure Photography)의 완성도를 균형 잡힌 시각으로 심사하는 전문 피규어 사진 비평가입니다. 첨부 이미지에서 직접 관찰되는 시각적·광학적 근거를 바탕으로 객관적으로 평가하세요. 과도하게 칭찬하거나 호의적으로만 평가하지 마세요.
 
-{category_instruction}
+{category_guide}
 
 [핵심 심사 원칙: 객관적 변별력 및 스타일 중립성]
 1. 억지 칭찬도, 억지 트집 잡기(Nitpicking)도 지양하세요 (결함과 발전적 제안의 엄격한 구분):
@@ -234,41 +226,54 @@ figure_category 값에 반드시 '{cat_info['label']}'을 입력하고, 아래 �
 모든 점수는 0.0~10.0 범위의 숫자로 작성하세요. 최종 점수는 네 항목을 기계적으로 단순 산술평균하지 말고 전체 완성도를 위 점수 기준에 맞춰 반영하세요. EXIF가 없거나 불완전하면 추정하지 말고 이미지에서 확인되는 내용만 평가하세요. 답변의 텍스트 값은 한국어로 작성하세요.
 
 [시각적 워터마크/하단 프레임 촬영 설정 감지 지침]
-- 사진 하단 테두리/여백/워터마크에 카메라 모델명 및 촬영 파라미터가 시각적으로 인쇄되어 있는 경우 detected_camera_settings에 키-값 객체로 추출하고 technique_notes에 반영하세요. 없으면 null로 두세요. (하단 프레임 영역 자체는 감점 사유 아님)
-
-촬영 관련 안전 EXIF (GPS, 촬영 시각, 소유자/일련번호 등은 제외됨):
-{camera_settings}
-"""
+- 사진 하단 테두리/여백/워터마크에 카메라 모델명 및 촬영 파라미터가 시각적으로 인쇄되어 있는 경우 detected_camera_settings에 키-값 객체로 추출하고 technique_notes에 반영하세요. 없으면 null로 두세요. (하단 프레임 영역 자체는 감점 사유 아님)"""
 
 
-def build_cross_check_prompt(
+def build_grader_user_prompt(
     photo: Any,
     category_hint: str | None = None,
 ) -> str:
-    """Build figure photo critique prompt for OpenAI cross-check aligned with Gemini's grading standards."""
-    safe_exif = getattr(photo, "safe_exif", {})
-    camera_settings = json.dumps(safe_exif, ensure_ascii=False, sort_keys=True)
-    if not safe_exif:
-        camera_settings = "{} (사용 가능한 안전한 EXIF 촬영 설정 없음)"
-
-    category_instruction = ""
+    """Build dynamic user payload for figure photo evaluation (EXIF and category hint)."""
+    lines = ["[평가 대상 피규어 사진 정보]"]
     if category_hint and category_hint in FIGURE_CATEGORIES:
         cat_info = FIGURE_CATEGORIES[category_hint]
-        category_instruction = f"""[지정된 피규어 촬영 유형: {cat_info['label']}]
-이 사진은 사용자가 '{cat_info['label']}'({cat_info['description']}) 유형으로 지정했습니다. 아래 특화 심사 기준을 최우선 잣대로 적용하세요:
-- 특화 심사 포인트: {cat_info['focus']}"""
+        lines.append(f"[지정된 피규어 촬영 유형: {cat_info['label']}] ({cat_info['description']})")
+        lines.append(f"  (figure_category 값에 반드시 '{cat_info['label']}'을 입력하고, 특화 심사 포인트인 '{cat_info['focus']}'를 최우선 적용하세요)")
     else:
-        category_instruction = """[피규어 촬영 세부 유형 자동 판별 및 분기 심사]
-먼저 사진의 물리적 촬영 환경을 판별하여 아래 4가지 피규어 촬영 세부 유형 중 가장 부합하는 하나를 기준으로 삼고, 해당하는 심사 트랙(Track A 또는 Track B)을 확정하여 심사하세요:
+        lines.append("- 피규어 촬영 유형: 자동 판별 (시스템 지침의 4가지 유형 중 가장 부합하는 하나를 선택)")
+
+    safe_exif = getattr(photo, "safe_exif", {})
+    camera_settings = json.dumps(safe_exif, ensure_ascii=False, sort_keys=True) if safe_exif else "{} (사용 가능한 안전한 EXIF 촬영 설정 없음)"
+    lines.append(f"- 촬영 관련 안전 EXIF: {camera_settings}")
+    lines.append("\n위 정보와 첨부된 이미지를 바탕으로, 시스템 지침의 채점 사다리와 규칙을 준수하여 엄격하고 객관적으로 평가해 주세요.")
+    return "\n".join(lines)
+
+
+def build_grader_prompt(
+    photo: Any,
+    category_hint: str | None = None,
+    compact_tags: bool = False,
+    analysis_mode: str = "full",
+) -> str:
+    """Build unified single-string prompt for figure photo evaluation (backwards compatible)."""
+    if analysis_mode == "fast":
+        return build_fast_grader_prompt(photo, category_hint=category_hint)
+    sys_prompt = get_grader_system_prompt(compact_tags=compact_tags, analysis_mode=analysis_mode)
+    usr_prompt = build_grader_user_prompt(photo, category_hint=category_hint)
+    return f"{sys_prompt}\n\n{usr_prompt}"
+
+
+def get_cross_check_system_prompt() -> str:
+    """Return static system instructions for OpenAI cross-check critique (100% cacheable prefix)."""
+    return """당신은 피규어 및 캐릭터 모델 사진(Figure Photography)의 조형미와 광학적 기술 완성도를 공정하고 정밀하게 진단하는 전문 사진 큐레이터입니다.
+첨부된 이미지에서 직접 관찰되는 시각적·광학적 사실을 바탕으로 편향 없는 균형 잡힌 시각으로 평가하세요. 과도한 아부도, 인위적인 단점 찾아내기(Nitpicking)도 모두 배제하세요.
+
+[피규어 촬영 세부 유형 및 분기 심사 지침]
+사진의 물리적 촬영 환경을 판별하여 아래 4가지 피규어 촬영 세부 유형 중 가장 부합하는 하나를 기준으로 삼고, 해당하는 심사 트랙(Track A 또는 Track B)을 확정하여 심사하세요 (사용자가 지정한 경우 해당 유형 기준 우선 적용):
 1. '일상/야외 스냅' → [Track A: 비통제 일상·야외 스냅 트랙] (자연광 야외 출사, 여행지, 대중교통 창가, 카페·식당·방 안 일상 스냅 및 음식 동행)
 2. '스튜디오 연출/디오라마' → [Track B: 통제된 전용 촬영 세팅 트랙] (배경지, 다각도 조명 세팅, 디오라마/미니어처 세트, 거울/투과 반영 연출)
 3. '접사/디테일' → [Track B: 통제된 전용 촬영 세팅 트랙] (피규어 얼굴, 눈동자, 무기 등 세부 조형/도색 초근접 매크로 촬영)
-4. '일반 피규어 촬영' → [Track B: 통제된 전용 촬영 세팅 트랙] (피규어 본체 전신 또는 상반신을 중심으로 단정하게 담아낸 스탠다드 포토)"""
-
-    return f"""당신은 피규어 및 캐릭터 모델 사진(Figure Photography)의 조형미와 광학적 기술 완성도를 공정하고 정밀하게 진단하는 전문 사진 큐레이터입니다.
-첨부된 이미지에서 직접 관찰되는 시각적·광학적 사실을 바탕으로 편향 없는 균형 잡힌 시각으로 평가하세요. 과도한 아부도, 인위적인 단점 찾아내기(Nitpicking)도 모두 배제하세요.
-
-{category_instruction}
+4. '일반 피규어 촬영' → [Track B: 통제된 전용 촬영 세팅 트랙] (피규어 본체 전신 또는 상반신을 중심으로 단정하게 담아낸 스탠다드 포토)
 
 [핵심 심사 원칙: 객관적 변별력 및 스타일 중립성]
 - 완성도가 높은 수작(8.5점 이상, 9.0점대)을 평가할 때, 기술적 결함이 없음에도 '사소한 대안적 연출 제안'을 결함으로 취급해 8점대 초중반으로 끌어내리는 행위를 엄격히 금지합니다.
@@ -318,13 +323,48 @@ def build_cross_check_prompt(
 - improvements: 사진의 실제 기술적 약점 또는 다음 촬영 시 시도해 볼 만한 발전적 제안 목록 (1~3개, 억지 결함 부풀리기 지양)
 
 [시각적 워터마크/하단 EXIF 프레임 주의사항]:
-- 사진 하단 테두리/여백에 카메라 모델명 및 촬영 파라미터가 인쇄된 'EXIF 정보 프레임(레터박스)'이 있더라도 감점 사유로 삼지 마세요.
+- 사진 하단 테두리/여백에 카메라 모델명 및 촬영 파라미터가 인쇄된 'EXIF 정보 프레임(레터박스)'이 있더라도 감점 사유로 삼지 마세요."""
 
-촬영 관련 안전 EXIF:
-{camera_settings}
-"""
+
+def build_cross_check_user_prompt(
+    photo: Any,
+    category_hint: str | None = None,
+) -> str:
+    """Build dynamic user payload for OpenAI cross-check critique."""
+    lines = ["[크로스 체크 대상 피규어 사진 정보]"]
+    if category_hint and category_hint in FIGURE_CATEGORIES:
+        cat_info = FIGURE_CATEGORIES[category_hint]
+        lines.append(f"- 사용자 지정 촬영 유형: '{cat_info['label']}' ({cat_info['description']})")
+        lines.append(f"  (특화 심사 포인트인 '{cat_info['focus']}'를 최우선 적용하세요)")
+    else:
+        lines.append("- 촬영 유형: 자동 판별 (시스템 지침의 4가지 유형 중 부합하는 트랙 기준 적용)")
+
+    safe_exif = getattr(photo, "safe_exif", {})
+    camera_settings = json.dumps(safe_exif, ensure_ascii=False, sort_keys=True) if safe_exif else "{} (사용 가능한 안전한 EXIF 촬영 설정 없음)"
+    lines.append(f"- 촬영 관련 안전 EXIF: {camera_settings}")
+    lines.append("\n위 정보와 첨부된 이미지를 바탕으로, 시스템 지침의 큐레이터 비평 기준을 준수하여 편향 없이 객관적으로 비평해 주세요.")
+    return "\n".join(lines)
+
+
+def build_cross_check_prompt(
+    photo: Any,
+    category_hint: str | None = None,
+) -> str:
+    """Build unified single-string prompt for cross-check (backwards compatible)."""
+    return f"{get_cross_check_system_prompt()}\n\n{build_cross_check_user_prompt(photo, category_hint=category_hint)}"
 
 
 _build_prompt = build_grader_prompt
 
-__all__ = ["build_grader_prompt", "build_fast_grader_prompt", "_build_prompt", "build_cross_check_prompt"]
+__all__ = [
+    "get_fast_grader_system_prompt",
+    "build_fast_grader_user_prompt",
+    "build_fast_grader_prompt",
+    "get_grader_system_prompt",
+    "build_grader_user_prompt",
+    "build_grader_prompt",
+    "get_cross_check_system_prompt",
+    "build_cross_check_user_prompt",
+    "build_cross_check_prompt",
+    "_build_prompt",
+]

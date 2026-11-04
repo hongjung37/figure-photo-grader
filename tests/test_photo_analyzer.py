@@ -28,6 +28,15 @@ from photo_tag_schema import AESTHETIC_TAG_OPTIONS, AestheticTags, get_score_gra
 
 
 class PhotoAnalyzerTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp_usage_dir = tempfile.TemporaryDirectory()
+        photo_analyzer.set_usage_log_db(Path(self._tmp_usage_dir.name) / "test_usage.sqlite3")
+
+    def tearDown(self) -> None:
+        photo_analyzer.set_usage_log_db(None)
+        if hasattr(self, "_tmp_usage_dir"):
+            self._tmp_usage_dir.cleanup()
+
     def _make_jpeg(self, path: Path, *, with_exif: bool = False) -> None:
         image = Image.new("RGB", (16, 12), (90, 120, 150))
         save_options = {"format": "JPEG"}

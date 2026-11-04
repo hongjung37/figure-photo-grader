@@ -152,6 +152,8 @@ def ensure_db_columns(db_path: Path | str, force: bool = False) -> None:
             conn.execute("ALTER TABLE photo_analyses ADD COLUMN captured_at TEXT")
         if "color_sig" not in cols:
             conn.execute("ALTER TABLE photo_analyses ADD COLUMN color_sig INTEGER")
+        if "is_excluded" not in cols:
+            conn.execute("ALTER TABLE photo_analyses ADD COLUMN is_excluded INTEGER DEFAULT 0")
 
         missing_capture_times = []
         if {"sha256", "image_format", "captured_at"} <= set(cols):

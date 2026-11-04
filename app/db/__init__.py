@@ -35,9 +35,12 @@ from app.db.repository import (
     update_review_status,
     update_sns_advice,
     update_user_score,
+    update_analysis_excluded,
+    batch_update_excluded,
 )
 
 __all__ = [
+    "batch_update_excluded",
     "classify_focal_band",
     "create_collection",
     "delete_analyses",
@@ -70,4 +73,5 @@ __all__ = [
     "update_review_status",
     "update_sns_advice",
     "update_user_score",
+    "update_analysis_excluded",
 ]
