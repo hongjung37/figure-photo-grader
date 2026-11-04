@@ -132,13 +132,16 @@ function renderReanalyzePanel(item) {
       </div>
 
       <div class="reanalyze-category-row">
-        <label class="reanalyze-sublabel" for="reanalyze-category-${item.id}">피규어 촬영 세부 유형:</label>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+          <label class="reanalyze-sublabel" for="reanalyze-category-${item.id}" style="margin:0;">피규어 촬영 세부 유형:</label>
+          ${item.figure_category ? `<span style="font-size:0.75rem;color:var(--muted);">현재 판정: <b>${_escapeReanalyzeHtml(item.figure_category)}</b></span>` : ''}
+        </div>
         <select id="reanalyze-category-${item.id}" class="select-input reanalyze-select">
-          <option value="auto" ${currentCategoryKey === 'auto' ? 'selected' : ''}>자동 판별 (사진 분석으로 자동 분류)</option>
-          <option value="general" ${currentCategoryKey === 'general' ? 'selected' : ''}>📷 일반 피규어 촬영 (기본 전시/조형 중심)</option>
-          <option value="macro" ${currentCategoryKey === 'macro' ? 'selected' : ''}>🔍 접사/디테일 (도색, 접합선, 데칼 초점 심사)</option>
-          <option value="snap" ${currentCategoryKey === 'snap' ? 'selected' : ''}>🌿 일상/야외 스냅 (배경 조화, 자연광, 생활감 심사)</option>
-          <option value="staging" ${currentCategoryKey === 'staging' ? 'selected' : ''}>🎬 스튜디오 연출/디오라마 (드라마틱 조명, 콘트라스트)</option>
+          <option value="auto" selected>자동 판별 (사진 분석으로 자동 분류 - 캐시 최적화 권장)</option>
+          <option value="general">📷 일반 피규어 촬영 (기본 전시/조형 중심)</option>
+          <option value="macro">🔍 접사/디테일 (도색, 접합선, 데칼 초점 심사)</option>
+          <option value="snap">🌿 일상/야외 스냅 (배경 조화, 자연광, 생활감 심사)</option>
+          <option value="staging">🎬 스튜디오 연출/디오라마 (드라마틱 조명, 콘트라스트)</option>
         </select>
       </div>
 

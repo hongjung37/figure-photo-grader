@@ -53,6 +53,23 @@ _CLIENT_CACHE: dict[str, OpenAI] = {}
 MAX_CONCURRENT_OPENAI_CALLS = 3
 _OPENAI_SEMAPHORE = threading.BoundedSemaphore(MAX_CONCURRENT_OPENAI_CALLS)
 
+# Prompt Cache Coordination: prevents cold-cache thundering herd and replica spillover on concurrent bursts
+_CACHE_COORD_LOCK = threading.Lock()
+_CACHE_KEY_LOCKS: dict[str, threading.Lock] = {}
+_CACHE_WARM_UNTIL: dict[str, float] = {}
+_CACHE_LAST_LAUNCH: dict[str, float] = {}
+CACHE_TTL_WARM_SECONDS = 240.0
+PREFILL_STAGGER_SECONDS = 1.8
+
+
+def _get_cache_key_lock(coord_key: str) -> threading.Lock:
+    with _CACHE_COORD_LOCK:
+        lock = _CACHE_KEY_LOCKS.get(coord_key)
+        if lock is None:
+            lock = threading.Lock()
+            _CACHE_KEY_LOCKS[coord_key] = lock
+        return lock
+
 
 def _get_client(api_key: str, base_url: str | None = None) -> OpenAI:
     """Return a process-wide OpenAI client (cached per API key and base_url)."""
@@ -147,7 +164,8 @@ def _call_openai_structured(
         return int((time.perf_counter() - t0) * 1000)
 
     # Build multimodal messages payload:
-    # 2-Tier structure: system prompt (static 100% cacheable) + user content (dynamic EXIF & image)
+    # 2-Tier structure: [Static System Prompt + Schema] -> [User Text] -> [Image URL]
+    # Preserves the full cross-photo prefix across different photos AND full image prefix on same-photo multi-sampling.
     if system_prompt:
         user_content: list[dict[str, Any]] = []
         u_text = user_prompt or prompt_text or ""
@@ -177,52 +195,142 @@ def _call_openai_structured(
             })
         messages = [{"role": "user", "content": content}]
 
+    cache_key = f"photo-eval-{getattr(response_model, '__name__', 'default')}"
+    coord_key = f"{model}:{cache_key}"
+    photo_sha = getattr(photo, "sha256", None) if photo is not None else None
+    photo_coord_key = f"{coord_key}:{photo_sha}" if photo_sha else None
+    is_real_client = isinstance(client, OpenAI)
+    u_text_for_warmup = (user_prompt or prompt_text or "") if system_prompt else ""
+
+    def _warm_prefix_cache() -> None:
+        """Write a text-only KV cache checkpoint at [system_prompt + static_user_header] so all subsequent photos hit cross-photo cache."""
+        if not system_prompt or photo is None:
+            return
+        try:
+            from openai.lib._pydantic import to_strict_json_schema
+            static_user_prefix = (
+                u_text_for_warmup.split("\n- 촬영 관련 안전 EXIF:", 1)[0]
+                if u_text_for_warmup
+                else "[평가 대상 피규어 사진 정보]"
+            ).strip()
+            fmt = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": getattr(response_model, "__name__", "Response"),
+                    "strict": True,
+                    "schema": to_strict_json_schema(response_model),
+                },
+            }
+            w_comp = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": static_user_prefix},
+                ],
+                response_format=fmt,
+                max_completion_tokens=16,
+            )
+            w_details = getattr(w_comp.usage, "prompt_tokens_details", None) if w_comp.usage else None
+            w_written = getattr(w_details, "cache_write_tokens", None) if w_details else None
+            w_cached = getattr(w_details, "cached_tokens", None) if w_details else None
+            print(
+                f"[OpenAI Cache Warmup] {task_desc} ({model}) | 프리픽스 체크포인트 준비 완료 (write={w_written}, cached={w_cached})",
+                file=sys.stderr,
+            )
+            time.sleep(0.4)
+        except Exception as warm_exc:
+            print(f"[OpenAI Cache Warmup] 생략 ({warm_exc})", file=sys.stderr)
+
+    def _execute_completion() -> Any:
+        try:
+            comp = client.beta.chat.completions.parse(
+                model=model,
+                messages=messages,
+                response_format=response_model,
+            )
+            choice = comp.choices[0]
+            if getattr(choice.message, "refusal", None):
+                raise RuntimeError(f"OpenAI가 요청을 거부했습니다: {choice.message.refusal}")
+            return comp, choice.message.parsed
+        except Exception as parse_err:
+            # Do not swallow auth or quota errors
+            err_s = str(parse_err)
+            if any(c in err_s for c in ("401", "invalid_api_key", "insufficient_quota")):
+                raise
+            # Fallback to standard chat completions with JSON mode for custom gateways
+            import json as _json
+            schema_instruction = (
+                "반드시 아래 JSON 스키마를 준수하는 순수 JSON 객체만 응답하세요:\n"
+                f"{_json.dumps(response_model.model_json_schema(), ensure_ascii=False)}"
+            )
+            if system_prompt and len(messages) >= 2:
+                fallback_messages = [
+                    {"role": "system", "content": f"{system_prompt}\n\n{schema_instruction}"},
+                    messages[1],
+                ]
+            else:
+                fallback_messages = [
+                    {"role": "system", "content": schema_instruction},
+                    *messages,
+                ]
+            comp = client.chat.completions.create(
+                model=model,
+                messages=fallback_messages,
+                response_format={"type": "json_object"},
+            )
+            choice = comp.choices[0]
+            raw_content = choice.message.content or ""
+            if hasattr(response_model, "from_llm_json"):
+                parsed_obj = response_model.from_llm_json(raw_content)
+            else:
+                parsed_obj = response_model.model_validate_json(raw_content)
+            return comp, parsed_obj
+
     for attempt in range(1, max_retries + 1):
         attempts = attempt
         try:
             with _OPENAI_SEMAPHORE:
-                try:
-                    completion = client.beta.chat.completions.parse(
-                        model=model,
-                        messages=messages,
-                        response_format=response_model,
-                    )
-                    choice = completion.choices[0]
-                    if getattr(choice.message, "refusal", None):
-                        raise RuntimeError(f"OpenAI가 요청을 거부했습니다: {choice.message.refusal}")
-                    parsed = choice.message.parsed
-                except Exception as parse_err:
-                    # Do not swallow auth or quota errors
-                    err_s = str(parse_err)
-                    if any(c in err_s for c in ("401", "invalid_api_key", "insufficient_quota")):
-                        raise
-                    # Fallback to standard chat completions with JSON mode for custom gateways
-                    import json as _json
-                    schema_instruction = (
-                        "반드시 아래 JSON 스키마를 준수하는 순수 JSON 객체만 응답하세요:\n"
-                        f"{_json.dumps(response_model.model_json_schema(), ensure_ascii=False)}"
-                    )
-                    if system_prompt and len(messages) >= 2:
-                        fallback_messages = [
-                            {"role": "system", "content": f"{system_prompt}\n\n{schema_instruction}"},
-                            messages[1],
-                        ]
+                if is_real_client:
+                    # Level 1: Cross-Photo Prefix Checkpoint Warmup & Stagger
+                    key_lock = _get_cache_key_lock(coord_key)
+                    with key_lock:
+                        now = time.monotonic()
+                        is_prefix_warm = now < _CACHE_WARM_UNTIL.get(coord_key, 0.0)
+                        if not is_prefix_warm and system_prompt and photo is not None:
+                            _warm_prefix_cache()
+                            now = time.monotonic()
+                            _CACHE_WARM_UNTIL[coord_key] = now + CACHE_TTL_WARM_SECONDS
+                            _CACHE_LAST_LAUNCH[coord_key] = now
+                        else:
+                            elapsed = now - _CACHE_LAST_LAUNCH.get(coord_key, 0.0)
+                            if elapsed < PREFILL_STAGGER_SECONDS:
+                                time.sleep(PREFILL_STAGGER_SECONDS - elapsed)
+                            _CACHE_LAST_LAUNCH[coord_key] = time.monotonic()
+
+                    # Level 2: Same-Photo (SHA256) Coordination for sample_count=3 / concurrent same-photo calls
+                    if photo_coord_key:
+                        photo_lock = _get_cache_key_lock(photo_coord_key)
+                        photo_lock.acquire()
+                        try:
+                            now_p = time.monotonic()
+                            is_photo_warm = now_p < _CACHE_WARM_UNTIL.get(photo_coord_key, 0.0)
+                            if not is_photo_warm:
+                                completion, parsed = _execute_completion()
+                                finish_p = time.monotonic()
+                                _CACHE_WARM_UNTIL[photo_coord_key] = finish_p + CACHE_TTL_WARM_SECONDS
+                                _CACHE_WARM_UNTIL[coord_key] = finish_p + CACHE_TTL_WARM_SECONDS
+                        finally:
+                            photo_lock.release()
+                        if is_photo_warm:
+                            completion, parsed = _execute_completion()
+                            with _CACHE_COORD_LOCK:
+                                finish_p = time.monotonic()
+                                _CACHE_WARM_UNTIL[photo_coord_key] = finish_p + CACHE_TTL_WARM_SECONDS
+                                _CACHE_WARM_UNTIL[coord_key] = finish_p + CACHE_TTL_WARM_SECONDS
                     else:
-                        fallback_messages = [
-                            {"role": "system", "content": schema_instruction},
-                            *messages,
-                        ]
-                    completion = client.chat.completions.create(
-                        model=model,
-                        messages=fallback_messages,
-                        response_format={"type": "json_object"},
-                    )
-                    choice = completion.choices[0]
-                    raw_content = choice.message.content or ""
-                    if hasattr(response_model, "from_llm_json"):
-                        parsed = response_model.from_llm_json(raw_content)
-                    else:
-                        parsed = response_model.model_validate_json(raw_content)
+                        completion, parsed = _execute_completion()
+                else:
+                    completion, parsed = _execute_completion()
 
             if parsed is None:
                 raise RuntimeError(f"OpenAI가 {task_desc} 정형 결과를 생성하지 못했습니다.")
@@ -246,6 +354,11 @@ def _call_openai_structured(
                     f"[OpenAI Cache] {task_desc} ({model}) | 총 입력: {in_tok:,} 토큰 | 캐시 적중: {cached_tok:,} 토큰 ({cache_pct:.1f}%)",
                     file=sys.stderr,
                 )
+                if cached_tok == 0 and is_real_client and system_prompt and photo is not None:
+                    # Remote KV prefix was evicted early; re-warm checkpoint for subsequent requests
+                    with _get_cache_key_lock(coord_key):
+                        _warm_prefix_cache()
+                        _CACHE_WARM_UNTIL[coord_key] = time.monotonic() + CACHE_TTL_WARM_SECONDS
 
             _log_api_usage(
                 task=task_desc,

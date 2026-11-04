@@ -97,6 +97,11 @@ class OpenAIClientTests(unittest.TestCase):
         call_kwargs = mock_client.beta.chat.completions.parse.call_args.kwargs
         self.assertEqual(call_kwargs["model"], "gpt-4o-mini")
         self.assertEqual(call_kwargs["response_format"], PhotoAnalysis)
+        # Verify cache-optimized payload order: static/user text precedes image_url
+        user_content = call_kwargs["messages"][1]["content"]
+        self.assertEqual(user_content[0]["type"], "text")
+        self.assertEqual(user_content[1]["type"], "image_url")
+        self.assertNotIn("extra_body", call_kwargs)
 
     def test_suggest_lightroom_advice_with_openai_success(self) -> None:
         expected_advice = LightroomAdvice(
