@@ -259,13 +259,14 @@ class PhotoAnalyzerTests(unittest.TestCase):
             photo = prepare_photo(image_path)
             prompt = photo_analyzer._build_prompt(photo)
 
-            self.assertIn("7.0 ~ 7.9: [우수]", prompt)
-            self.assertIn("8.0 ~ 8.9: [매우 우수]", prompt)
-            self.assertIn("9.0 ~ 10.0: [프로사진작가 및 전문가급]", prompt)
+            self.assertIn("6.5 ~ 7.4 [B+컷 / 깔끔한 스탠다드", prompt)
+            self.assertIn("8.3 ~ 8.9 [A+컷 / 고완성도 화보]", prompt)
+            self.assertIn("9.0 ~ 9.4 [S컷 / 마스터피스]", prompt)
+            self.assertIn("9.5 ~ 10.0 [S+컷 / 더 레전드", prompt)
             self.assertIn("[장점]", prompt)
             self.assertIn("[단점]", prompt)
             self.assertIn("억지 칭찬도, 억지 트집 잡기(Nitpicking)도 지양하세요", prompt)
-            self.assertIn("스타일 중립성", prompt)
+            self.assertIn("스타일 및 장비·기교 중립성", prompt)
 
 
     def test_model_presets_tiers(self) -> None:

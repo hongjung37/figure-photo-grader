@@ -386,6 +386,9 @@ def heal_fast_analysis_payload(data: dict[str, Any]) -> dict[str, Any]:
             val = round(val / 10.0, 1)
         healed[score_field] = max(0.0, min(10.0, round(val, 1)))
 
+    raw_summary = data.get("quick_summary")
+    healed["quick_summary"] = str(raw_summary).strip() if raw_summary is not None else ""
+
     raw_reason = data.get("final_reason")
     healed["final_reason"] = str(raw_reason).strip() if raw_reason is not None else ""
 
@@ -424,8 +427,14 @@ class OpenAICrossCheck(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    composition_critique: str = Field(
+        description="구도, 프레이밍, 여백, 배경 분리 및 공간적 깊이감(3D 입체감 vs 2D 평면감)에 대한 객관적 평가 (반드시 '[장점]'과 '[아쉬운 점]' 구분 선행 작성)"
+    )
+    lighting_critique: str = Field(
+        description="빛의 방향과 질, 조형 입체감, 노출, 반사광(핫스팟) 및 그림자 디테일에 대한 객관적 평가 (반드시 '[장점]'과 '[아쉬운 점]' 구분 선행 작성)"
+    )
     score: float = Field(
-        description="구도, 조명, 색감, 촬영기술을 종합한 10점 만점 기준 최종 점수 (0.0~10.0). 7점대 평균 회귀를 피하고 실제 완성도에 따라 5~6점대(일반 스냅/평면 연출)와 8~9점대(수작)를 명확히 구분"
+        description="구도·조명 비평을 종합한 최종 점수 (0.0~10.0). 기준점 6.8~7.2(스탠다드), 7.5~8.2(수작), 8.3~8.9(화보), 9.0~9.4(마스터피스), 9.5~10.0(더 레전드). 5대 체크리스트 무결점 시 +0.1~+0.2 시너지 반영"
     )
     reason: str = Field(
         description="구도·조명·색감·기술의 시각적 근거를 종합한 객관적 총평 및 해당 점수를 부여한 명확한 이유"
@@ -435,12 +444,6 @@ class OpenAICrossCheck(BaseModel):
     )
     improvements: list[str] = Field(
         description="사진의 실제 한계점 및 다음 촬영을 위한 구체적 개선 조언 목록 (1~3개, 억지 트집 지양)"
-    )
-    composition_critique: str = Field(
-        description="구도, 프레이밍, 여백, 배경 분리 및 공간적 깊이감(3D 입체감 vs 2D 평면감)에 대한 객관적 평가"
-    )
-    lighting_critique: str = Field(
-        description="빛의 방향과 질, 조형 입체감, 노출, 반사광(핫스팟) 및 그림자 디테일에 대한 객관적 평가"
     )
 
     @field_validator("score", mode="before")
@@ -461,25 +464,9 @@ class PhotoAnalysis(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    composition_score: float = Field(description="구도 점수 (0~10). 7점: 우수, 8점: 매우 우수, 9점: 프로사진작가 및 전문가급")
-    composition_notes: str = Field(description="구도 평가. 반드시 '[장점]'과 '[단점]'을 명확히 구분하여 서술")
-    lighting_score: float = Field(description="조명 점수 (0~10). 7점: 우수, 8점: 매우 우수, 9점: 프로사진작가 및 전문가급")
-    lighting_notes: str = Field(description="빛의 방향/노출/명암 평가. 반드시 '[장점]'과 '[단점]'을 명확히 구분하여 서술")
-    color_score: float = Field(description="색감 점수 (0~10). 7점: 우수, 8점: 매우 우수, 9점: 프로사진작가 및 전문가급")
-    color_notes: str = Field(description="색조/채도/조화 평가. 반드시 '[장점]'과 '[단점]'을 명확히 구분하여 서술")
-    technique_score: float = Field(description="촬영 기술 점수 (0~10). 7점: 우수, 8점: 매우 우수, 9점: 프로사진작가 및 전문가급")
-    technique_notes: str = Field(description="초점/선명도/설정 적절성 평가. 반드시 '[장점]'과 '[단점]'을 명확히 구분하여 서술")
-    final_score: float = Field(description="사진 전체 최종 종합 점수 (0~10). 7점: 우수, 8점: 매우 우수, 9점: 프로사진작가 및 전문가급")
-    final_reason: str = Field(description="최종 점수 근거. 장점과 단점을 균형 있게 분석하고 해당 점수를 부여한 명확한 이유 제시")
-    strengths: list[str] = Field(description="사진의 주요 장점 목록 (실제 돋보이는 핵심 강점)")
-    improvements: list[str] = Field(description="사진의 단점, 아쉬운 점 및 다음 촬영을 위한 개선점 목록")
     figure_category: FigureCategoryType = Field(
         default="일반 피규어 촬영",
         description="피규어 사진 하위 유형: '접사/디테일', '일상/야외 스냅', '스튜디오 연출/디오라마', '일반 피규어 촬영' 중 택1",
-    )
-    detected_camera_settings: dict[str, str] | None = Field(
-        default=None,
-        description="사진 하단 프레임이나 워터마크에 인쇄된 시각적 촬영 설정(카메라, 조리개, 셔터, ISO, 렌즈 등) 추출 결과. 없거나 불확실하면 null",
     )
     focus_status: FocusStatusType = Field(
         default="완벽 칼초점",
@@ -487,8 +474,24 @@ class PhotoAnalysis(BaseModel):
     )
     focus_notes: str = Field(
         default="",
-        description="초점이 맞은 부위(눈동자, 의상, 배경 등) 및 심도 상태에 대한 1줄 분석 근거",
+        description="초점이 맞은 부위(눈동자, 의상, 배경 등) 및 심도 상태에 대한 1줄 분석 근거 및 5대 체크리스트 요약",
     )
+    detected_camera_settings: dict[str, str] | None = Field(
+        default=None,
+        description="사진 하단 프레임이나 워터마크에 인쇄된 시각적 촬영 설정(카메라, 조리개, 셔터, ISO, 렌즈 등) 추출 결과. 없거나 불확실하면 null",
+    )
+    composition_notes: str = Field(description="구도 평가. 반드시 '[장점]'과 '[단점]'을 명확히 구분하여 서술")
+    composition_score: float = Field(description="구도 점수 (0~10). 기준점 6.8~7.2: 깔끔한 스탠다드, 7.5~8.2: 수작, 8.3~8.9: 고완성도 화보, 9.0~9.4: 마스터피스, 9.5~10.0: 더 레전드")
+    lighting_notes: str = Field(description="빛의 방향/노출/명암 평가. 반드시 '[장점]'과 '[단점]'을 명확히 구분하여 서술")
+    lighting_score: float = Field(description="조명 점수 (0~10). 기준점 6.8~7.2: 깔끔한 스탠다드, 7.5~8.2: 수작, 8.3~8.9: 고완성도 화보, 9.0~9.4: 마스터피스, 9.5~10.0: 더 레전드")
+    color_notes: str = Field(description="색조/채도/조화 평가. 반드시 '[장점]'과 '[단점]'을 명확히 구분하여 서술")
+    color_score: float = Field(description="색감 점수 (0~10). 기준점 6.8~7.2: 깔끔한 스탠다드, 7.5~8.2: 수작, 8.3~8.9: 고완성도 화보, 9.0~9.4: 마스터피스, 9.5~10.0: 더 레전드")
+    technique_notes: str = Field(description="초점/선명도/설정 적절성 평가. 반드시 '[장점]'과 '[단점]'을 명확히 구분하여 서술")
+    technique_score: float = Field(description="촬영 기술 점수 (0~10). 기준점 6.8~7.2: 깔끔한 스탠다드, 7.5~8.2: 수작, 8.3~8.9: 고완성도 화보, 9.0~9.4: 마스터피스, 9.5~10.0: 더 레전드")
+    final_score: float = Field(description="사진 전체 최종 종합 점수 (0~10). 단순 평균이 아닌 전체 임팩트 반영(무결점 고득점 시 +0.1~+0.2 시너지 보정, 치명 결함 시 하방 견인)")
+    final_reason: str = Field(description="최종 점수 근거. 장점과 단점을 균형 있게 분석하고 해당 점수를 부여한 명확한 이유 제시")
+    strengths: list[str] = Field(description="사진의 주요 장점 목록 (실제 돋보이는 핵심 강점)")
+    improvements: list[str] = Field(description="사진의 단점, 아쉬운 점 및 다음 촬영을 위한 개선점 목록")
     aesthetic_tags: AestheticTags = Field(
         default_factory=AestheticTags.empty,
         description="시각적 근거에 기반한 범주별 미학 태그",
@@ -527,8 +530,9 @@ class PhotoAnalysis(BaseModel):
             if isinstance(field_schema, dict):
                 field_schema["items"] = {"type": "string", "enum": list(allowed_tags)}
         required = list(schema.get("required", []))
-        if "aesthetic_tags" not in required:
-            required.append("aesthetic_tags")
+        for req_field in ("figure_category", "focus_status", "focus_notes", "aesthetic_tags"):
+            if req_field not in required:
+                required.append(req_field)
         schema["required"] = required
         return schema
 
@@ -597,11 +601,15 @@ class FastPhotoAnalysis(BaseModel):
         default="완벽 칼초점",
         description="피규어 눈동자/페이스 초점 핀 정밀 판정: '완벽 칼초점', '미세 앞핀', '미세 뒤핀', '초점 이탈', '판별 불가' 중 택1",
     )
-    composition_score: float = Field(description="구도 점수 (0~10). 7점: 우수, 8점: 매우 우수, 9점: 프로사진작가 및 전문가급")
-    lighting_score: float = Field(description="조명 점수 (0~10). 7점: 우수, 8점: 매우 우수, 9점: 프로사진작가 및 전문가급")
-    color_score: float = Field(description="색감 점수 (0~10). 7점: 우수, 8점: 매우 우수, 9점: 프로사진작가 및 전문가급")
-    technique_score: float = Field(description="촬영 기술 점수 (0~10). 7점: 우수, 8점: 매우 우수, 9점: 프로사진작가 및 전문가급")
-    final_score: float = Field(description="사진 전체 최종 종합 점수 (0~10). 7점: 우수, 8점: 매우 우수, 9점: 프로사진작가 및 전문가급")
+    quick_summary: str = Field(
+        default="",
+        description="점수 책정 전 5대 광학·구도 체크리스트 선행 검증(Micro-CoT): '[강점: 핵심 시각적 근거 2가지 이상] [감점: 실제 기술적 감점 요인 또는 없음(5대 체크리스트 무결점 통과)]'",
+    )
+    composition_score: float = Field(description="구도 점수 (0~10). 기준점 6.8~7.2: 깔끔한 스탠다드, 7.5~8.2: 수작, 8.3~8.9: 고완성도 화보, 9.0~9.4: 마스터피스, 9.5~10.0: 더 레전드")
+    lighting_score: float = Field(description="조명 점수 (0~10). 기준점 6.8~7.2: 깔끔한 스탠다드, 7.5~8.2: 수작, 8.3~8.9: 고완성도 화보, 9.0~9.4: 마스터피스, 9.5~10.0: 더 레전드")
+    color_score: float = Field(description="색감 점수 (0~10). 기준점 6.8~7.2: 깔끔한 스탠다드, 7.5~8.2: 수작, 8.3~8.9: 고완성도 화보, 9.0~9.4: 마스터피스, 9.5~10.0: 더 레전드")
+    technique_score: float = Field(description="촬영 기술 점수 (0~10). 기준점 6.8~7.2: 깔끔한 스탠다드, 7.5~8.2: 수작, 8.3~8.9: 고완성도 화보, 9.0~9.4: 마스터피스, 9.5~10.0: 더 레전드")
+    final_score: float = Field(description="사진 전체 최종 종합 점수 (0~10). 단순 평균이 아닌 전체 임팩트 반영(무결점 고득점 시 +0.1~+0.2 시너지 보정, 치명 결함 시 하방 견인)")
     final_reason: str = Field(
         description="최종 점수 핵심 사유 1문장 (80자 이내, [핵심 강점 1개] + [결정적 감점/보완 요인 1개] 요약)"
     )
@@ -690,7 +698,7 @@ class FastPhotoAnalysis(BaseModel):
             figure_category=self.figure_category,
             detected_camera_settings=None,
             focus_status=self.focus_status,
-            focus_notes="",
+            focus_notes=self.quick_summary or "",
             aesthetic_tags=AestheticTags.empty(),
         )
 
