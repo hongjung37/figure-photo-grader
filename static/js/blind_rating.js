@@ -1,5 +1,17 @@
 // static/js/blind_rating.js - Blind Random Rating & Speed Feedback Subsystem (Option A)
 
+function safeBlindEscape(str) {
+  if (typeof escapeHtml === 'function') return escapeHtml(str);
+  if (typeof window !== 'undefined' && typeof window.escapeHtml === 'function') return window.escapeHtml(str);
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 let blindState = {
   mode: 'setup', // 'setup', 'grading', 'summary'
   pool: [],
@@ -236,7 +248,7 @@ function renderBlindGradingCard() {
       <div class="blind-arena-header">
         <div style="display:flex;align-items:center;gap:12px;">
           <span class="blind-badge-step">진행 ${currentIdx + 1} / ${total}장</span>
-          <span style="font-size:0.85rem;color:#94a3b8;font-weight:600;">${item.photo_filename || '사진'}</span>
+          <span style="font-size:0.85rem;color:#94a3b8;font-weight:600;">${safeBlindEscape(item.filename || item.photo_filename || '사진')}</span>
         </div>
         <div style="display:flex;align-items:center;gap:10px;">
           <button type="button" class="blind-action-btn" onclick="skipBlindItem()" title="점수를 매기지 않고 다음 사진으로 넘어갑니다 (단축키: Tab 또는 Space)">건너뛰기 (Skip) ↷</button>
@@ -256,8 +268,8 @@ function renderBlindGradingCard() {
             <div class="blind-zoom-hint">🔍 클릭하여 확대/축소</div>
           </div>
           <div class="blind-photo-meta">
-            <span class="blind-cat-badge">📁 ${item.figure_category || '일반 피규어'}</span>
-            <span style="color:#94a3b8;font-size:0.8rem;">${metaStr}</span>
+            <span class="blind-cat-badge">📁 ${safeBlindEscape(item.figure_category || '일반 피규어')}</span>
+            <span style="color:#94a3b8;font-size:0.8rem;">${safeBlindEscape(metaStr)}</span>
           </div>
         </div>
 
@@ -379,7 +391,8 @@ async function submitBlindScore(userScore) {
   const diff = Math.round((userScore - aiScore) * 10) / 10;
   blindState.sessionResults.push({
     id: item.id,
-    photo_filename: item.photo_filename,
+    filename: item.filename || item.photo_filename || '사진',
+    photo_filename: item.filename || item.photo_filename || '사진',
     user_score: userScore,
     ai_score: aiScore,
     grade: item.grade || 'B',
@@ -416,7 +429,7 @@ function renderBlindRevealAnimation(item, userScore, aiScore, diff) {
     subMsg = `내가 AI(${aiScore.toFixed(1)}점)보다 ${absDiff.toFixed(1)}점 더 꼼꼼하고 엄격하게 평가했습니다.`;
   }
 
-  const aiReason = item.final_reason ? `"${item.final_reason}"` : '';
+  const aiReason = item.final_reason ? `"${safeBlindEscape(item.final_reason)}"` : '';
 
   feedbackArea.innerHTML = `
     <div class="blind-reveal-card ${badgeClass}">
@@ -424,7 +437,7 @@ function renderBlindRevealAnimation(item, userScore, aiScore, diff) {
         <span style="font-size:0.85rem;font-weight:800;color:${badgeColor};display:flex;align-items:center;gap:6px;">
           ${badgeTitle}
         </span>
-        <span class="blind-tag-grade">AI 등급: ${item.grade || 'B'}</span>
+        <span class="blind-tag-grade">AI 등급: ${safeBlindEscape(item.grade || 'B')}</span>
       </div>
 
       <div class="blind-score-compare-row">
@@ -571,7 +584,7 @@ function renderBlindSummary() {
           <div style="display:flex;gap:12px;align-items:center;margin-top:10px;">
             <img src="/api/image/${bestMatch.id}" class="highlight-img" alt="Best Sync">
             <div>
-              <div style="font-weight:700;color:white;font-size:0.88rem;">${bestMatch.photo_filename || '사진'}</div>
+              <div style="font-weight:700;color:white;font-size:0.88rem;">${safeBlindEscape(bestMatch.filename || bestMatch.photo_filename || '사진')}</div>
               <div style="font-size:0.8rem;color:#94a3b8;margin-top:4px;">
                 👤 내 점수: <strong>${bestMatch.user_score.toFixed(1)}</strong> / 🤖 AI: <strong>${bestMatch.ai_score.toFixed(1)}</strong>
               </div>
@@ -588,7 +601,7 @@ function renderBlindSummary() {
           <div style="display:flex;gap:12px;align-items:center;margin-top:10px;">
             <img src="/api/image/${maxDivergence.id}" class="highlight-img" alt="Max Gap">
             <div>
-              <div style="font-weight:700;color:white;font-size:0.88rem;">${maxDivergence.photo_filename || '사진'}</div>
+              <div style="font-weight:700;color:white;font-size:0.88rem;">${safeBlindEscape(maxDivergence.filename || maxDivergence.photo_filename || '사진')}</div>
               <div style="font-size:0.8rem;color:#94a3b8;margin-top:4px;">
                 👤 내 점수: <strong>${maxDivergence.user_score.toFixed(1)}</strong> / 🤖 AI: <strong>${maxDivergence.ai_score.toFixed(1)}</strong>
               </div>
@@ -654,3 +667,17 @@ function handleBlindKeydown(e) {
     submitBlindScore(10.0);
   }
 }
+
+window.safeBlindEscape = safeBlindEscape;
+window.openBlindRatingModal = openBlindRatingModal;
+window.closeBlindRatingModal = closeBlindRatingModal;
+window.selectBlindSource = selectBlindSource;
+window.selectBlindLimit = selectBlindLimit;
+window.startBlindRatingSession = startBlindRatingSession;
+window.renderBlindSetup = renderBlindSetup;
+window.renderBlindGradingCard = renderBlindGradingCard;
+window.submitBlindScore = submitBlindScore;
+window.submitCustomBlindScore = submitCustomBlindScore;
+window.skipBlindItem = skipBlindItem;
+window.nextBlindItem = nextBlindItem;
+window.toggleBlindImgZoom = toggleBlindImgZoom;

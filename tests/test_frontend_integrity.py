@@ -403,6 +403,16 @@ if (mockElements['adv-filter-count-badge'].textContent !== '2' || !mockElements[
 }
 vm.runInContext('setCatFilter("all"); clearFocalFilter(); toggleAdvFilterDrawer(false);', ctx);
 
+// 11) Verify safeBlindEscape and blind rating XSS defense
+const fnEscape = ctx.safeBlindEscape || windowObj.safeBlindEscape;
+if (typeof fnEscape !== 'function') {
+  throw new Error('safeBlindEscape is not exported on ctx or windowObj');
+}
+const testDangerous = '<script>alert(1)</script>&' + '"' + '\'';
+const escaped = fnEscape(testDangerous);
+if (escaped !== '&lt;script&gt;alert(1)&lt;/script&gt;&amp;&quot;&#39;') {
+  throw new Error('safeBlindEscape did not escape dangerous characters properly: ' + escaped);
+}
 process.stdout.write('OK');
 """
         res = subprocess.run(
@@ -414,6 +424,16 @@ process.stdout.write('OK');
         )
         self.assertEqual(res.returncode, 0, f"Script evaluation failed: {res.stderr}\n{res.stdout}")
         self.assertIn("OK", res.stdout)
+
+
+    def test_blind_rating_xss_and_filename_escaping(self):
+        blind_code = (PROJECT_ROOT / "static/js/blind_rating.js").read_text(encoding="utf-8")
+        self.assertIn("function safeBlindEscape", blind_code)
+        self.assertIn("safeBlindEscape(item.filename || item.photo_filename || '사진')", blind_code)
+        self.assertIn("safeBlindEscape(metaStr)", blind_code)
+        self.assertIn("safeBlindEscape(item.figure_category", blind_code)
+        self.assertIn("safeBlindEscape(item.final_reason)", blind_code)
+        self.assertNotIn("${item.photo_filename || '사진'}", blind_code)
 
 
 if __name__ == "__main__":
