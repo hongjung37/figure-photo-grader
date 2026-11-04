@@ -1524,7 +1524,7 @@ function renderGalleryCard(item) {
               <span class="badge-user-score" style="display:inline-block;margin-top:4px;margin-left:4px;" title="사용자 직접 평점: ${item.user_score.toFixed(1)}점 (AI: ${item.final_score.toFixed(1)}점)">👤 내 점수 ${item.user_score.toFixed(1)}</span>
             ` : ''}
             ${item.cross_check_opinion ? `
-              <span class="cross-check-badge" title="OpenAI(${escapeHtml(item.cross_check_opinion.model || 'GPT-6 Luna')}) 보조 의견: ${Number(item.cross_check_opinion.score).toFixed(1)}점">🤝 OpenAI ${Number(item.cross_check_opinion.score).toFixed(1)}</span>
+              <span class="cross-check-badge" title="${(/gemini/i.test(item.cross_check_opinion.model || '') ? 'Gemini' : 'OpenAI')}(${escapeHtml(item.cross_check_opinion.model || '')}) 보조 의견: ${Number(item.cross_check_opinion.score).toFixed(1)}점">🤝 ${/gemini/i.test(item.cross_check_opinion.model || '') ? 'Gemini' : 'OpenAI'} ${Number(item.cross_check_opinion.score).toFixed(1)}</span>
             ` : ''}
           </div>
           <div class="score-badge">

@@ -21,54 +21,136 @@ function _formatCapturedAt(value) {
 
 function renderCrossCheckOpinion(op) {
   if (!op) return '';
+  const modelName = op.model || '';
+  const isGemini = /gemini/i.test(modelName);
+  const providerLabel = isGemini ? 'Gemini' : 'OpenAI';
+  const mainProviderLabel = isGemini ? 'OpenAI' : 'Gemini';
+  const defaultModelName = isGemini ? 'Gemini Flash-Lite' : 'GPT-6 Luna';
+
+  // Subscores: check direct fields first, then fallback to parsing older legacy bracket strings
+  let compScore = (op.composition_score != null) ? Number(op.composition_score) : null;
+  let lightScore = (op.lighting_score != null) ? Number(op.lighting_score) : null;
+  let colorScore = (op.color_score != null) ? Number(op.color_score) : null;
+  let techScore = (op.technique_score != null) ? Number(op.technique_score) : null;
+
+  if (compScore === null && op.composition_critique) {
+    const m = op.composition_critique.match(/\[구도\s*([\d.]+)점?\]/);
+    if (m) compScore = parseFloat(m[1]);
+  }
+  if ((lightScore === null || colorScore === null || techScore === null) && op.lighting_critique) {
+    const ml = op.lighting_critique.match(/\[?조명\s*([\d.]+)점?/);
+    if (ml && lightScore === null) lightScore = parseFloat(ml[1]);
+    const mc = op.lighting_critique.match(/색감\s*([\d.]+)점?/);
+    if (mc && colorScore === null) colorScore = parseFloat(mc[1]);
+    const mt = op.lighting_critique.match(/기술\s*([\d.]+)점?/);
+    if (mt && techScore === null) techScore = parseFloat(mt[1]);
+  }
+
+  // Check if composition / lighting critique are real narrative critiques vs synthetic bracket placeholders
+  const isSyntheticComp = !op.composition_critique || op.composition_critique.startsWith('[구도');
+  const isSyntheticLight = !op.lighting_critique || op.lighting_critique.startsWith('[조명');
+
+  const compCritique = isSyntheticComp ? '' : op.composition_critique.trim();
+  const lightCritique = isSyntheticLight ? '' : op.lighting_critique.trim();
+
+  // Clean reason text
+  let reasonText = (op.reason || '').trim();
+  reasonText = reasonText.replace(/^(?:OpenAI|Gemini|GPT-6 Luna)\s*총평[:\s]*/i, '');
+
+  const focusBadge = op.focus_status
+    ? `<span class="cross-check-focus-badge">🎯 초점: ${_escapeDetailHtml(op.focus_status)}</span>`
+    : '';
+
+  const hasSubScores = (compScore !== null || lightScore !== null || colorScore !== null || techScore !== null);
+  const subScoresHtml = hasSubScores ? `
+    <div class="cross-check-metrics-grid">
+      <div class="cc-metric">
+        <span class="cc-metric-lbl">📐 구도</span>
+        <strong class="cc-metric-val">${compScore !== null ? compScore.toFixed(1) : '-'}</strong>
+      </div>
+      <div class="cc-metric">
+        <span class="cc-metric-lbl">💡 조명</span>
+        <strong class="cc-metric-val">${lightScore !== null ? lightScore.toFixed(1) : '-'}</strong>
+      </div>
+      <div class="cc-metric">
+        <span class="cc-metric-lbl">🎨 색감</span>
+        <strong class="cc-metric-val">${colorScore !== null ? colorScore.toFixed(1) : '-'}</strong>
+      </div>
+      <div class="cc-metric">
+        <span class="cc-metric-lbl">⚙️ 기술</span>
+        <strong class="cc-metric-val">${techScore !== null ? techScore.toFixed(1) : '-'}</strong>
+      </div>
+    </div>
+  ` : '';
+
+  const narrativeCritiquesHtml = (compCritique || lightCritique) ? `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
+      ${compCritique ? `
+        <div class="cross-check-comp-box">
+          <b style="display:block;margin-bottom:3px;">📐 구도 심층 비평:</b>
+          <span>${_escapeDetailHtml(compCritique)}</span>
+        </div>
+      ` : ''}
+      ${lightCritique ? `
+        <div class="cross-check-light-box">
+          <b style="display:block;margin-bottom:3px;">💡 조명 심층 비평:</b>
+          <span>${_escapeDetailHtml(lightCritique)}</span>
+        </div>
+      ` : ''}
+    </div>
+  ` : '';
+
+  const strengths = (op.strengths || []).filter(s => s && s.trim());
+  const improvements = (op.improvements || []).filter(i => i && i.trim() && !i.includes('감점: 없음') && !i.includes('무결점 통과'));
+
+  const listsHtml = (strengths.length || improvements.length) ? `
+    <div class="cross-check-lists-grid">
+      ${strengths.length ? `
+        <div class="cross-check-strengths-box">
+          <b style="display:block;margin-bottom:4px;">✓ ${providerLabel} 시각 강점:</b>
+          <ul style="margin:0;padding-left:16px;">${strengths.map(s => `<li>${_escapeDetailHtml(s)}</li>`).join('')}</ul>
+        </div>
+      ` : ''}
+      ${improvements.length ? `
+        <div class="cross-check-improvements-box">
+          <b style="display:block;margin-bottom:4px;">✗ ${providerLabel} 조언/개선점:</b>
+          <ul style="margin:0;padding-left:16px;">${improvements.map(i => `<li>${_escapeDetailHtml(i)}</li>`).join('')}</ul>
+        </div>
+      ` : `
+        <div class="cross-check-flawless-box">
+          <b style="display:block;margin-bottom:2px;">✓ 기술 결함 없음</b>
+          <span style="font-size:0.77rem;color:var(--muted);">5대 체크리스트 감점 요인 없이 통과</span>
+        </div>
+      `}
+    </div>
+  ` : '';
+
   return `
     <div class="cross-check-opinion-card">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px;">
-        <div style="display:flex;align-items:center;gap:8px;">
-          <span style="font-size:1.2rem;">🤝</span>
-          <div>
-            <strong class="cross-check-title">OpenAI 크로스 체크 의견 (${_escapeDetailHtml(op.model || 'GPT-6 Luna')})</strong>
-            <div style="font-size:0.73rem;color:var(--muted);">Gemini 본 평가와 별도로 제공되는 독립적인 보조 비평입니다. (점수 합산/평균 없음)</div>
+      <div class="cross-check-header">
+        <div class="cross-check-header-left">
+          <div class="cross-check-title-row">
+            <span class="cross-check-icon">🤝</span>
+            <strong class="cross-check-title">${providerLabel} 크로스체크</strong>
+            <span class="cross-check-model-tag">${_escapeDetailHtml(op.model || defaultModelName)}</span>
+            ${focusBadge}
           </div>
+          <div class="cross-check-subtitle">${mainProviderLabel} 본 평가와 별도로 제공되는 독립적인 보조 비평 (점수 합산/평균 없음)</div>
         </div>
-        <div style="text-align:right;">
-          <span class="cross-check-score">${op.score !== undefined && op.score !== null ? Number(op.score).toFixed(1) : '-'}</span>
-          <small style="color:var(--muted);font-size:0.75rem;"> / 10점</small>
+        <div class="cross-check-score-pill">
+          <span class="cross-check-score-val">${op.score !== undefined && op.score !== null ? Number(op.score).toFixed(1) : '-'}</span>
+          <span class="cross-check-score-denom">/ 10점</span>
         </div>
       </div>
-      ${op.reason ? `<div class="cross-check-reason-box"><b>OpenAI 총평:</b> ${_escapeDetailHtml(op.reason)}</div>` : ''}
-      ${(op.composition_critique || op.lighting_critique) ? `
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;">
-          ${op.composition_critique ? `
-            <div class="cross-check-comp-box">
-              <b style="display:block;margin-bottom:2px;">📐 구도 비평:</b>
-              <span>${_escapeDetailHtml(op.composition_critique)}</span>
-            </div>
-          ` : ''}
-          ${op.lighting_critique ? `
-            <div class="cross-check-light-box">
-              <b style="display:block;margin-bottom:2px;">💡 조명 비평:</b>
-              <span>${_escapeDetailHtml(op.lighting_critique)}</span>
-            </div>
-          ` : ''}
+      ${subScoresHtml}
+      ${reasonText ? `
+        <div class="cross-check-reason-box">
+          <b class="cross-check-reason-lbl">💬 ${providerLabel} 총평:</b>
+          <div class="cross-check-reason-body">${_escapeDetailHtml(reasonText)}</div>
         </div>
       ` : ''}
-      ${((op.strengths && op.strengths.length) || (op.improvements && op.improvements.length)) ? `
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:0.78rem;">
-          ${op.strengths && op.strengths.length ? `
-            <div class="cross-check-strengths-box">
-              <b style="display:block;margin-bottom:2px;">✓ OpenAI 시각 강점:</b>
-              <ul style="margin:4px 0 0;padding-left:16px;">${op.strengths.map(s => `<li>${_escapeDetailHtml(s)}</li>`).join('')}</ul>
-            </div>
-          ` : ''}
-          ${op.improvements && op.improvements.length ? `
-            <div class="cross-check-improvements-box">
-              <b style="display:block;margin-bottom:2px;">✗ OpenAI 조언/개선점:</b>
-              <ul style="margin:4px 0 0;padding-left:16px;">${op.improvements.map(i => `<li>${_escapeDetailHtml(i)}</li>`).join('')}</ul>
-            </div>
-          ` : ''}
-        </div>
-      ` : ''}
+      ${narrativeCritiquesHtml}
+      ${listsHtml}
     </div>
   `;
 }
@@ -127,14 +209,17 @@ function openDetailModal(id) {
   let reanalyzeBannerHtml = '';
   if (reanalyzeDiff) {
     if (reanalyzeDiff.mode === 'cross_check_only') {
-      const lunaAfter = reanalyzeDiff.newLunaScore != null ? `${reanalyzeDiff.newLunaScore.toFixed(1)}점` : '-';
-      const lunaBefore = reanalyzeDiff.prevLunaScore != null ? `${reanalyzeDiff.prevLunaScore.toFixed(1)}점` : '없음';
+      const ccAfter = reanalyzeDiff.newLunaScore != null ? `${reanalyzeDiff.newLunaScore.toFixed(1)}점` : '-';
+      const ccBefore = reanalyzeDiff.prevLunaScore != null ? `${reanalyzeDiff.prevLunaScore.toFixed(1)}점` : '없음';
+      const ccModel = (item.cross_check_opinion && item.cross_check_opinion.model) || '';
+      const isCcGemini = /gemini/i.test(ccModel);
+      const ccProv = isCcGemini ? 'Gemini' : 'OpenAI';
       reanalyzeBannerHtml = `
         <div style="grid-column: 1 / -1; background: rgba(99,102,241,0.12); border: 1px solid #818cf8; border-radius: 10px; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap;">
           <div style="font-size: 0.85rem; color: var(--text);">
-            <strong>🤝 GPT-6 Luna 크로스체크 단독 갱신 완료:</strong>
-            Luna 보조 점수 <b>${_escapeDetailHtml(lunaBefore)} → ${_escapeDetailHtml(lunaAfter)}</b>
-            <span style="color:var(--muted);font-size:0.78rem;margin-left:6px;">(크로스체크 단독 모드는 주 종합 점수 ${item.final_score.toFixed(1)}점과 주 모델을 유지합니다)</span>
+            <strong>🤝 ${ccProv} 크로스체크 단독 갱신 완료:</strong>
+            보조 점수 <b>${_escapeDetailHtml(ccBefore)} → ${_escapeDetailHtml(ccAfter)}</b>
+            <span style="color:var(--muted);font-size:0.78rem;margin-left:6px;">(주 종합 점수 ${item.final_score.toFixed(1)}점과 주 모델 유지)</span>
           </div>
           <button type="button" class="filter-btn" style="padding:2px 8px;font-size:0.74rem;" onclick="window._lastReanalyzeDiff=null; this.parentElement.remove();">확인 ✕</button>
         </div>

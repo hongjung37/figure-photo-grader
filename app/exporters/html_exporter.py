@@ -65,50 +65,80 @@ def _render_cross_check_section(cross_check: Any) -> str:
             return '<li class="empty">기록된 항목이 없습니다.</li>'
         return "".join(f"<li>{escape(str(item))}</li>" for item in items)
 
+    cc_is_gemini = "gemini" in cc_model.lower()
+    cc_provider = "Gemini" if cc_is_gemini else "OpenAI"
+    main_provider = "OpenAI" if cc_is_gemini else "Gemini"
+
+    # Strip redundant leading provider label in reason
+    clean_reason = cc_reason
+    if clean_reason.lower().startswith(f"{cc_provider.lower()} 총평:"):
+        clean_reason = clean_reason[len(f"{cc_provider} 총평:"):].strip()
+
     reason_html = (
-        f'<div class="cross-check-reason-box"><strong>OpenAI 총평:</strong> <p>{cc_reason}</p></div>'
-        if cc_reason
+        f'<div class="cross-check-reason-box"><strong>{cc_provider} 총평:</strong> <p>{clean_reason}</p></div>'
+        if clean_reason
         else ""
     )
 
+    is_synth_comp = cc_comp.startswith("[구도")
+    is_synth_light = cc_light.startswith("[조명")
+    critique_comp = "" if is_synth_comp else cc_comp
+    critique_light = "" if is_synth_light else cc_light
+
     critique_html = ""
-    if cc_comp or cc_light:
+    if critique_comp or critique_light:
         comp_card = (
-            f'<div class="cross-check-comp-box"><b class="cross-check-sub-title">📐 구도 비평</b><p>{cc_comp}</p></div>'
-            if cc_comp
+            f'<div class="cross-check-comp-box"><b class="cross-check-sub-title">📐 구도 비평</b><p>{critique_comp}</p></div>'
+            if critique_comp
             else ""
         )
         light_card = (
-            f'<div class="cross-check-light-box"><b class="cross-check-sub-title">💡 조명 비평</b><p>{cc_light}</p></div>'
-            if cc_light
+            f'<div class="cross-check-light-box"><b class="cross-check-sub-title">💡 조명 비평</b><p>{critique_light}</p></div>'
+            if critique_light
             else ""
         )
         critique_html = f'<div class="cross-check-grid-2">{comp_card}{light_card}</div>'
 
+    comp_s = cc_data.get("composition_score")
+    light_s = cc_data.get("lighting_score")
+    color_s = cc_data.get("color_score")
+    tech_s = cc_data.get("technique_score")
+
+    metrics_html = ""
+    if comp_s is not None or light_s is not None or color_s is not None or tech_s is not None:
+        metrics_html = f"""
+        <div class="cross-check-grid-4" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px;">
+          <div style="background:rgba(2,132,199,0.08);padding:6px 10px;border-radius:6px;text-align:center;"><small style="display:block;color:var(--muted);font-size:0.75rem;">📐 구도</small><strong style="color:#0284c7;">{comp_s:.1f if comp_s is not None else '-'}</strong></div>
+          <div style="background:rgba(2,132,199,0.08);padding:6px 10px;border-radius:6px;text-align:center;"><small style="display:block;color:var(--muted);font-size:0.75rem;">💡 조명</small><strong style="color:#0284c7;">{light_s:.1f if light_s is not None else '-'}</strong></div>
+          <div style="background:rgba(2,132,199,0.08);padding:6px 10px;border-radius:6px;text-align:center;"><small style="display:block;color:var(--muted);font-size:0.75rem;">🎨 색감</small><strong style="color:#0284c7;">{color_s:.1f if color_s is not None else '-'}</strong></div>
+          <div style="background:rgba(2,132,199,0.08);padding:6px 10px;border-radius:6px;text-align:center;"><small style="display:block;color:var(--muted);font-size:0.75rem;">⚙️ 기술</small><strong style="color:#0284c7;">{tech_s:.1f if tech_s is not None else '-'}</strong></div>
+        </div>
+        """
+
     list_html = ""
     if strengths or improvements:
         s_card = (
-            f'<div class="cross-check-strengths-box"><b class="cross-check-sub-title">✓ OpenAI 시각 강점</b><ul>{render_list_items(strengths)}</ul></div>'
+            f'<div class="cross-check-strengths-box"><b class="cross-check-sub-title">✓ {cc_provider} 시각 강점</b><ul>{render_list_items(strengths)}</ul></div>'
             if strengths
             else ""
         )
         i_card = (
-            f'<div class="cross-check-improvements-box"><b class="cross-check-sub-title">✗ OpenAI 조언/개선점</b><ul>{render_list_items(improvements)}</ul></div>'
+            f'<div class="cross-check-improvements-box"><b class="cross-check-sub-title">✗ {cc_provider} 조언/개선점</b><ul>{render_list_items(improvements)}</ul></div>'
             if improvements
             else ""
         )
-        margin_style = ' style="margin-top:12px;"' if (cc_comp or cc_light) else ""
+        margin_style = ' style="margin-top:12px;"' if (critique_comp or critique_light or metrics_html) else ""
         list_html = f'<div class="cross-check-grid-2"{margin_style}>{s_card}{i_card}</div>'
 
     return f"""
-  <section class="section" aria-label="OpenAI 크로스 체크 의견">
+  <section class="section" aria-label="{cc_provider} 크로스 체크 의견">
     <div class="panel cross-check-opinion-card">
       <div class="cross-check-header">
         <div class="cross-check-title-group">
           <span class="cross-check-icon">🤝</span>
           <div>
-            <h2 class="cross-check-title">OpenAI 크로스 체크 의견 <small>교차 검증 소견 ({cc_model})</small></h2>
-            <p class="cross-check-subtitle">Gemini 본 평가와 별도로 제공되는 독립적인 보조 비평입니다. (점수 합산/평균 없음)</p>
+            <h2 class="cross-check-title">{cc_provider} 크로스 체크 의견 <small>교차 검증 소견 ({cc_model})</small></h2>
+            <p class="cross-check-subtitle">{main_provider} 본 평가와 별도로 제공되는 독립적인 보조 비평입니다. (점수 합산/평균 없음)</p>
           </div>
         </div>
         <div class="cross-check-score-group">
@@ -116,6 +146,7 @@ def _render_cross_check_section(cross_check: Any) -> str:
           <div class="cross-check-score-val"><strong>{score_str}</strong><small> / 10</small></div>
         </div>
       </div>
+      {metrics_html}
       {reason_html}
       {critique_html}
       {list_html}

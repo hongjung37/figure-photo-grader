@@ -1295,7 +1295,7 @@ function updateComparison() {
       ${item.cross_check_opinion ? `
         <div class="cross-check-compare-box">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-            <b class="cross-check-comp-title">🤝 OpenAI 크로스 체크 (${escapeHtml(item.cross_check_opinion.model || 'GPT-6 Luna')})</b>
+            <b class="cross-check-comp-title">🤝 ${/gemini/i.test(item.cross_check_opinion.model || '') ? 'Gemini' : 'OpenAI'} 크로스 체크 (${escapeHtml(item.cross_check_opinion.model || (/gemini/i.test(item.cross_check_opinion.model || '') ? 'Gemini Flash-Lite' : 'GPT-6 Luna'))})</b>
             <strong class="cross-check-comp-score">${item.cross_check_opinion.score !== undefined && item.cross_check_opinion.score !== null ? Number(item.cross_check_opinion.score).toFixed(1) : '-'}점</strong>
           </div>
           <div class="cross-check-comp-reason">${escapeHtml(item.cross_check_opinion.reason || '')}</div>
