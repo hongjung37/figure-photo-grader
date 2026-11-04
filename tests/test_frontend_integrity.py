@@ -20,6 +20,7 @@ class FrontendIntegrityTests(unittest.TestCase):
             PROJECT_ROOT / "static/js/modals.js",
             PROJECT_ROOT / "static/js/rating_advice.js",
             PROJECT_ROOT / "static/js/reanalyze.js",
+            PROJECT_ROOT / "static/js/growth_timeline.js",
             PROJECT_ROOT / "static/js/detail_modal.js",
             PROJECT_ROOT / "static/dashboard.js",
         ]
@@ -73,6 +74,7 @@ const files = [
   'static/js/modals.js',
   'static/js/rating_advice.js',
   'static/js/reanalyze.js',
+  'static/js/growth_timeline.js',
   'static/js/detail_modal.js',
   'static/dashboard.js'
 ];
@@ -81,9 +83,13 @@ const mockElements = {
   'gallery-grid': { style: {} },
   'compare-view': { style: {} },
   'insights-view': { style: {}, innerHTML: '' },
+  'timeline-view': { style: {}, innerHTML: '' },
+  'timeline-tooltip': { style: {}, innerHTML: '' },
+  'timeline-chart-wrap': { getBoundingClientRect: () => ({ left: 0, top: 0, width: 900, height: 400 }) },
   'tab-gallery': { classList: { toggle: () => {} } },
   'tab-compare': { classList: { toggle: () => {} } },
   'tab-insights': { classList: { toggle: () => {} } },
+  'tab-timeline': { classList: { toggle: () => {} } },
   'comp-a-select': { options: [], innerHTML: '', value: '1' },
   'comp-b-select': { options: [], innerHTML: '', value: '2' },
   'compare-content': { innerHTML: '' },
@@ -160,6 +166,11 @@ if (mockElements['compare-view'].style.display !== 'block') {
 switchFn('insights');
 if (mockElements['insights-view'].style.display !== 'block') {
   throw new Error('insights-view did not display block');
+}
+
+switchFn('timeline');
+if (mockElements['timeline-view'].style.display !== 'block') {
+  throw new Error('timeline-view did not display block');
 }
 
 switchFn('gallery');

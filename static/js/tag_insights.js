@@ -153,24 +153,29 @@ function switchView(mode) {
   const galleryGrid = document.getElementById('gallery-grid');
   const compareView = document.getElementById('compare-view');
   const insightsView = document.getElementById('insights-view');
+  const timelineView = document.getElementById('timeline-view');
   const scoreDistPanel = document.getElementById('score-dist-panel');
   const tabGallery = document.getElementById('tab-gallery');
   const tabCompare = document.getElementById('tab-compare');
   const tabInsights = document.getElementById('tab-insights');
+  const tabTimeline = document.getElementById('tab-timeline');
 
   if (tabGallery) tabGallery.classList.toggle('active', mode === 'gallery');
   if (tabCompare) tabCompare.classList.toggle('active', mode === 'compare');
   if (tabInsights) tabInsights.classList.toggle('active', mode === 'insights');
+  if (tabTimeline) tabTimeline.classList.toggle('active', mode === 'timeline');
 
   if (mode === 'gallery') {
     if (galleryGrid) galleryGrid.style.display = 'grid';
     if (compareView) compareView.style.display = 'none';
     if (insightsView) insightsView.style.display = 'none';
+    if (timelineView) timelineView.style.display = 'none';
     if (typeof renderScoreDistPanel === 'function') renderScoreDistPanel();
   } else if (mode === 'compare') {
     if (galleryGrid) galleryGrid.style.display = 'none';
     if (compareView) compareView.style.display = 'block';
     if (insightsView) insightsView.style.display = 'none';
+    if (timelineView) timelineView.style.display = 'none';
     if (scoreDistPanel) scoreDistPanel.style.display = 'none';
     populateCompareSelects();
     updateComparison();
@@ -178,8 +183,16 @@ function switchView(mode) {
     if (galleryGrid) galleryGrid.style.display = 'none';
     if (compareView) compareView.style.display = 'none';
     if (insightsView) insightsView.style.display = 'block';
+    if (timelineView) timelineView.style.display = 'none';
     if (scoreDistPanel) scoreDistPanel.style.display = 'none';
     renderTagInsights();
+  } else if (mode === 'timeline') {
+    if (galleryGrid) galleryGrid.style.display = 'none';
+    if (compareView) compareView.style.display = 'none';
+    if (insightsView) insightsView.style.display = 'none';
+    if (timelineView) timelineView.style.display = 'block';
+    if (scoreDistPanel) scoreDistPanel.style.display = 'none';
+    if (typeof renderGrowthTimeline === 'function') renderGrowthTimeline();
   }
 }
 

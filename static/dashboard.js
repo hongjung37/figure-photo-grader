@@ -277,6 +277,42 @@ function selectDateSession(dateStr) {
 }
 window.selectDateSession = selectDateSession;
 
+function applySessionDateJump(dateStr) {
+  if (!dateStr) return;
+  currentDateBasis = 'smart';
+  ['smart', 'captured', 'created'].forEach(k => {
+    const btn = document.getElementById(`date-basis-${k}`);
+    if (btn) btn.classList.toggle('active', k === 'smart');
+  });
+  currentDatePreset = 'session';
+  currentDateFrom = dateStr;
+  currentDateTo = dateStr;
+  const fromEl = document.getElementById('date-scope-from');
+  const toEl = document.getElementById('date-scope-to');
+  if (fromEl) fromEl.value = dateStr;
+  if (toEl) toEl.value = dateStr;
+  applyDateScopeChange();
+}
+window.applySessionDateJump = applySessionDateJump;
+
+function applyCustomDateJump(fromStr, toStr) {
+  if (!fromStr || !toStr) return;
+  currentDateBasis = 'smart';
+  ['smart', 'captured', 'created'].forEach(k => {
+    const btn = document.getElementById(`date-basis-${k}`);
+    if (btn) btn.classList.toggle('active', k === 'smart');
+  });
+  currentDatePreset = 'custom';
+  currentDateFrom = fromStr;
+  currentDateTo = toStr;
+  const fromEl = document.getElementById('date-scope-from');
+  const toEl = document.getElementById('date-scope-to');
+  if (fromEl) fromEl.value = fromStr;
+  if (toEl) toEl.value = toStr;
+  applyDateScopeChange();
+}
+window.applyCustomDateJump = applyCustomDateJump;
+
 function clearDateScope() {
   currentCollectionFilter = 'all';
   window.currentCollectionFilter = 'all';
@@ -697,6 +733,9 @@ function applyDateScopeChange() {
   if (typeof currentView !== 'undefined' && currentView === 'insights' && typeof renderTagInsights === 'function') {
     renderTagInsights();
   }
+  if (typeof currentView !== 'undefined' && currentView === 'timeline' && typeof renderGrowthTimeline === 'function') {
+    renderGrowthTimeline();
+  }
 }
 window.applyDateScopeChange = applyDateScopeChange;
 
@@ -1105,6 +1144,9 @@ function setCatFilter(cat, btn) {
   updateAdvFilterSummaryUI();
   renderScoreDistPanel();
   renderGallery();
+  if (typeof currentView !== 'undefined' && currentView === 'timeline' && typeof renderGrowthTimeline === 'function') {
+    renderGrowthTimeline();
+  }
 }
 
 function getItemFocalMm(item) {
@@ -1185,6 +1227,9 @@ function setFocalFilter(focalKey, btn) {
   updateAdvFilterSummaryUI();
   renderScoreDistPanel();
   renderGallery();
+  if (typeof currentView !== 'undefined' && currentView === 'timeline' && typeof renderGrowthTimeline === 'function') {
+    renderGrowthTimeline();
+  }
 }
 
 function clearFocalFilter() {
@@ -1216,6 +1261,9 @@ async function loadData() {
   renderGallery();
   if (typeof currentView !== 'undefined' && currentView === 'insights' && typeof renderTagInsights === 'function') {
     renderTagInsights();
+  }
+  if (typeof currentView !== 'undefined' && currentView === 'timeline' && typeof renderGrowthTimeline === 'function') {
+    renderGrowthTimeline();
   }
 }
 

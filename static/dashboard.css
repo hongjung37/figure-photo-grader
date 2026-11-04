@@ -1314,6 +1314,98 @@ body.darkroom .best-ratio-badge {
 
 
 /* ==========================================================================
+   Score Growth & Progression Timeline Chart View
+   ========================================================================== */
+.timeline-container {
+  display: none;
+  margin-top: 22px;
+}
+
+.timeline-top-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 14px 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
+}
+
+.timeline-kpis-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.timeline-kpi-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 16px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.timeline-kpi-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.timeline-chart-wrap {
+  position: relative;
+  width: 100%;
+  overflow-x: auto;
+  border-radius: 10px;
+  background: var(--card);
+}
+
+.timeline-chart-svg {
+  color: var(--ink);
+  transition: opacity 0.2s ease;
+}
+
+.timeline-tooltip {
+  display: none;
+  position: absolute;
+  z-index: 90;
+  width: 280px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.16);
+  pointer-events: auto;
+  transition: opacity 0.1s ease, transform 0.1s ease;
+}
+
+html.darkroom .timeline-tooltip,
+body.darkroom .timeline-tooltip {
+  background: #131b2e;
+  border-color: #243048;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+}
+
+html.darkroom .timeline-chart-svg,
+body.darkroom .timeline-chart-svg {
+  color: #f8fafc;
+}
+
+@media (max-width: 768px) {
+  .timeline-kpis-grid {
+    grid-template-columns: 1fr;
+  }
+  .timeline-top-bar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+/* ==========================================================================
    Blind Rating & Speed Feedback Subsystem Styles (Option A)
    ========================================================================== */
 .blind-setup-card {

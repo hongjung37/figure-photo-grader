@@ -73,6 +73,7 @@
         <button class="tab-btn" id="tab-tournament" onclick="openTournamentModal()" style="background:#fef3c7;border-color:#fde68a;color:#b45309;font-weight:700;">🏆 블라인드 토너먼트</button>
         <button class="tab-btn" id="tab-blind-rating" onclick="openBlindRatingModal()" style="background:#e0f2fe;border-color:#bae6fd;color:#0369a1;font-weight:700;">🎯 블라인드 채점</button>
         <button class="tab-btn" id="tab-insights" onclick="switchView('insights')">📊 태그·화각 인사이트</button>
+        <button class="tab-btn" id="tab-timeline" onclick="switchView('timeline')">📈 성장 타임라인</button>
       </div>
     </div>
 
@@ -275,6 +276,8 @@
   <!-- Tag Insights View (방안 A) -->
   <div class="insights-container" id="insights-view" style="display:none;margin-top:22px;"></div>
 
+  <!-- Score Growth Timeline View -->
+  <div class="timeline-container" id="timeline-view" style="display:none;margin-top:22px;"></div>
 </main>
 
 <!-- Detail Modal -->
@@ -679,6 +682,7 @@
 <script src="/static/js/modals.js"></script>
 <script src="/static/js/rating_advice.js"></script>
 <script src="/static/js/reanalyze.js"></script>
+<script src="/static/js/growth_timeline.js"></script>
 <script src="/static/js/detail_modal.js"></script>
 <script src="/static/dashboard.js"></script>
 </body>

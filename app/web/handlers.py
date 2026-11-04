@@ -124,6 +124,7 @@ _TAG_INSIGHTS_JS = load_template_file("static/js/tag_insights.js")
 _MODALS_JS = load_template_file("static/js/modals.js")
 _RATING_ADVICE_JS = load_template_file("static/js/rating_advice.js")
 _REANALYZE_JS = load_template_file("static/js/reanalyze.js")
+_GROWTH_TIMELINE_JS = load_template_file("static/js/growth_timeline.js")
 _DETAIL_MODAL_JS = load_template_file("static/js/detail_modal.js")
 _DASHBOARD_JS = load_template_file("static/dashboard.js")
 DASHBOARD_HTML = (
@@ -149,6 +150,8 @@ DASHBOARD_HTML = (
     + _RATING_ADVICE_JS
     + "\n"
     + _REANALYZE_JS
+    + "\n"
+    + _GROWTH_TIMELINE_JS
     + "\n"
     + _DETAIL_MODAL_JS
     + "\n"
