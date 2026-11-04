@@ -408,6 +408,11 @@ class CrossCheckOpinion(BaseModel):
     improvements: list[str] = Field(default_factory=list, description="보조 모델이 제안하는 개선점")
     composition_critique: str = Field(default="", description="구도 및 프레이밍 비평")
     lighting_critique: str = Field(default="", description="조명 및 명암 비평")
+    focus_status: str | None = Field(default=None, description="보조 모델이 판정한 눈동자 초점 상태")
+    composition_score: float | None = Field(default=None, description="보조 모델 구도 점수")
+    lighting_score: float | None = Field(default=None, description="보조 모델 조명 점수")
+    color_score: float | None = Field(default=None, description="보조 모델 색감 점수")
+    technique_score: float | None = Field(default=None, description="보조 모델 기술 점수")
 
     @field_validator("score", mode="before")
     @classmethod
@@ -700,6 +705,45 @@ class FastPhotoAnalysis(BaseModel):
             focus_status=self.focus_status,
             focus_notes=self.quick_summary or "",
             aesthetic_tags=AestheticTags.empty(),
+        )
+
+    def to_cross_check_opinion(self, model_name: str) -> CrossCheckOpinion:
+        """Convert FastPhotoAnalysis into a CrossCheckOpinion for second-opinion display."""
+        strengths: list[str] = []
+        improvements: list[str] = []
+
+        qs = self.quick_summary or ""
+        s_match = re.search(r"\[강점:\s*([^\]]+)\]", qs)
+        i_match = re.search(r"\[감점:\s*([^\]]+)\]", qs)
+
+        if s_match:
+            strengths.append(s_match.group(1).strip())
+        if i_match:
+            val = i_match.group(1).strip()
+            if val and "없음" not in val:
+                improvements.append(val)
+
+        if not strengths and self.focus_status:
+            strengths.append(f"초점: {self.focus_status}")
+
+        if not improvements and self.final_reason:
+            improvements.append(self.final_reason)
+
+        reason_text = self.final_reason or self.quick_summary or "경량 교차 검증 완료"
+
+        return CrossCheckOpinion(
+            model=model_name,
+            score=self.final_score,
+            reason=reason_text,
+            strengths=strengths,
+            improvements=improvements,
+            composition_critique="",
+            lighting_critique="",
+            focus_status=self.focus_status,
+            composition_score=self.composition_score,
+            lighting_score=self.lighting_score,
+            color_score=self.color_score,
+            technique_score=self.technique_score,
         )
 
 

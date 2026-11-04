@@ -524,6 +524,71 @@ class OpenAIClientTests(unittest.TestCase):
                 api_key=None,
             )
 
+    def test_fast_photo_analysis_to_cross_check_opinion(self) -> None:
+        from app.models.analysis import FastPhotoAnalysis
+
+        fast = FastPhotoAnalysis(
+            figure_category="스튜디오 연출/디오라마",
+            focus_status="완벽 칼초점",
+            quick_summary="[강점: 림라이트 윤곽선 및 눈동자 칼초점] [감점: 배경 여백 약간 부족]",
+            composition_score=8.5,
+            lighting_score=8.7,
+            color_score=8.2,
+            technique_score=9.0,
+            final_score=8.6,
+            final_reason="안정적인 연출과 또렷한 초점이 돋보임",
+        )
+        op = fast.to_cross_check_opinion(model_name="gpt-6-luna")
+        self.assertEqual(op.model, "gpt-6-luna")
+        self.assertEqual(op.score, 8.6)
+        self.assertEqual(op.reason, "안정적인 연출과 또렷한 초점이 돋보임")
+        self.assertEqual(op.focus_status, "완벽 칼초점")
+        self.assertIn("림라이트 윤곽선 및 눈동자 칼초점", op.strengths)
+        self.assertIn("배경 여백 약간 부족", op.improvements)
+        self.assertEqual(op.composition_score, 8.5)
+        self.assertEqual(op.lighting_score, 8.7)
+        self.assertEqual(op.color_score, 8.2)
+        self.assertEqual(op.technique_score, 9.0)
+
+    def test_cross_check_photo_routes_to_counterpart(self) -> None:
+        from app.models.analysis import CrossCheckOpinion
+        from app.services.multi_llm import cross_check_photo
+
+        dummy_op_openai = CrossCheckOpinion(
+            model="gpt-6-luna",
+            score=8.5,
+            reason="Luna 의견",
+            strengths=["디테일"],
+            improvements=[],
+            focus_status="완벽 칼초점",
+        )
+        dummy_op_gemini = CrossCheckOpinion(
+            model="gemini-3.5-flash-lite",
+            score=8.2,
+            reason="Gemini 의견",
+            strengths=["색감"],
+            improvements=[],
+            focus_status="완벽 칼초점",
+        )
+
+        # 1. Main model is Gemini -> routes to OpenAI Fast
+        with patch("app.services.multi_llm.cross_check_with_openai", return_value=dummy_op_openai) as mock_o, \
+             patch("app.services.multi_llm.cross_check_with_gemini", return_value=dummy_op_gemini) as mock_g:
+            res1 = cross_check_photo(self.sample_photo, main_model="gemini-3.5-flash-lite")
+            self.assertEqual(res1.model, "gpt-6-luna")
+            mock_o.assert_called_once()
+            self.assertEqual(mock_o.call_args.kwargs.get("analysis_mode"), "fast")
+            mock_g.assert_not_called()
+
+        # 2. Main model is OpenAI (gpt-6-luna) -> routes to Gemini Fast
+        with patch("app.services.multi_llm.cross_check_with_openai", return_value=dummy_op_openai) as mock_o, \
+             patch("app.services.multi_llm.cross_check_with_gemini", return_value=dummy_op_gemini) as mock_g:
+            res2 = cross_check_photo(self.sample_photo, main_model="gpt-6-luna")
+            self.assertEqual(res2.model, "gemini-3.5-flash-lite")
+            mock_g.assert_called_once()
+            self.assertEqual(mock_g.call_args.kwargs.get("analysis_mode"), "fast")
+            mock_o.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

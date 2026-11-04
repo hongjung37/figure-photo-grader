@@ -32,7 +32,7 @@ def _get_env_file_path() -> Path:
     return ENV_FILE_PATH
 
 from app.db.connection import get_db_connection
-from app.models.analysis import FastPhotoAnalysis, PhotoAnalysis
+from app.models.analysis import CrossCheckOpinion, FastPhotoAnalysis, PhotoAnalysis
 from app.models.crop import (
     CropBox,
     CropSet,
@@ -388,6 +388,61 @@ def analyze_with_gemini(
     if is_fast:
         return FastPhotoAnalysis.from_llm_json(output_text).to_photo_analysis()
     return PhotoAnalysis.from_llm_json(output_text)
+
+
+def cross_check_with_gemini(
+    photo: PreparedPhoto,
+    model: str = DEFAULT_MODEL,
+    category_hint: str | None = None,
+    api_key: str | None = None,
+    analysis_mode: str = "fast",
+) -> CrossCheckOpinion:
+    """Generate a second-opinion critique from Gemini (Fast mode by default)."""
+    load_dotenv(dotenv_path=_get_env_file_path(), override=False)
+    resolved_key = (api_key or os.environ.get("GEMINI_API_KEY") or "").strip()
+    if not resolved_key:
+        raise RuntimeError("GEMINI_API_KEY를 .env 파일 또는 환경변수에 설정해 주세요.")
+
+    is_fast = (analysis_mode or "fast").strip().lower() == "fast"
+    if is_fast:
+        prompt_text = build_fast_grader_prompt(photo, category_hint=category_hint)
+        target_schema = FastPhotoAnalysis.model_json_schema()
+        task_label = "Gemini 크로스 체크(경량)"
+    else:
+        prompt_text = build_grader_prompt(photo, category_hint=category_hint)
+        target_schema = PhotoAnalysis.model_json_schema()
+        task_label = "Gemini 크로스 체크"
+
+    client = _dispatch_get_client(resolved_key)
+    input_payload = [
+        {"type": "text", "text": prompt_text},
+        {
+            "type": "image",
+            "data": base64.b64encode(photo.upload_bytes).decode("ascii"),
+            "mime_type": photo.upload_mime_type,
+        },
+    ]
+    output_text = _dispatch_call_gemini_interaction(
+        client=client,
+        model=model,
+        input_payload=input_payload,
+        schema=target_schema,
+        task_desc=task_label,
+    )
+    if is_fast:
+        fast_analysis = FastPhotoAnalysis.from_llm_json(output_text)
+        return fast_analysis.to_cross_check_opinion(model_name=model)
+    full_analysis = PhotoAnalysis.from_llm_json(output_text)
+    return CrossCheckOpinion(
+        model=model,
+        score=full_analysis.final_score,
+        reason=full_analysis.final_reason,
+        strengths=full_analysis.strengths,
+        improvements=full_analysis.improvements,
+        composition_critique=full_analysis.composition_notes,
+        lighting_critique=full_analysis.lighting_notes,
+        focus_status=full_analysis.focus_status,
+    )
 
 
 def generate_lightroom_advice(photo: PreparedPhoto, model: str = DEFAULT_MODEL) -> LightroomAdvice:

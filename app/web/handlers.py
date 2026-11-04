@@ -742,28 +742,13 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         category_hint = category_param if category_param != "auto" else None
 
         if mode == "cross_check_only":
-            from app.services.openai_client import cross_check_with_openai
-            from app.models.analysis import OpenAICrossCheck
-            openai_res = cross_check_with_openai(
+            from app.services.multi_llm import cross_check_photo
+            opinion = cross_check_photo(
                 photo=prepared,
-                model=DEFAULT_OPENAI_MODEL,
+                main_model=row.get("model"),
                 category_hint=category_hint,
+                analysis_mode="fast",
             )
-            if isinstance(openai_res, OpenAICrossCheck):
-                opinion = CrossCheckOpinion(
-                    model=DEFAULT_OPENAI_MODEL,
-                    score=openai_res.score,
-                    reason=openai_res.reason,
-                    strengths=openai_res.strengths,
-                    improvements=openai_res.improvements,
-                    composition_critique=openai_res.composition_critique,
-                    lighting_critique=openai_res.lighting_critique,
-                )
-            elif isinstance(openai_res, CrossCheckOpinion):
-                opinion = openai_res
-            else:
-                raise RuntimeError(f"예상치 못한 OpenAI 응답 형태: {type(openai_res)}")
-
             updated_record = update_cross_check_opinion(self.db_path, record_id, opinion)
         else:
             raw_depth = str(data.get("analysis_mode", "fast" if mode == "fast" else "full")).strip().lower()

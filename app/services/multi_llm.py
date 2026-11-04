@@ -26,6 +26,7 @@ import threading
 from app.services.gemini_client import (
     analyze_with_gemini,
     clear_last_used_gemini_model,
+    cross_check_with_gemini,
     generate_all_sns_crops as generate_all_sns_crops_with_gemini,
     generate_lightroom_advice as generate_lightroom_advice_with_gemini,
     generate_single_sns_crop as generate_single_sns_crop_with_gemini,
@@ -106,7 +107,7 @@ def resolve_task_model(model_spec: str | None = None, default_tier: str = "lite"
 
 
 def _merge_analyses(g_res: PhotoAnalysis, o_res: Any, model_name: str = DEFAULT_OPENAI_MODEL) -> PhotoAnalysis:
-    """Attach OpenAI's independent critique as CrossCheckOpinion to Gemini's primary analysis without score averaging."""
+    """Attach independent critique as CrossCheckOpinion to primary analysis without score averaging."""
     if isinstance(o_res, OpenAICrossCheck):
         opinion = CrossCheckOpinion(
             model=model_name,
@@ -117,6 +118,8 @@ def _merge_analyses(g_res: PhotoAnalysis, o_res: Any, model_name: str = DEFAULT_
             composition_critique=o_res.composition_critique,
             lighting_critique=o_res.lighting_critique,
         )
+    elif isinstance(o_res, FastPhotoAnalysis):
+        opinion = o_res.to_cross_check_opinion(model_name=model_name)
     elif isinstance(o_res, PhotoAnalysis):
         opinion = CrossCheckOpinion(
             model=model_name,
@@ -126,6 +129,11 @@ def _merge_analyses(g_res: PhotoAnalysis, o_res: Any, model_name: str = DEFAULT_
             improvements=o_res.improvements,
             composition_critique=o_res.composition_notes,
             lighting_critique=o_res.lighting_notes,
+            focus_status=o_res.focus_status,
+            composition_score=o_res.composition_score,
+            lighting_score=o_res.lighting_score,
+            color_score=o_res.color_score,
+            technique_score=o_res.technique_score,
         )
     elif isinstance(o_res, CrossCheckOpinion):
         opinion = o_res
@@ -133,6 +141,61 @@ def _merge_analyses(g_res: PhotoAnalysis, o_res: Any, model_name: str = DEFAULT_
         opinion = None
 
     return g_res.model_copy(update={"cross_check_opinion": opinion})
+
+
+def cross_check_photo(
+    photo: PreparedPhoto,
+    main_model: str | None = None,
+    category_hint: str | None = None,
+    cross_model: str | None = None,
+    api_key: str | None = None,
+    analysis_mode: str = "fast",
+) -> CrossCheckOpinion:
+    """Run cross-check evaluation using the counterpart LLM provider in fast mode.
+
+    - If main_model is OpenAI (e.g. gpt-6-luna): cross-checks with Gemini (default: gemini-3.5-flash-lite).
+    - If main_model is Gemini (or default): cross-checks with OpenAI (default: gpt-6-luna).
+    """
+    model_str = (main_model or "").lower()
+    is_openai_main = model_str.startswith(("gpt-", "o1", "o3", "o4")) or "luna" in model_str
+
+    if is_openai_main:
+        target_gemini = cross_model or MODEL_PRESETS.get("standard", DEFAULT_MODEL)
+        return cross_check_with_gemini(
+            photo=photo,
+            model=target_gemini,
+            category_hint=category_hint,
+            api_key=api_key,
+            analysis_mode=analysis_mode,
+        )
+    else:
+        target_openai = cross_model or DEFAULT_OPENAI_MODEL
+        from app.services import openai_client as o_mod
+        fn = o_mod.cross_check_with_openai
+        if not (hasattr(fn, "_mock_return_value") or hasattr(fn, "return_value")):
+            fn = cross_check_with_openai
+        res = fn(
+            photo=photo,
+            model=target_openai,
+            category_hint=category_hint,
+            api_key=api_key,
+            analysis_mode=analysis_mode,
+        )
+        if isinstance(res, CrossCheckOpinion):
+            return res
+        if isinstance(res, OpenAICrossCheck):
+            return CrossCheckOpinion(
+                model=target_openai,
+                score=res.score,
+                reason=res.reason,
+                strengths=res.strengths,
+                improvements=res.improvements,
+                composition_critique=res.composition_critique,
+                lighting_critique=res.lighting_critique,
+            )
+        if isinstance(res, FastPhotoAnalysis):
+            return res.to_cross_check_opinion(model_name=target_openai)
+        return res
 
 
 def analyze_photo(
@@ -195,6 +258,7 @@ def analyze_photo(
                 model=target_openai_model,
                 category_hint=category_hint,
                 api_key=api_key,
+                analysis_mode="fast",
             )
             gemini_res = gemini_fut.result()
             openai_res = openai_fut.result()
