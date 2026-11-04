@@ -564,32 +564,88 @@
         </div>
       </div>
 
-      <!-- Settings Grid -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
-        <div>
-          <label class="reanalyze-sublabel" for="batch-reanalyze-tier">적용할 AI 모델:</label>
-          <select id="batch-reanalyze-tier" class="select-input" style="width:100%;font-size:0.8rem;padding:6px 10px;">
-            <option value="standard" selected>🔍 Gemini Flash-Lite 3.5 (표준 화질 - 권장)</option>
-            <option value="luna">🌙 OpenAI GPT-6 Luna (최고 정확도 엄격 심사)</option>
-            <option value="lite">⚡ Gemini Flash-Lite 3.1 (초고속 대량 스크리닝)</option>
-            <option value="flash-3.6">🧪 Gemini Flash 3.6 (실험적 고성능)</option>
-            <option value="flash-3.7">🚀 Gemini Flash 3.7 (차세대 고속 비평)</option>
-            <option value="pro">💎 Gemini Flash 3.8 (고화질 디테일 심층 비평)</option>
-            <option value="ensemble">🤝 앙상블: Flash-Lite 3.5 + GPT-6 Luna</option>
-            <option value="ensemble-3.7">🤝 앙상블: Flash 3.7 + GPT-6 Luna</option>
-            <option value="ensemble-pro">🤝 앙상블: Flash 3.8 + GPT-6 Luna</option>
-          </select>
-        </div>
+      <!-- Batch Operation Mode Selection -->
+      <div style="margin-bottom:14px;">
+        <label class="reanalyze-sublabel" style="display:block;margin-bottom:6px;">작업 방식 선택:</label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <label id="batch-mode-card-full" class="reanalyze-mode-card selected" style="cursor:pointer;padding:10px 12px;margin:0;display:flex;align-items:flex-start;" onclick="selectBatchOperationMode('full')">
+            <input type="radio" name="batch-operation-mode" id="batch-op-mode-full" value="full" checked onchange="selectBatchOperationMode('full')" style="margin-top:2px;">
+            <div style="margin-left:8px;">
+              <div style="font-weight:800;font-size:0.88rem;color:var(--text);">⚙️ 모델 전면 재평가</div>
+              <div style="font-size:0.73rem;color:var(--muted);margin-top:2px;line-height:1.4;">선택한 모델로 주 종합 점수·세부 점수·태그를 새로 생성하여 덮어씁니다.</div>
+            </div>
+          </label>
 
-        <div>
-          <label class="reanalyze-sublabel" for="batch-reanalyze-depth">분석 깊이 (모드):</label>
-          <select id="batch-reanalyze-depth" class="select-input" style="width:100%;font-size:0.8rem;padding:6px 10px;">
-            <option value="fast" selected>⚡ 경량 분석 (5대 점수 · 초점 · 1줄 사유 고속 처리)</option>
-            <option value="full">🔍 정밀 분석 (장단점 · 4대 영역 노트 · 8대 미학 태그)</option>
-          </select>
+          <label id="batch-mode-card-cc" class="reanalyze-mode-card" style="cursor:pointer;padding:10px 12px;margin:0;display:flex;align-items:flex-start;" onclick="selectBatchOperationMode('cross_check_only')">
+            <input type="radio" name="batch-operation-mode" id="batch-op-mode-cc" value="cross_check_only" onchange="selectBatchOperationMode('cross_check_only')" style="margin-top:2px;">
+            <div style="margin-left:8px;">
+              <div style="font-weight:800;font-size:0.88rem;color:var(--text);display:flex;align-items:center;gap:6px;">
+                <span>🤝 크로스체크만 채워넣기</span>
+                <span style="font-size:0.68rem;background:rgba(2,132,199,0.12);color:#0284c7;padding:1px 5px;border-radius:4px;font-weight:700;">경량 고속</span>
+              </div>
+              <div style="font-size:0.73rem;color:var(--muted);margin-top:2px;line-height:1.4;">기존 주 점수는 보존하고, 상대 모델의 보조 의견만 빠르게 채워넣습니다.</div>
+            </div>
+          </label>
         </div>
       </div>
 
+      <!-- Settings for Full Re-evaluation -->
+      <div id="batch-reanalyze-full-settings">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+          <div>
+            <label class="reanalyze-sublabel" for="batch-reanalyze-tier">적용할 AI 모델:</label>
+            <select id="batch-reanalyze-tier" class="select-input" style="width:100%;font-size:0.8rem;padding:6px 10px;">
+              <option value="standard" selected>🔍 Gemini Flash-Lite 3.5 (표준 화질 - 권장)</option>
+              <option value="luna">🌙 OpenAI GPT-6 Luna (최고 정확도 엄격 심사)</option>
+              <option value="lite">⚡ Gemini Flash-Lite 3.1 (초고속 대량 스크리닝)</option>
+              <option value="flash-3.6">🧪 Gemini Flash 3.6 (실험적 고성능)</option>
+              <option value="flash-3.7">🚀 Gemini Flash 3.7 (차세대 고속 비평)</option>
+              <option value="pro">💎 Gemini Flash 3.8 (고화질 디테일 심층 비평)</option>
+              <option value="ensemble">🤝 앙상블: Flash-Lite 3.5 + GPT-6 Luna</option>
+              <option value="ensemble-3.7">🤝 앙상블: Flash 3.7 + GPT-6 Luna</option>
+              <option value="ensemble-pro">🤝 앙상블: Flash 3.8 + GPT-6 Luna</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="reanalyze-sublabel" for="batch-reanalyze-depth">분석 깊이 (모드):</label>
+            <select id="batch-reanalyze-depth" class="select-input" style="width:100%;font-size:0.8rem;padding:6px 10px;">
+              <option value="fast" selected>⚡ 경량 분석 (5대 점수 · 초점 · 1줄 사유 고속 처리)</option>
+              <option value="full">🔍 정밀 분석 (장단점 · 4대 영역 노트 · 8대 미학 태그)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Median Sampling Checkbox -->
+        <div style="margin-bottom:14px;padding:9px 12px;background:rgba(99,102,241,0.06);border:1px dashed rgba(99,102,241,0.32);border-radius:8px;">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:0.83rem;font-weight:600;color:var(--text);user-select:none;">
+            <input type="checkbox" id="batch-reanalyze-median" checked style="width:16px;height:16px;accent-color:#4f46e5;cursor:pointer;">
+            <span>🎯 3회 병렬 채점 후 중앙값(Median) 채택</span>
+            <span style="background:rgba(99,102,241,0.15);color:#4f46e5;padding:2px 6px;border-radius:4px;font-size:0.72rem;font-weight:700;">아웃라이어 튐 방지</span>
+          </label>
+          <div style="font-size:0.74rem;color:var(--muted);margin-top:3px;padding-left:24px;line-height:1.4;">
+            동일 사진을 3회 독립 채점하여 단발성 튀는 점수(예: 4점대 튐)를 배제하고 가장 신뢰도 높은 중앙값 분석을 저장합니다.
+          </div>
+        </div>
+      </div>
+
+      <!-- Settings for Cross-check Only -->
+      <div id="batch-reanalyze-cc-settings" style="display:none;margin-bottom:14px;background:rgba(2,132,199,0.06);border:1px solid rgba(2,132,199,0.25);border-radius:10px;padding:12px 14px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+          <span style="font-size:1.1rem;">⚡</span>
+          <strong style="font-size:0.85rem;color:var(--blue);">상대 모델 경량 교차 검증 (Fast Mode)</strong>
+        </div>
+        <div style="font-size:0.76rem;color:var(--text);line-height:1.45;margin-bottom:10px;">
+          각 사진의 주 평가 모델에 맞춰 상대 LLM(Gemini ↔ OpenAI)이 약 1~3초 만에 4대 세부 점수 및 강점/보완점을 생성합니다. 사진의 본 종합 점수와 카테고리, 태그는 그대로 안전하게 보존됩니다.
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:0.82rem;font-weight:700;color:var(--text);user-select:none;background:var(--card-bg, #fff);padding:8px 12px;border-radius:6px;border:1px solid var(--line, #bae6fd);">
+          <input type="checkbox" id="batch-reanalyze-skip-existing-cc" checked onchange="updateBatchReanalyzeSkipCount()" style="width:16px;height:16px;accent-color:#0284c7;cursor:pointer;">
+          <span>이미 크로스체크가 있는 사진은 건너뛰기</span>
+          <span id="batch-reanalyze-skip-cc-badge" style="font-size:0.72rem;background:#e0f2fe;color:#0369a1;padding:1px 6px;border-radius:4px;font-weight:700;">누락된 사진만 보충</span>
+        </label>
+      </div>
+
+      <!-- Common Settings Grid -->
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
         <div>
           <label class="reanalyze-sublabel" for="batch-reanalyze-category">피규어 세부 유형 (카테고리):</label>
@@ -610,18 +666,6 @@
             <option value="3">🚀 3장씩 병렬 진행 (고속)</option>
             <option value="1">🐢 1장씩 순차 진행 (할당량 극보수)</option>
           </select>
-        </div>
-      </div>
-
-      <!-- Median Sampling Checkbox -->
-      <div style="margin-bottom:16px;padding:9px 12px;background:rgba(99,102,241,0.06);border:1px dashed rgba(99,102,241,0.32);border-radius:8px;">
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:0.83rem;font-weight:600;color:var(--text);user-select:none;">
-          <input type="checkbox" id="batch-reanalyze-median" checked style="width:16px;height:16px;accent-color:#4f46e5;cursor:pointer;">
-          <span>🎯 3회 병렬 채점 후 중앙값(Median) 채택</span>
-          <span style="background:rgba(99,102,241,0.15);color:#4f46e5;padding:2px 6px;border-radius:4px;font-size:0.72rem;font-weight:700;">아웃라이어 튐 방지</span>
-        </label>
-        <div style="font-size:0.74rem;color:var(--muted);margin-top:3px;padding-left:24px;line-height:1.4;">
-          동일 사진을 3회 독립 채점하여 단발성 튀는 점수(예: 4점대 튐)를 배제하고 가장 신뢰도 높은 중앙값 분석을 저장합니다.
         </div>
       </div>
 
@@ -658,14 +702,14 @@
     <!-- SECTION C: Finished Summary (Visible when complete) -->
     <div id="batch-reanalyze-summary-section" style="display:none;margin-top:8px;">
       <div style="padding:12px 16px;background:rgba(16,185,129,0.1);border:1px solid #34d399;border-radius:10px;margin-bottom:14px;">
-        <div style="font-size:0.95rem;font-weight:800;color:#065f46;margin-bottom:4px;">
+        <div id="batch-reanalyze-summary-title" style="font-size:0.95rem;font-weight:800;color:#065f46;margin-bottom:4px;">
           🎉 일괄 재평가가 성공적으로 완료되었습니다!
         </div>
         <div id="batch-reanalyze-summary-stats" style="font-size:0.82rem;color:var(--text);display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
         </div>
       </div>
 
-      <div style="font-size:0.8rem;font-weight:700;margin-bottom:6px;color:var(--text);">📊 사진별 점수 변화 결과 (Before → After):</div>
+      <div id="batch-reanalyze-diff-title" style="font-size:0.8rem;font-weight:700;margin-bottom:6px;color:var(--text);">📊 사진별 점수 변화 결과 (Before → After):</div>
       <div id="batch-reanalyze-diff-list" style="max-height:220px;overflow-y:auto;background:var(--card-sub, #f8fafc);border:1px solid var(--line, #e2e8f0);border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px;font-size:0.78rem;">
       </div>
 

@@ -58,7 +58,12 @@ function selectReanalyzeMode(id, mode) {
 
 function renderReanalyzePanel(item) {
   const currentCategoryKey = getCategoryKeyFromTitle(item.figure_category);
-  const hasLuna = Boolean(item.cross_check_opinion);
+  const mainModel = (item.model || '').toLowerCase();
+  const isMainOpenAI = mainModel.startsWith('gpt') || mainModel.includes('luna');
+  const counterpartProv = isMainOpenAI ? 'Gemini' : 'OpenAI';
+  const counterpartModelName = isMainOpenAI ? 'Flash-Lite 3.5' : 'GPT-6 Luna';
+  const mainProv = isMainOpenAI ? 'OpenAI' : 'Gemini';
+  const hasCrossCheck = Boolean(item.cross_check_opinion);
   const savedTier = (window.ModelSettings && window.ModelSettings.get('photo_grading')) || 'standard';
   const currentModelBadge = (window.ModelSettings && item.model)
     ? window.ModelSettings.formatBadge(item.model)
@@ -120,12 +125,12 @@ function renderReanalyzePanel(item) {
           <input type="radio" name="reanalyze-mode-${item.id}" value="cross_check_only" onchange="selectReanalyzeMode(${item.id}, 'cross_check_only')">
           <div class="reanalyze-mode-content">
             <div class="reanalyze-mode-badge-wrap">
-              <span class="reanalyze-mode-badge mode-luna">🤝 GPT-6 Luna 보조 의견만 단독 추가</span>
+              <span class="reanalyze-mode-badge mode-luna">🤝 ${counterpartProv} ${counterpartModelName} 보조 의견 (경량)</span>
               <span class="reanalyze-token-tag">⚡ 본 점수·모델 유지</span>
             </div>
-            <strong class="reanalyze-mode-title">${hasLuna ? 'Luna 크로스체크 의견만 다시 생성' : 'OpenAI 크로스체크 비평만 추가 (본 점수 유지)'}</strong>
+            <strong class="reanalyze-mode-title">${hasCrossCheck ? `${counterpartProv} 크로스체크 의견 갱신 (경량)` : `${counterpartProv} 크로스체크 비평 추가 (경량)`}</strong>
             <p class="reanalyze-mode-text">
-              ⚠️ 주의: 이 모드는 Gemini의 기존 종합 점수(${Number(item.final_score || 0).toFixed(1)}점)와 주 분석 모델을 변경하지 않고 그대로 보존하며, 하단의 GPT-6 Luna 보조 비평 박스만 갱신합니다.
+              주 평가(${mainProv} ${Number(item.final_score || 0).toFixed(1)}점)와 주 모델을 변경하지 않고 보존하며, 상대 모델인 <b>${counterpartProv} ${counterpartModelName}</b>의 독립된 경량 비평 및 4대 세부 점수만 약 1~4초 만에 빠르게 갱신합니다.
             </p>
           </div>
         </div>
@@ -199,6 +204,11 @@ async function executeReanalyze(id) {
     ? Number(beforeItem.cross_check_opinion.score)
     : null;
 
+  const mainModel = ((beforeItem && beforeItem.model) || '').toLowerCase();
+  const isMainOpenAI = mainModel.startsWith('gpt') || mainModel.includes('luna');
+  const counterpartProv = isMainOpenAI ? 'Gemini' : 'OpenAI';
+  const counterpartModelName = isMainOpenAI ? 'Flash-Lite 3.5' : 'GPT-6 Luna';
+
   if (submitBtn) submitBtn.disabled = true;
   if (statusEl) {
     statusEl.style.display = 'block';
@@ -207,10 +217,10 @@ async function executeReanalyze(id) {
       : tier;
     const depthLabel = analysisMode === 'fast' ? '⚡ 경량 재평가' : '🔍 정밀 재평가';
     const modeName = mode === 'cross_check_only'
-      ? 'OpenAI GPT-6 Luna 크로스체크 단독'
+      ? `${counterpartProv} ${counterpartModelName} 크로스체크 단독 (경량)`
       : `AI ${depthLabel} (${_escapeReanalyzeHtml(chosenLabel)})`;
     const samplingText = (sampleCount > 1 && mode === 'full') ? ' [🎯 3회 중앙값 정밀 채점]' : '';
-    statusEl.innerHTML = `⏳ <b>${modeName}${samplingText}</b> 실행 중... (단독 모델 약 5~10초, 앙상블 약 10~25초 소요)`;
+    statusEl.innerHTML = `⏳ <b>${modeName}${samplingText}</b> 실행 중... (경량 크로스체크 약 1~4초 소요)`;
   }
 
   try {
@@ -330,6 +340,64 @@ window.executeReanalyze = executeReanalyze;
 // --- Batch Photo Re-analysis ---
 let _batchReanalyzeCancelled = false;
 let _batchReanalyzeResults = [];
+let _batchReanalyzeMode = 'full';
+
+function selectBatchOperationMode(mode) {
+  const isCc = (mode === 'cross_check_only');
+  _batchReanalyzeMode = isCc ? 'cross_check_only' : 'full';
+  const cardFull = document.getElementById('batch-mode-card-full');
+  const cardCc = document.getElementById('batch-mode-card-cc');
+  const radFull = document.getElementById('batch-op-mode-full');
+  const radCc = document.getElementById('batch-op-mode-cc');
+  const secFull = document.getElementById('batch-reanalyze-full-settings');
+  const secCc = document.getElementById('batch-reanalyze-cc-settings');
+  const startBtn = document.getElementById('btn-batch-reanalyze-start');
+
+  if (cardFull) cardFull.classList.toggle('selected', !isCc);
+  if (cardCc) cardCc.classList.toggle('selected', isCc);
+  if (radFull) radFull.checked = !isCc;
+  if (radCc) radCc.checked = isCc;
+
+  if (secFull) secFull.style.display = isCc ? 'none' : 'block';
+  if (secCc) secCc.style.display = isCc ? 'block' : 'none';
+
+  if (startBtn) {
+    if (isCc) {
+      startBtn.innerHTML = '🤝 크로스체크 일괄 채워넣기 시작';
+      startBtn.style.background = '#0284c7';
+    } else {
+      startBtn.innerHTML = '🚀 일괄 재평가 시작';
+      startBtn.style.background = '#0d9488';
+    }
+  }
+}
+
+function updateBatchReanalyzeSkipCount() {
+  const batchIds = (typeof selectedBatchIds !== 'undefined') ? selectedBatchIds : (window.selectedBatchIds || new Set());
+  const dataList = (typeof allData !== 'undefined' ? allData : (window.allData || []));
+  const items = dataList.filter(it => batchIds.has(Number(it.id)));
+  const hasCcCount = items.filter(it => Boolean(it.cross_check_opinion)).length;
+  const missingCcCount = items.length - hasCcCount;
+  const skipBadge = document.getElementById('batch-reanalyze-skip-cc-badge');
+  const checkbox = document.getElementById('batch-reanalyze-skip-existing-cc');
+  if (skipBadge) {
+    if (checkbox && !checkbox.checked) {
+      skipBadge.textContent = `전체 ${items.length}장 덮어쓰기 생성`;
+      skipBadge.style.background = '#fef3c7';
+      skipBadge.style.color = '#b45309';
+    } else {
+      if (missingCcCount === 0) {
+        skipBadge.textContent = `모든 사진에 이미 보유 중 (${hasCcCount}장 건너뜀)`;
+      } else if (hasCcCount === 0) {
+        skipBadge.textContent = `전체 ${missingCcCount}장 신규 생성`;
+      } else {
+        skipBadge.textContent = `미보유 ${missingCcCount}장 채우기 (기보유 ${hasCcCount}장 건너뜀)`;
+      }
+      skipBadge.style.background = '#e0f2fe';
+      skipBadge.style.color = '#0369a1';
+    }
+  }
+}
 
 function openBatchReanalyzeModal() {
   const batchIds = (typeof selectedBatchIds !== 'undefined') ? selectedBatchIds : (window.selectedBatchIds || new Set());
@@ -355,19 +423,25 @@ function openBatchReanalyzeModal() {
     strip.innerHTML = items.map(it => {
       const score = (it.final_score != null) ? Number(it.final_score).toFixed(1) : '-';
       const mBadge = (window.ModelSettings && it.model) ? window.ModelSettings.formatBadge(it.model) : (it.model || '');
+      const ccBadge = it.cross_check_opinion
+        ? `<span style="font-size:0.65rem;background:rgba(2,132,199,0.12);color:#0284c7;padding:1px 4px;border-radius:3px;">🤝${Number(it.cross_check_opinion.score).toFixed(1)}</span>`
+        : '';
       return `
         <div style="flex:0 0 160px;background:var(--card-bg, #fff);border:1px solid var(--line, #cbd5e1);border-radius:8px;padding:6px;display:flex;gap:8px;align-items:center;">
           <img src="/api/image/${it.id}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;background:#0f172a;flex-shrink:0;">
           <div style="overflow:hidden;flex:1;">
             <div style="font-weight:700;font-size:0.75rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${_escapeReanalyzeHtml(it.filename)}">${_escapeReanalyzeHtml(it.filename)}</div>
-            <div style="display:flex;align-items:center;gap:4px;margin-top:2px;">
+            <div style="display:flex;align-items:center;gap:4px;margin-top:2px;flex-wrap:wrap;">
               <span style="font-size:0.75rem;font-weight:800;color:var(--blue);">${score}점</span>
               ${mBadge ? `<span style="font-size:0.68rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_escapeReanalyzeHtml(mBadge)}</span>` : ''}
+              ${ccBadge}
             </div>
           </div>
         </div>
       `;
     }).join('');
+
+    updateBatchReanalyzeSkipCount();
   }
 
   // Set default model from ModelSettings
@@ -382,6 +456,9 @@ function openBatchReanalyzeModal() {
   if (medianBox && window.ModelSettings) {
     medianBox.checked = (window.ModelSettings.get('median_sampling') !== 'false');
   }
+
+  // Default operation mode to 'full'
+  selectBatchOperationMode('full');
 
   // Reset sections
   const secConfig = document.getElementById('batch-reanalyze-config-section');
@@ -408,11 +485,14 @@ async function executeBatchReanalyze() {
   const items = dataList.filter(it => batchIds.has(Number(it.id)));
   if (items.length === 0) return;
 
-  const tier = document.getElementById('batch-reanalyze-tier').value;
-  const analysisMode = document.getElementById('batch-reanalyze-depth').value;
-  const categoryChoice = document.getElementById('batch-reanalyze-category').value;
-  const concurrency = parseInt(document.getElementById('batch-reanalyze-concurrency').value, 10) || 2;
-  const useMedian = document.getElementById('batch-reanalyze-median').checked;
+  const isCrossCheckOnly = (document.getElementById('batch-op-mode-cc')?.checked === true);
+  const skipExisting = isCrossCheckOnly && (document.getElementById('batch-reanalyze-skip-existing-cc')?.checked !== false);
+
+  const tier = document.getElementById('batch-reanalyze-tier')?.value || 'standard';
+  const analysisMode = isCrossCheckOnly ? 'fast' : (document.getElementById('batch-reanalyze-depth')?.value || 'fast');
+  const categoryChoice = document.getElementById('batch-reanalyze-category')?.value || 'keep';
+  const concurrency = parseInt(document.getElementById('batch-reanalyze-concurrency')?.value, 10) || 2;
+  const useMedian = isCrossCheckOnly ? false : (document.getElementById('batch-reanalyze-median')?.checked || false);
   const sampleCount = useMedian ? 3 : 1;
 
   // Show progress section
@@ -420,12 +500,19 @@ async function executeBatchReanalyze() {
   document.getElementById('batch-reanalyze-progress-section').style.display = 'block';
   document.getElementById('batch-reanalyze-summary-section').style.display = 'none';
 
+  const progTitle = document.getElementById('batch-reanalyze-progress-title');
+  if (progTitle) {
+    progTitle.textContent = isCrossCheckOnly ? '🤝 크로스체크 일괄 채워넣기 진행 중...' : '일괄 재평가 진행 중...';
+  }
+
   _batchReanalyzeCancelled = false;
   _batchReanalyzeResults = [];
+  _batchReanalyzeMode = isCrossCheckOnly ? 'cross_check_only' : 'full';
 
   const total = items.length;
   let completed = 0;
   let successCount = 0;
+  let skippedCount = 0;
   let failCount = 0;
 
   const progBar = document.getElementById('batch-reanalyze-progress-bar');
@@ -434,23 +521,36 @@ async function executeBatchReanalyze() {
   const liveList = document.getElementById('batch-reanalyze-live-list');
 
   // Initialize live list
-  liveList.innerHTML = items.map(it => `
-    <div id="batch-item-row-${it.id}" style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;border-radius:6px;background:var(--card-bg, #fff);border:1px solid var(--line, #e2e8f0);">
-      <span style="display:flex;align-items:center;gap:6px;overflow:hidden;flex:1;">
-        <span id="batch-item-icon-${it.id}">⏱️</span>
-        <strong style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_escapeReanalyzeHtml(it.filename)}</strong>
-        <span style="color:var(--muted);font-size:0.74rem;flex-shrink:0;">(기존: ${it.final_score != null ? Number(it.final_score).toFixed(1) : '-'}점)</span>
-      </span>
-      <span id="batch-item-status-${it.id}" style="color:var(--muted);font-weight:600;flex-shrink:0;margin-left:10px;">대기 중</span>
-    </div>
-  `).join('');
+  liveList.innerHTML = items.map(it => {
+    const hasCc = Boolean(it.cross_check_opinion);
+    const willSkip = isCrossCheckOnly && skipExisting && hasCc;
+    const initialStatus = willSkip ? '건너뜀 대기 (보유 중)' : '대기 중';
+    const initialIcon = willSkip ? '⏭️' : '⏱️';
+    const mainScore = it.final_score != null ? Number(it.final_score).toFixed(1) : '-';
+    const ccInfo = hasCc ? ` · 🤝${Number(it.cross_check_opinion.score).toFixed(1)}점` : '';
+
+    return `
+      <div id="batch-item-row-${it.id}" style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;border-radius:6px;background:var(--card-bg, #fff);border:1px solid var(--line, #e2e8f0);">
+        <span style="display:flex;align-items:center;gap:6px;overflow:hidden;flex:1;">
+          <span id="batch-item-icon-${it.id}">${initialIcon}</span>
+          <strong style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_escapeReanalyzeHtml(it.filename)}</strong>
+          <span style="color:var(--muted);font-size:0.74rem;flex-shrink:0;">(본점수: ${mainScore}점${ccInfo})</span>
+        </span>
+        <span id="batch-item-status-${it.id}" style="color:var(--muted);font-weight:600;flex-shrink:0;margin-left:10px;">${initialStatus}</span>
+      </div>
+    `;
+  }).join('');
 
   const updateProgress = () => {
-    const pct = Math.round((completed / total) * 100);
+    const pct = total > 0 ? Math.round((completed / total) * 100) : 100;
     if (progBar) progBar.style.width = `${pct}%`;
     if (progPct) progPct.textContent = `${pct}%`;
     if (progStatus) {
-      progStatus.innerHTML = `진행 현황: <b>${completed} / ${total}장 완료</b> (성공 <span style="color:#059669">${successCount}</span> · 실패 <span style="color:#e11d48">${failCount}</span>)`;
+      if (isCrossCheckOnly) {
+        progStatus.innerHTML = `진행 현황: <b>${completed} / ${total}장 완료</b> (신규 생성 <span style="color:#0284c7;font-weight:700;">${successCount}</span> · 건너뜀 <span style="color:#64748b;font-weight:700;">${skippedCount}</span> · 실패 <span style="color:#e11d48;font-weight:700;">${failCount}</span>)`;
+      } else {
+        progStatus.innerHTML = `진행 현황: <b>${completed} / ${total}장 완료</b> (성공 <span style="color:#059669;font-weight:700;">${successCount}</span> · 실패 <span style="color:#e11d48;font-weight:700;">${failCount}</span>)`;
+      }
     }
   };
   updateProgress();
@@ -463,6 +563,31 @@ async function executeBatchReanalyze() {
       const it = items[queueIdx++];
       const id = Number(it.id);
 
+      const iconEl = document.getElementById(`batch-item-icon-${id}`);
+      const statusEl = document.getElementById(`batch-item-status-${id}`);
+
+      // Check skip condition
+      if (isCrossCheckOnly && skipExisting && it.cross_check_opinion) {
+        skippedCount++;
+        completed++;
+        if (iconEl) iconEl.textContent = '⏭️';
+        if (statusEl) {
+          statusEl.innerHTML = `<span style="color:var(--muted);">기존 보유 (${Number(it.cross_check_opinion.score).toFixed(1)}점) 건너뜀</span>`;
+        }
+        _batchReanalyzeResults.push({
+          id,
+          filename: it.filename,
+          success: true,
+          skipped: true,
+          prevScore: it.final_score != null ? Number(it.final_score) : null,
+          ccScore: Number(it.cross_check_opinion.score),
+          model: it.cross_check_opinion.model,
+          provider: it.cross_check_opinion.provider,
+        });
+        updateProgress();
+        continue;
+      }
+
       // Determine category
       let category = categoryChoice;
       if (categoryChoice === 'keep') {
@@ -470,40 +595,69 @@ async function executeBatchReanalyze() {
       }
 
       // Mark running
-      const iconEl = document.getElementById(`batch-item-icon-${id}`);
-      const statusEl = document.getElementById(`batch-item-status-${id}`);
       if (iconEl) iconEl.textContent = '⏳';
       if (statusEl) {
-        statusEl.innerHTML = `<span style="color:#0284c7;">재평가 중...</span>`;
+        statusEl.innerHTML = `<span style="color:#0284c7;">${isCrossCheckOnly ? '크로스체크 생성 중...' : '재평가 중...'}</span>`;
       }
 
       const pScore = it.final_score != null ? Number(it.final_score) : null;
       let resItem = null;
 
       try {
-        const res = await API.reanalyzePhoto(id, 'full', tier, category, sampleCount, analysisMode);
+        const runMode = isCrossCheckOnly ? 'cross_check_only' : 'full';
+        const res = await API.reanalyzePhoto(id, runMode, tier, category, sampleCount, analysisMode);
         if (_batchReanalyzeCancelled) break;
         if (res && res.success && res.analysis) {
           successCount++;
-          const nScore = Number(res.analysis.final_score);
-          const diffVal = (pScore != null) ? +(nScore - pScore).toFixed(1) : 0;
-          const diffSign = diffVal > 0 ? `+${diffVal.toFixed(1)}` : `${diffVal.toFixed(1)}`;
-          const diffColor = diffVal > 0 ? '#059669' : (diffVal < 0 ? '#e11d48' : '#64748b');
+          // Update in-memory data item
+          const targetItem = dataList.find(d => Number(d.id) === id);
+          if (targetItem) {
+            Object.assign(targetItem, res.analysis);
+          }
 
-          resItem = {
-            id,
-            filename: it.filename,
-            success: true,
-            prevScore: pScore,
-            newScore: nScore,
-            diffVal,
-            sampledScores: res.sampled_scores || null,
-            model: res.analysis.model,
-          };
+          if (isCrossCheckOnly) {
+            const cc = res.analysis.cross_check_opinion;
+            const ccScore = cc && cc.score != null ? Number(cc.score) : null;
+            const provName = cc ? (cc.provider || '상대 모델') : '크로스체크';
+            resItem = {
+              id,
+              filename: it.filename,
+              success: true,
+              skipped: false,
+              isCrossCheck: true,
+              prevScore: pScore,
+              ccScore: ccScore,
+              model: cc?.model,
+              provider: cc?.provider,
+            };
+            if (iconEl) iconEl.textContent = '🤝';
+            if (statusEl) {
+              const scoreText = ccScore != null ? `${ccScore.toFixed(1)}점` : '완료';
+              statusEl.innerHTML = `<span style="background:rgba(2,132,199,0.12);color:#0284c7;padding:2px 6px;border-radius:4px;font-weight:700;">🤝 ${scoreText}</span> <small style="color:var(--muted);margin-left:4px;">(${provName})</small>`;
+            }
+          } else {
+            const nScore = Number(res.analysis.final_score);
+            const diffVal = (pScore != null) ? +(nScore - pScore).toFixed(1) : 0;
+            const diffSign = diffVal > 0 ? `+${diffVal.toFixed(1)}` : `${diffVal.toFixed(1)}`;
+            const diffColor = diffVal > 0 ? '#059669' : (diffVal < 0 ? '#e11d48' : '#64748b');
 
-          if (iconEl) iconEl.textContent = '✅';
-          if (statusEl) {
-            statusEl.innerHTML = `<b>${nScore.toFixed(1)}점</b> <span style="color:${diffColor};font-size:0.75rem;margin-left:4px;">(${diffSign}점)</span>`;
+            resItem = {
+              id,
+              filename: it.filename,
+              success: true,
+              skipped: false,
+              isCrossCheck: false,
+              prevScore: pScore,
+              newScore: nScore,
+              diffVal,
+              sampledScores: res.sampled_scores || null,
+              model: res.analysis.model,
+            };
+
+            if (iconEl) iconEl.textContent = '✅';
+            if (statusEl) {
+              statusEl.innerHTML = `<b>${nScore.toFixed(1)}점</b> <span style="color:${diffColor};font-size:0.75rem;margin-left:4px;">(${diffSign}점)</span>`;
+            }
           }
         } else {
           throw new Error((res && res.error) || '응답 오류');
@@ -514,6 +668,8 @@ async function executeBatchReanalyze() {
           id,
           filename: it.filename,
           success: false,
+          skipped: false,
+          isCrossCheck: isCrossCheckOnly,
           error: err.message,
           prevScore: pScore,
         };
@@ -543,6 +699,83 @@ function showBatchReanalyzeSummary() {
 
   const results = _batchReanalyzeResults || [];
   const total = results.length;
+  const isCrossCheck = (_batchReanalyzeMode === 'cross_check_only');
+
+  const titleEl = document.getElementById('batch-reanalyze-summary-title');
+  const diffTitleEl = document.getElementById('batch-reanalyze-diff-title');
+  const statsEl = document.getElementById('batch-reanalyze-summary-stats');
+  const diffList = document.getElementById('batch-reanalyze-diff-list');
+
+  if (isCrossCheck) {
+    if (titleEl) titleEl.textContent = '🎉 크로스체크 일괄 채워넣기가 완료되었습니다!';
+    if (diffTitleEl) diffTitleEl.textContent = '📊 사진별 크로스체크 채워넣기 결과:';
+
+    const created = results.filter(r => r.success && !r.skipped);
+    const skipped = results.filter(r => r.success && r.skipped);
+    const fails = results.filter(r => !r.success);
+
+    const validScores = created.map(r => r.ccScore).filter(s => s != null);
+    const avgCc = validScores.length > 0
+      ? (validScores.reduce((a, b) => a + b, 0) / validScores.length).toFixed(1)
+      : null;
+
+    if (statsEl) {
+      statsEl.innerHTML = `
+        <span>🤝 <b>총 ${total}장</b> 처리 (신규 생성 <strong style="color:#0284c7;">${created.length}장</strong>, 기보유 건너뜀 <strong style="color:#64748b;">${skipped.length}장</strong>, 실패 <strong style="color:#e11d48;">${fails.length}장</strong>)</span>
+        ${avgCc ? `<span>📊 신규 크로스체크 평균: <strong style="color:#0284c7;">${avgCc}점</strong></span>` : ''}
+      `;
+    }
+
+    if (diffList) {
+      diffList.innerHTML = results.map(r => {
+        if (!r.success) {
+          return `
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;background:rgba(225,29,72,0.06);border:1px solid rgba(225,29,72,0.25);border-radius:6px;">
+              <span>❌ <strong>${_escapeReanalyzeHtml(r.filename)}</strong></span>
+              <span style="color:#e11d48;">오류: ${_escapeReanalyzeHtml(r.error)}</span>
+            </div>
+          `;
+        }
+        const mainScore = r.prevScore != null ? r.prevScore.toFixed(1) : '-';
+        if (r.skipped) {
+          const ccScore = r.ccScore != null ? r.ccScore.toFixed(1) : '-';
+          return `
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;background:var(--card-sub, #f8fafc);border:1px solid var(--line, #e2e8f0);border-radius:6px;opacity:0.85;">
+              <span style="display:flex;align-items:center;gap:6px;overflow:hidden;flex:1;">
+                <span>⏭️</span>
+                <strong style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_escapeReanalyzeHtml(r.filename)}</strong>
+                <span style="font-size:0.72rem;color:var(--muted);">(기존 보유 건너뜀)</span>
+              </span>
+              <span style="flex-shrink:0;margin-left:10px;font-size:0.78rem;">
+                본 점수: <strong>${mainScore}점</strong> | 크로스체크: <span style="font-weight:700;color:#0284c7;">🤝${ccScore}점</span>
+              </span>
+            </div>
+          `;
+        }
+        const ccScore = r.ccScore != null ? r.ccScore.toFixed(1) : '-';
+        const provBadge = r.provider ? `<span style="font-size:0.7rem;background:rgba(2,132,199,0.12);color:#0284c7;padding:1px 5px;border-radius:3px;font-weight:700;">${_escapeReanalyzeHtml(r.provider)}</span>` : '';
+        return `
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;background:var(--card-bg, #fff);border:1px solid var(--line, #e2e8f0);border-radius:6px;">
+            <span style="display:flex;align-items:center;gap:6px;overflow:hidden;flex:1;">
+              <span>🤝</span>
+              <strong style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_escapeReanalyzeHtml(r.filename)}</strong>
+              ${provBadge}
+            </span>
+            <span style="flex-shrink:0;margin-left:10px;">
+              <span style="color:var(--muted);font-size:0.74rem;">본 점수: ${mainScore}점</span>
+              <span style="margin-left:8px;font-weight:800;color:#0284c7;font-size:0.85rem;">크로스체크: ${ccScore}점</span>
+            </span>
+          </div>
+        `;
+      }).join('');
+    }
+    return;
+  }
+
+  // Full reanalysis mode
+  if (titleEl) titleEl.textContent = '🎉 일괄 재평가가 성공적으로 완료되었습니다!';
+  if (diffTitleEl) diffTitleEl.textContent = '📊 사진별 점수 변화 결과 (Before → After):';
+
   const successes = results.filter(r => r.success);
   const fails = results.filter(r => !r.success);
 
@@ -562,7 +795,6 @@ function showBatchReanalyzeSummary() {
   const avgSign = Number(avgDiff) > 0 ? `+${avgDiff}` : `${avgDiff}`;
   const avgColor = Number(avgDiff) > 0 ? '#059669' : (Number(avgDiff) < 0 ? '#e11d48' : '#64748b');
 
-  const statsEl = document.getElementById('batch-reanalyze-summary-stats');
   if (statsEl) {
     statsEl.innerHTML = `
       <span>📦 총 <b>${total}장</b> 처리 (성공 <strong style="color:#059669">${successes.length}</strong>, 실패 <strong style="color:#e11d48">${fails.length}</strong>)</span>
@@ -573,7 +805,6 @@ function showBatchReanalyzeSummary() {
     `;
   }
 
-  const diffList = document.getElementById('batch-reanalyze-diff-list');
   if (diffList) {
     diffList.innerHTML = results.map(r => {
       if (!r.success) {
@@ -587,7 +818,7 @@ function showBatchReanalyzeSummary() {
       const p = r.prevScore != null ? r.prevScore.toFixed(1) : '-';
       const n = r.newScore.toFixed(1);
       const diffSign = r.diffVal > 0 ? `+${r.diffVal.toFixed(1)}` : `${r.diffVal.toFixed(1)}`;
-      const diffColor = r.diffVal > 0 ? '#059669' : (r.diffVal < 0 ? '#e11d48' : '#64748b');
+      const diffColor = r.diffVal > 0 ? '#059669' : (diffVal < 0 ? '#e11d48' : '#64748b');
       const samplingBadges = (r.sampledScores && r.sampledScores.length > 1)
         ? `<small style="color:var(--muted);margin-left:6px;">(3회: ${r.sampledScores.join(', ')}점)</small>`
         : '';
@@ -631,7 +862,8 @@ async function finishBatchReanalyze() {
   }
 }
 
-
+window.selectBatchOperationMode = selectBatchOperationMode;
+window.updateBatchReanalyzeSkipCount = updateBatchReanalyzeSkipCount;
 window.upgradeFastToFullAnalysis = upgradeFastToFullAnalysis;
 window.openBatchReanalyzeModal = openBatchReanalyzeModal;
 window.closeBatchReanalyzeModal = closeBatchReanalyzeModal;
