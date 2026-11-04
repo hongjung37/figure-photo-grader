@@ -119,6 +119,7 @@ _API_JS = load_template_file("static/js/api.js")
 _TAG_FILTER_JS = load_template_file("static/js/tag_filter.js")
 _CROP_VIEWER_JS = load_template_file("static/js/crop_viewer.js")
 _TOURNAMENT_JS = load_template_file("static/js/tournament.js")
+_BLIND_RATING_JS = load_template_file("static/js/blind_rating.js")
 _TAG_INSIGHTS_JS = load_template_file("static/js/tag_insights.js")
 _MODALS_JS = load_template_file("static/js/modals.js")
 _RATING_ADVICE_JS = load_template_file("static/js/rating_advice.js")
@@ -138,6 +139,8 @@ DASHBOARD_HTML = (
     + _CROP_VIEWER_JS
     + "\n"
     + _TOURNAMENT_JS
+    + "\n"
+    + _BLIND_RATING_JS
     + "\n"
     + _TAG_INSIGHTS_JS
     + "\n"

@@ -1312,3 +1312,527 @@ body.darkroom .best-ratio-badge {
 
 
 
+
+/* ==========================================================================
+   Blind Rating & Speed Feedback Subsystem Styles (Option A)
+   ========================================================================== */
+.blind-setup-card {
+  max-width: 680px;
+  margin: auto;
+  width: 100%;
+  background: #0f172a;
+  padding: 32px;
+  border-radius: 20px;
+  border: 1px solid #334155;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+}
+
+.blind-setup-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border-bottom: 1px solid #1e293b;
+  padding-bottom: 18px;
+}
+
+.blind-setup-label {
+  display: block;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #cbd5e1;
+  margin-bottom: 8px;
+}
+
+.blind-option-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.blind-option-box {
+  border: 1.5px solid #334155;
+  background: #1e293b;
+  border-radius: 12px;
+  padding: 14px 18px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  display: block;
+}
+
+.blind-option-box:hover {
+  border-color: #38bdf8;
+  background: #24344d;
+}
+
+.blind-option-box.active {
+  border-color: #38bdf8;
+  background: rgba(56, 189, 248, 0.12);
+  box-shadow: 0 0 0 1px #38bdf8;
+}
+
+.blind-badge-pill {
+  background: #0284c7;
+  color: white;
+  font-size: 0.74rem;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 999px;
+  margin-left: auto;
+}
+
+.blind-chip-btn {
+  background: #0f172a;
+  border: 1px solid #334155;
+  color: #94a3b8;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 0.86rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.blind-chip-btn:hover {
+  border-color: #38bdf8;
+  color: white;
+}
+
+.blind-chip-btn.active {
+  background: #0284c7;
+  border-color: #38bdf8;
+  color: white;
+  font-weight: 700;
+}
+
+.blind-arena-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+
+.blind-arena-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 4px;
+}
+
+.blind-badge-step {
+  background: #0284c7;
+  color: white;
+  font-weight: 800;
+  font-size: 0.82rem;
+  padding: 4px 12px;
+  border-radius: 999px;
+}
+
+.blind-action-btn {
+  background: #1e293b;
+  border: 1px solid #334155;
+  color: #cbd5e1;
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.blind-action-btn:hover {
+  border-color: #38bdf8;
+  color: white;
+}
+
+.blind-progress-track {
+  height: 4px;
+  background: #1e293b;
+  border-radius: 999px;
+  overflow: hidden;
+  width: 100%;
+}
+
+.blind-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #38bdf8, #6366f1);
+  transition: width 0.3s ease;
+}
+
+.blind-main-split {
+  display: grid;
+  grid-template-columns: 1fr 420px;
+  gap: 20px;
+  min-height: 540px;
+  align-items: stretch;
+}
+
+.blind-photo-column {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: #020617;
+  border-radius: 18px;
+  border: 1px solid #1e293b;
+  padding: 12px;
+  overflow: hidden;
+}
+
+.blind-img-wrapper {
+  flex: 1;
+  min-height: 480px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+  cursor: zoom-in;
+  border-radius: 10px;
+  background: #090d16;
+}
+
+.blind-img-wrapper.zoomed {
+  cursor: zoom-out;
+  overflow: auto;
+}
+
+.blind-main-img {
+  max-height: 520px;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  transition: transform 0.2s ease;
+}
+
+.blind-img-wrapper.zoomed .blind-main-img {
+  max-height: none;
+  object-fit: none;
+  transform: scale(1.5);
+}
+
+.blind-zoom-hint {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  background: rgba(15, 23, 42, 0.75);
+  color: #cbd5e1;
+  font-size: 0.74rem;
+  padding: 4px 8px;
+  border-radius: 6px;
+  backdrop-filter: blur(4px);
+  pointer-events: none;
+}
+
+.blind-photo-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 6px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.blind-cat-badge {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.15);
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+
+.blind-control-column {
+  display: flex;
+  flex-direction: column;
+}
+
+.blind-panel-card {
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 18px;
+  padding: 22px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+}
+
+.blind-guide-box {
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px dashed #475569;
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.blind-quick-scores {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.blind-score-btn {
+  background: #1e293b;
+  border: 1.5px solid #334155;
+  border-radius: 10px;
+  padding: 12px 6px;
+  color: white;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.blind-score-btn:hover {
+  border-color: #38bdf8;
+  background: #0284c7;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(2, 132, 199, 0.35);
+}
+
+.blind-score-val {
+  font-size: 1.15rem;
+  font-weight: 800;
+}
+
+.blind-score-sub {
+  font-size: 0.68rem;
+  color: #38bdf8;
+  margin-top: 2px;
+}
+
+.blind-input-box {
+  width: 100%;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  color: white;
+  padding: 10px 14px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.blind-input-box:focus {
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 1px #38bdf8;
+}
+
+.blind-shortcut-bar {
+  margin-top: 16px;
+  font-size: 0.74rem;
+  color: #94a3b8;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding-top: 12px;
+  border-top: 1px solid #1e293b;
+}
+
+.blind-shortcut-bar kbd {
+  background: #334155;
+  color: #f8fafc;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: monospace;
+  font-weight: 700;
+  font-size: 0.72rem;
+}
+
+/* Reveal Card & Animation (Option A) */
+@keyframes blindRevealPop {
+  0% { transform: scale(0.94); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.blind-reveal-card {
+  border-radius: 14px;
+  padding: 18px;
+  animation: blindRevealPop 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+}
+
+.blind-reveal-card.reveal-match {
+  background: rgba(16, 185, 129, 0.12);
+  border: 1.5px solid #10b981;
+}
+
+.blind-reveal-card.reveal-higher {
+  background: rgba(56, 189, 248, 0.12);
+  border: 1.5px solid #38bdf8;
+}
+
+.blind-reveal-card.reveal-stricter {
+  background: rgba(245, 158, 11, 0.12);
+  border: 1.5px solid #f59e0b;
+}
+
+.blind-tag-grade {
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: #cbd5e1;
+  background: #1e293b;
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+
+.blind-score-compare-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  margin: 12px 0;
+}
+
+.blind-score-box {
+  text-align: center;
+  padding: 10px 20px;
+  border-radius: 12px;
+  min-width: 110px;
+}
+
+.blind-score-box.user {
+  background: rgba(59, 130, 246, 0.2);
+  border: 1.5px solid #3b82f6;
+}
+
+.blind-score-box.ai {
+  background: rgba(168, 85, 247, 0.2);
+  border: 1.5px solid #a855f7;
+}
+
+.blind-score-box .score-label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #cbd5e1;
+}
+
+.blind-score-box .score-val {
+  font-size: 1.7rem;
+  font-weight: 900;
+  color: white;
+  margin-top: 2px;
+}
+
+.blind-vs-sign {
+  font-size: 0.95rem;
+  font-weight: 900;
+  color: #94a3b8;
+}
+
+.blind-ai-quote {
+  margin-top: 10px;
+  background: rgba(15, 23, 42, 0.65);
+  border-left: 3px solid #38bdf8;
+  padding: 8px 12px;
+  font-size: 0.8rem;
+  color: #cbd5e1;
+  border-radius: 0 8px 8px 0;
+  line-height: 1.45;
+}
+
+.blind-countdown-wrap {
+  margin-top: 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.blind-countdown-text {
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+/* Summary View Styles */
+.blind-summary-container {
+  max-width: 820px;
+  margin: auto;
+  width: 100%;
+  background: #0f172a;
+  padding: 36px;
+  border-radius: 20px;
+  border: 1px solid #334155;
+  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
+}
+
+.blind-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+.blind-stat-card {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  padding: 16px;
+  text-align: center;
+}
+
+.blind-stat-card .stat-title {
+  font-size: 0.76rem;
+  color: #94a3b8;
+  font-weight: 700;
+}
+
+.blind-stat-card .stat-number {
+  font-size: 1.8rem;
+  font-weight: 900;
+  margin-top: 4px;
+}
+
+.blind-tendency-banner {
+  margin-top: 16px;
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  border-radius: 12px;
+  padding: 14px 18px;
+  font-size: 0.88rem;
+  color: #e0f2fe;
+}
+
+.blind-highlight-card {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 14px;
+  padding: 16px;
+}
+
+.highlight-badge {
+  font-size: 0.76rem;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 6px;
+  display: inline-block;
+}
+
+.highlight-badge.sync {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.highlight-badge.gap {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.highlight-img {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid #334155;
+  flex-shrink: 0;
+}
+
+@media (max-width: 900px) {
+  .blind-main-split {
+    grid-template-columns: 1fr;
+  }
+  .blind-stat-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

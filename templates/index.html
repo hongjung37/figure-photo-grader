@@ -29,6 +29,7 @@
     </div>
     <div style="display:flex;gap:10px;align-items:center;">
       <button class="upload-btn theme-toggle-btn" id="theme-toggle-btn" style="background:#334155;" onclick="toggleTheme()" title="다크룸 모드 전환">🌙 다크룸</button>
+      <button class="upload-btn" style="background:#0284c7;" onclick="openBlindRatingModal()" title="AI 점수를 가린 채 무작위 사진 평가">🎯 블라인드 내 점수</button>
       <button class="upload-btn" style="background:#f59e0b;" onclick="openTournamentModal()">🏆 블라인드 토너먼트 (B-3)</button>
       <button class="upload-btn" style="background:#0d9488;" onclick="exportAllXmp(this)">📥 라이트룸 XMP 내보내기</button>
       <button class="upload-btn" style="background:#6366f1;" onclick="openModelSettingsModal()">⚙️ 모델 설정</button>
@@ -70,6 +71,7 @@
         <button class="tab-btn active" id="tab-gallery" onclick="switchView('gallery')">갤러리 뷰</button>
         <button class="tab-btn" id="tab-compare" onclick="switchView('compare')">1:1 비교(Culling)</button>
         <button class="tab-btn" id="tab-tournament" onclick="openTournamentModal()" style="background:#fef3c7;border-color:#fde68a;color:#b45309;font-weight:700;">🏆 블라인드 토너먼트</button>
+        <button class="tab-btn" id="tab-blind-rating" onclick="openBlindRatingModal()" style="background:#e0f2fe;border-color:#bae6fd;color:#0369a1;font-weight:700;">🎯 블라인드 채점</button>
         <button class="tab-btn" id="tab-insights" onclick="switchView('insights')">📊 태그·화각 인사이트</button>
       </div>
     </div>
@@ -272,6 +274,7 @@
 
   <!-- Tag Insights View (방안 A) -->
   <div class="insights-container" id="insights-view" style="display:none;margin-top:22px;"></div>
+
 </main>
 
 <!-- Detail Modal -->
@@ -304,6 +307,23 @@
       <div id="tour-progress-bar" style="height:100%;width:0%;background:linear-gradient(90deg, #38bdf8, #818cf8);transition:width 0.3s ease;"></div>
     </div>
     <div class="tour-body" id="tour-body-container"></div>
+  </div>
+</div>
+
+<!-- Blind Random Rating Modal (Option A) -->
+<div class="tour-modal-overlay" id="blind-rating-modal" onclick="closeBlindRatingModal(event)">
+  <div class="tour-modal-content" onclick="event.stopPropagation()">
+    <div class="tour-header">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <span style="font-size:1.6rem;">🎯</span>
+        <div>
+          <h3 style="margin:0;font-size:1.15rem;font-weight:800;color:#f8fafc;">블라인드 내 점수 매기기 (Blind Rating)</h3>
+          <span style="font-size:0.78rem;color:#94a3b8;">AI 점수를 가린 채 나만의 점수를 매기고, 직후 AI와의 시각 차이를 즉시 비교합니다. (Option A)</span>
+        </div>
+      </div>
+      <button class="close-btn blind-close-trigger" style="position:static;color:#94a3b8;" onclick="closeBlindRatingModal()">&times;</button>
+    </div>
+    <div class="tour-body" id="blind-body-container" style="padding:20px 0;"></div>
   </div>
 </div>
 
@@ -654,6 +674,7 @@
 <script src="/static/js/tag_filter.js"></script>
 <script src="/static/js/crop_viewer.js"></script>
 <script src="/static/js/tournament.js"></script>
+<script src="/static/js/blind_rating.js"></script>
 <script src="/static/js/tag_insights.js"></script>
 <script src="/static/js/modals.js"></script>
 <script src="/static/js/rating_advice.js"></script>
