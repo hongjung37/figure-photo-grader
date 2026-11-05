@@ -351,7 +351,7 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             return self._handle_get_collections()
 
         if path == "/api/usage-stats":
-            return self._handle_get_usage_stats()
+            return self._handle_get_usage_stats(parsed.query)
 
         if path == "/api/tag-stats":
             return self._handle_get_tag_stats(parsed.query)
@@ -414,8 +414,16 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         data = get_all_collections(self.db_path)
         self._send_json_ok(data)
 
-    def _handle_get_usage_stats(self) -> None:
-        data = get_usage_stats(self.db_path)
+    def _handle_get_usage_stats(self, query_str: str = "") -> None:
+        period = "all"
+        date_from = None
+        date_to = None
+        if query_str:
+            query = parse_qs(query_str)
+            period = query.get("period", ["all"])[0]
+            date_from = query.get("date_from", [""])[0] or None
+            date_to = query.get("date_to", [""])[0] or None
+        data = get_usage_stats(self.db_path, period=period, date_from=date_from, date_to=date_to)
         self._send_json_ok(data)
 
     def _handle_get_tag_stats(self, query_str: str) -> None:

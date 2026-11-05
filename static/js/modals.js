@@ -63,8 +63,143 @@ function escapeUsageHtml(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
+let currentUsagePeriod = 'all';
+let currentUsageDateFrom = '';
+let currentUsageDateTo = '';
+
+const USAGE_PERIOD_LABELS = {
+  all: '전체',
+  today: '오늘',
+  yesterday: '어제',
+  '24h': '최근 24시간',
+  '7d': '최근 7일',
+  '30d': '최근 30일',
+  custom: '직접 지정'
+};
+
+function updateUsagePeriodPillsUI() {
+  const pills = document.querySelectorAll('.usage-period-btn');
+  pills.forEach(btn => {
+    btn.classList.toggle('active', btn.getAttribute('data-period') === currentUsagePeriod);
+  });
+}
+
+async function setUsagePeriod(period) {
+  currentUsagePeriod = period || 'all';
+  currentUsageDateFrom = '';
+  currentUsageDateTo = '';
+  const fromEl = document.getElementById('usage-date-from');
+  const toEl = document.getElementById('usage-date-to');
+  if (fromEl) fromEl.value = '';
+  if (toEl) toEl.value = '';
+  updateUsagePeriodPillsUI();
+  await refreshUsageStats();
+}
+
+function onUsageCustomDateChange() {
+  const fromEl = document.getElementById('usage-date-from');
+  const toEl = document.getElementById('usage-date-to');
+  currentUsageDateFrom = fromEl ? (fromEl.value || '').trim() : '';
+  currentUsageDateTo = toEl ? (toEl.value || '').trim() : '';
+}
+
+async function applyUsageCustomDate() {
+  onUsageCustomDateChange();
+  if (!currentUsageDateFrom && !currentUsageDateTo) {
+    currentUsagePeriod = 'all';
+  } else {
+    currentUsagePeriod = 'custom';
+  }
+  updateUsagePeriodPillsUI();
+  await refreshUsageStats();
+}
+
+async function syncUsageWithDashboardScope() {
+  const fromEl = document.getElementById('date-scope-from');
+  const toEl = document.getElementById('date-scope-to');
+  const dFrom = (typeof currentDateFrom !== 'undefined' ? currentDateFrom : (fromEl ? fromEl.value : '')) || '';
+  const dTo = (typeof currentDateTo !== 'undefined' ? currentDateTo : (toEl ? toEl.value : '')) || '';
+  const dPreset = (typeof currentDatePreset !== 'undefined' ? currentDatePreset : 'all');
+
+  const uFrom = document.getElementById('usage-date-from');
+  const uTo = document.getElementById('usage-date-to');
+
+  if (dPreset === 'today') {
+    currentUsagePeriod = 'today';
+    currentUsageDateFrom = '';
+    currentUsageDateTo = '';
+    if (uFrom) uFrom.value = '';
+    if (uTo) uTo.value = '';
+  } else if (dPreset === 'yesterday') {
+    currentUsagePeriod = 'yesterday';
+    currentUsageDateFrom = '';
+    currentUsageDateTo = '';
+    if (uFrom) uFrom.value = '';
+    if (uTo) uTo.value = '';
+  } else if (dPreset === '7d') {
+    currentUsagePeriod = '7d';
+    currentUsageDateFrom = '';
+    currentUsageDateTo = '';
+    if (uFrom) uFrom.value = '';
+    if (uTo) uTo.value = '';
+  } else if (dPreset === '30d') {
+    currentUsagePeriod = '30d';
+    currentUsageDateFrom = '';
+    currentUsageDateTo = '';
+    if (uFrom) uFrom.value = '';
+    if (uTo) uTo.value = '';
+  } else if (dFrom || dTo) {
+    currentUsagePeriod = 'custom';
+    currentUsageDateFrom = dFrom;
+    currentUsageDateTo = dTo;
+    if (uFrom) uFrom.value = dFrom;
+    if (uTo) uTo.value = dTo;
+  } else {
+    currentUsagePeriod = 'all';
+    currentUsageDateFrom = '';
+    currentUsageDateTo = '';
+    if (uFrom) uFrom.value = '';
+    if (uTo) uTo.value = '';
+  }
+  updateUsagePeriodPillsUI();
+  await refreshUsageStats();
+}
+
 async function openUsageModal() {
-  document.getElementById('usage-modal').style.display = 'flex';
+  const modal = document.getElementById('usage-modal');
+  if (modal) modal.style.display = 'flex';
+
+  const scopeActive = (typeof isDateScopeActive === 'function') ? isDateScopeActive() : false;
+  const dFrom = (typeof currentDateFrom !== 'undefined' ? currentDateFrom : '');
+  const dTo = (typeof currentDateTo !== 'undefined' ? currentDateTo : '');
+  const dPreset = (typeof currentDatePreset !== 'undefined' ? currentDatePreset : '');
+
+  const uFrom = document.getElementById('usage-date-from');
+  const uTo = document.getElementById('usage-date-to');
+
+  if (scopeActive && (dFrom || dTo || dPreset === 'today' || dPreset === 'yesterday')) {
+    if (dPreset === 'today') {
+      currentUsagePeriod = 'today';
+      currentUsageDateFrom = '';
+      currentUsageDateTo = '';
+      if (uFrom) uFrom.value = '';
+      if (uTo) uTo.value = '';
+    } else if (dPreset === 'yesterday') {
+      currentUsagePeriod = 'yesterday';
+      currentUsageDateFrom = '';
+      currentUsageDateTo = '';
+      if (uFrom) uFrom.value = '';
+      if (uTo) uTo.value = '';
+    } else {
+      currentUsagePeriod = 'custom';
+      currentUsageDateFrom = dFrom;
+      currentUsageDateTo = dTo;
+      if (uFrom) uFrom.value = dFrom;
+      if (uTo) uTo.value = dTo;
+    }
+  }
+
+  updateUsagePeriodPillsUI();
   await refreshUsageStats();
 }
 
@@ -77,11 +212,31 @@ function closeUsageModal(e) {
 
 async function refreshUsageStats() {
   const body = document.getElementById('usage-body');
+  if (!body) return;
   body.innerHTML = '<p style="color:var(--muted);">불러오는 중...</p>';
   try {
-    const d = await API.fetchUsageStats();
+    const d = await API.fetchUsageStats(currentUsagePeriod, currentUsageDateFrom, currentUsageDateTo);
+    let activeLabel = USAGE_PERIOD_LABELS[currentUsagePeriod] || currentUsagePeriod;
+    if (currentUsagePeriod === 'custom' || currentUsageDateFrom || currentUsageDateTo) {
+      if (currentUsageDateFrom && currentUsageDateTo) {
+        activeLabel = `${currentUsageDateFrom} ~ ${currentUsageDateTo}`;
+      } else if (currentUsageDateFrom) {
+        activeLabel = `${currentUsageDateFrom} 이후`;
+      } else {
+        activeLabel = `${currentUsageDateTo} 이전`;
+      }
+    }
+
     if (!d.total_calls) {
-      body.innerHTML = '<p style="color:var(--muted);">아직 기록된 API 호출이 없습니다. 사진을 분석하면 여기에 쌓입니다.</p>';
+      if (currentUsagePeriod !== 'all') {
+        body.innerHTML = `
+          <div style="padding:32px 16px;text-align:center;background:rgba(148,163,184,0.06);border-radius:12px;margin-top:8px;">
+            <p style="color:var(--muted);font-size:0.92rem;margin-bottom:12px;">선택한 기간(<b>${escapeUsageHtml(activeLabel)}</b>) 동안 기록된 API 호출이 없습니다.</p>
+            <button class="upload-btn" style="padding:6px 14px;font-size:0.8rem;background:var(--accent,#38bdf8);border:none;border-radius:6px;cursor:pointer;" onclick="setUsagePeriod('all')">전체 통계 보기</button>
+          </div>`;
+      } else {
+        body.innerHTML = '<p style="color:var(--muted);">아직 기록된 API 호출이 없습니다. 사진을 분석하면 여기에 쌓입니다.</p>';
+      }
       return;
     }
     const sum = (k) => d.by_task.reduce((a, t) => a + (t[k] || 0), 0);
@@ -141,8 +296,23 @@ async function refreshUsageStats() {
           tokStr = `${inTok.toLocaleString()} / ${(r.output_tokens || 0).toLocaleString()}`;
         }
       }
+      const rawIso = r.created_at || '';
+      let timeLabel = rawIso.replace('T', ' ').slice(5, 19);
+      try {
+        if (rawIso) {
+          const dt = new Date(rawIso);
+          if (!isNaN(dt.getTime())) {
+            const m = String(dt.getMonth() + 1).padStart(2, '0');
+            const day = String(dt.getDate()).padStart(2, '0');
+            const h = String(dt.getHours()).padStart(2, '0');
+            const min = String(dt.getMinutes()).padStart(2, '0');
+            const s = String(dt.getSeconds()).padStart(2, '0');
+            timeLabel = `${m}-${day} ${h}:${min}:${s}`;
+          }
+        }
+      } catch (e) {}
       return `<tr>
-        <td style="${td}">${escapeUsageHtml((r.created_at || '').replace('T', ' ').slice(5, 19))}</td>
+        <td style="${td}">${escapeUsageHtml(timeLabel)}</td>
         <td style="${td}">${escapeUsageHtml(r.task)}</td>
         <td style="${td}">${fmtModelBadge(r.used_model)}${r.fallback ? ` <span style="color:#d97706;font-size:0.73rem;">(폴백)</span>` : ''}</td>
         <td style="${td}">${((r.duration_ms || 0) / 1000).toFixed(1)}s</td>
@@ -150,9 +320,16 @@ async function refreshUsageStats() {
         <td style="${td}color:${r.success ? 'var(--teal)' : '#e11d48'};" title="${escapeUsageHtml(r.error || '')}">${r.success ? '성공' : '실패'}</td>
       </tr>`;
     }).join('');
+    const periodNotice = currentUsagePeriod !== 'all'
+      ? `<div style="margin-bottom:12px;font-size:0.8rem;color:var(--muted);display:flex;align-items:center;gap:6px;">
+           <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#10b981;"></span>
+           조회 기간: <strong style="color:var(--ink);">${escapeUsageHtml(activeLabel)}</strong> 집계 결과입니다 (총 ${d.total_calls.toLocaleString()}건).
+         </div>`
+      : '';
     body.innerHTML = `
+      ${periodNotice}
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;">
-        ${card('총 호출', d.total_calls)}${card('실패', failures)}${card('총 입력 토큰', totalIn.toLocaleString())}${card('⚡ 캐시 적중', `${totalCached.toLocaleString()} <span style="font-size:0.74rem;color:#10b981;font-weight:700;">(${cacheHitPct}%)</span>`)}${card('출력 토큰', totalOut.toLocaleString())}
+        ${card('총 호출', d.total_calls.toLocaleString())}${card('실패', failures.toLocaleString())}${card('총 입력 토큰', totalIn.toLocaleString())}${card('⚡ 캐시 적중', `${totalCached.toLocaleString()} <span style="font-size:0.74rem;color:#10b981;font-weight:700;">(${cacheHitPct}%)</span>`)}${card('출력 토큰', totalOut.toLocaleString())}
       </div>
       ${modelRows ? `
         <h3 style="margin:0 0 6px;font-size:0.95rem;">🤖 모델별 사용량 & 캐시 적중률</h3>
@@ -166,9 +343,9 @@ async function refreshUsageStats() {
         <thead><tr><th style="${th}">작업</th><th style="${th}">호출</th><th style="${th}">실패</th><th style="${th}">폴백</th><th style="${th}">재시도</th><th style="${th}">총 입력</th><th style="${th}">⚡ 캐시 적중</th><th style="${th}">출력</th><th style="${th}">평균 시간</th></tr></thead>
         <tbody>${taskRows}</tbody>
       </table>
-      <h3 style="margin:0 0 6px;font-size:0.95rem;">🕒 최근 호출 (30건)</h3>
+      <h3 style="margin:0 0 6px;font-size:0.95rem;">🕒 최근 호출 (해당 기간 내 최신 ${Math.min(30, d.recent.length)}건 / 총 ${d.total_calls.toLocaleString()}건 중)</h3>
       <table style="width:100%;border-collapse:collapse;">
-        <thead><tr><th style="${th}">시각(UTC)</th><th style="${th}">작업</th><th style="${th}">모델</th><th style="${th}">소요</th><th style="${th}">입력(⚡캐시) / 출력 tok</th><th style="${th}">결과</th></tr></thead>
+        <thead><tr><th style="${th}">시각(로컬)</th><th style="${th}">작업</th><th style="${th}">모델</th><th style="${th}">소요</th><th style="${th}">입력(⚡캐시) / 출력 tok</th><th style="${th}">결과</th></tr></thead>
         <tbody>${recentRows}</tbody>
       </table>`;
   } catch (err) {
@@ -542,4 +719,10 @@ if (typeof window !== 'undefined') {
       await processBatchUpload(validFiles);
     }
   });
+
+  window.setUsagePeriod = setUsagePeriod;
+  window.refreshUsageStats = refreshUsageStats;
+  window.onUsageCustomDateChange = onUsageCustomDateChange;
+  window.applyUsageCustomDate = applyUsageCustomDate;
+  window.syncUsageWithDashboardScope = syncUsageWithDashboardScope;
 }

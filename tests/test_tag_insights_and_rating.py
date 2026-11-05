@@ -297,6 +297,12 @@ class TestTagInsightsAndUserRating(unittest.TestCase):
                 fstats = json.loads(resp.read().decode("utf-8"))
                 self.assertEqual(fstats["total_photos"], 3)
                 self.assertIn("bands", fstats)
+
+            # 8. Test GET /api/usage-stats with period
+            with urllib.request.urlopen(f"{base_url}/api/usage-stats?period=24h") as resp:
+                ustats = json.loads(resp.read().decode("utf-8"))
+                self.assertEqual(ustats["period"], "24h")
+                self.assertIn("total_calls", ustats)
         finally:
             server.shutdown()
             server.server_close()

@@ -9,7 +9,7 @@ import sys
 import threading
 import time
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -44,10 +44,14 @@ from app.prompts import (
     build_all_sns_crops_prompt,
     build_caption_and_tags_prompt,
     build_fast_grader_prompt,
+    build_fast_grader_user_prompt,
     build_grader_prompt,
+    build_grader_user_prompt,
     build_lightroom_prompt,
     build_single_crop_prompt,
     build_sns_advice_prompt,
+    get_fast_grader_system_prompt,
+    get_grader_system_prompt,
 )
 from app.services.image_processor import PreparedPhoto
 
@@ -163,6 +167,10 @@ def _log_api_usage(
                 connection.execute("ALTER TABLE api_usage_log ADD COLUMN cached_tokens INTEGER")
             except Exception:
                 pass
+            try:
+                connection.execute("CREATE INDEX IF NOT EXISTS idx_api_usage_created ON api_usage_log(created_at)")
+            except Exception:
+                pass
 
             def _clean_int(val: Any) -> int | None:
                 if val is None or isinstance(val, bool):
@@ -198,10 +206,46 @@ def _log_api_usage(
         print(f"[api_usage_log] 기록 실패: {log_exc}", file=sys.stderr)
 
 
-def get_usage_stats(db_path: str | Path) -> dict[str, Any]:
-    """Aggregate api_usage_log by task and by model for the dashboard."""
+def get_usage_stats(
+    db_path: str | Path,
+    period: str = "all",
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> dict[str, Any]:
+    """Aggregate api_usage_log by task and by model for the dashboard.
+
+    Args:
+        db_path: Path to SQLite database.
+        period: Time window filter ('all', 'today', 'yesterday', '24h', '7d', '30d', 'custom').
+        date_from: Start date in YYYY-MM-DD (inclusive, local timezone).
+        date_to: End date in YYYY-MM-DD (inclusive, local timezone).
+    """
     path = Path(db_path)
-    empty: dict[str, Any] = {"total_calls": 0, "by_task": [], "by_model": [], "recent": []}
+    period_norm = str(period).strip().lower() if period else "all"
+    valid_periods = ("today", "yesterday", "24h", "7d", "30d", "all", "custom")
+    if period_norm not in valid_periods:
+        period_norm = "all"
+
+    d_from_str = str(date_from).strip() if date_from else None
+    d_to_str = str(date_to).strip() if date_to else None
+    if d_from_str or d_to_str:
+        if period_norm == "all":
+            period_norm = "custom"
+
+    empty: dict[str, Any] = {
+        "period": period_norm,
+        "date_from": d_from_str,
+        "date_to": d_to_str,
+        "cutoff_at": None,
+        "cutoff_from_iso": None,
+        "cutoff_to_iso": None,
+        "total_calls": 0,
+        "total_cached_tokens": 0,
+        "cache_hit_rate": 0.0,
+        "by_task": [],
+        "by_model": [],
+        "recent": [],
+    }
     if not path.is_file():
         return empty
     with closing(get_db_connection(path)) as connection:
@@ -211,10 +255,66 @@ def get_usage_stats(db_path: str | Path) -> dict[str, Any]:
         ).fetchone()
         if not exists:
             return empty
+
+        try:
+            connection.execute("CREATE INDEX IF NOT EXISTS idx_api_usage_created ON api_usage_log(created_at)")
+        except Exception:
+            pass
+
+        now_utc = datetime.now(timezone.utc)
+        now_local = datetime.now().astimezone()
+        local_tz = now_local.tzinfo
+        today_local = now_local.date()
+
+        from_iso: str | None = None
+        to_iso: str | None = None
+
+        if d_from_str or d_to_str:
+            if d_from_str:
+                try:
+                    df = datetime.strptime(d_from_str[:10], "%Y-%m-%d").date()
+                    dt_start = datetime.combine(df, datetime.min.time()).replace(tzinfo=local_tz)
+                    from_iso = dt_start.astimezone(timezone.utc).isoformat(timespec="seconds")
+                except Exception:
+                    pass
+            if d_to_str:
+                try:
+                    dt = datetime.strptime(d_to_str[:10], "%Y-%m-%d").date()
+                    dt_end = datetime.combine(dt, datetime.max.time().replace(microsecond=0)).replace(tzinfo=local_tz)
+                    to_iso = dt_end.astimezone(timezone.utc).isoformat(timespec="seconds")
+                except Exception:
+                    pass
+        elif period_norm == "today":
+            dt_start = datetime.combine(today_local, datetime.min.time()).replace(tzinfo=local_tz)
+            from_iso = dt_start.astimezone(timezone.utc).isoformat(timespec="seconds")
+        elif period_norm == "yesterday":
+            yest_date = today_local - timedelta(days=1)
+            dt_start = datetime.combine(yest_date, datetime.min.time()).replace(tzinfo=local_tz)
+            dt_end = datetime.combine(yest_date, datetime.max.time().replace(microsecond=0)).replace(tzinfo=local_tz)
+            from_iso = dt_start.astimezone(timezone.utc).isoformat(timespec="seconds")
+            to_iso = dt_end.astimezone(timezone.utc).isoformat(timespec="seconds")
+        elif period_norm == "24h":
+            from_iso = (now_utc - timedelta(hours=24)).isoformat(timespec="seconds")
+        elif period_norm == "7d":
+            from_iso = (now_utc - timedelta(days=7)).isoformat(timespec="seconds")
+        elif period_norm == "30d":
+            from_iso = (now_utc - timedelta(days=30)).isoformat(timespec="seconds")
+
+        where_parts: list[str] = []
+        params: list[Any] = []
+        if from_iso:
+            where_parts.append("created_at >= ?")
+            params.append(from_iso)
+        if to_iso:
+            where_parts.append("created_at <= ?")
+            params.append(to_iso)
+
+        where_clause = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
+
         by_task = [
             dict(r)
             for r in connection.execute(
-                """SELECT task,
+                f"""SELECT task,
                           COUNT(*) AS calls,
                           SUM(success) AS successes,
                           SUM(fallback) AS fallbacks,
@@ -223,13 +323,14 @@ def get_usage_stats(db_path: str | Path) -> dict[str, Any]:
                           COALESCE(SUM(output_tokens), 0) AS output_tokens,
                           COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
                           CAST(AVG(duration_ms) AS INTEGER) AS avg_ms
-                   FROM api_usage_log GROUP BY task ORDER BY calls DESC"""
+                   FROM api_usage_log {where_clause} GROUP BY task ORDER BY calls DESC""",
+                params,
             ).fetchall()
         ]
         by_model = [
             dict(r)
             for r in connection.execute(
-                """SELECT used_model,
+                f"""SELECT used_model,
                           COUNT(*) AS calls,
                           SUM(success) AS successes,
                           SUM(fallback) AS fallbacks,
@@ -238,21 +339,29 @@ def get_usage_stats(db_path: str | Path) -> dict[str, Any]:
                           COALESCE(SUM(output_tokens), 0) AS output_tokens,
                           COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
                           CAST(AVG(duration_ms) AS INTEGER) AS avg_ms
-                   FROM api_usage_log GROUP BY used_model ORDER BY calls DESC"""
+                   FROM api_usage_log {where_clause} GROUP BY used_model ORDER BY calls DESC""",
+                params,
             ).fetchall()
         ]
         recent = [
             dict(r)
             for r in connection.execute(
-                """SELECT created_at, task, requested_model, used_model, fallback, attempts, duration_ms,
+                f"""SELECT created_at, task, requested_model, used_model, fallback, attempts, duration_ms,
                           input_tokens, output_tokens, cached_tokens, success, error
-                   FROM api_usage_log ORDER BY id DESC LIMIT 30"""
+                   FROM api_usage_log {where_clause} ORDER BY id DESC LIMIT 30""",
+                params,
             ).fetchall()
         ]
         total_in = sum(t["input_tokens"] for t in by_task)
         total_cached = sum(t["cached_tokens"] for t in by_task)
         cache_hit_rate = round((total_cached / total_in * 100), 1) if total_in > 0 else 0.0
         return {
+            "period": period_norm,
+            "date_from": d_from_str,
+            "date_to": d_to_str,
+            "cutoff_at": from_iso,
+            "cutoff_from_iso": from_iso,
+            "cutoff_to_iso": to_iso,
             "total_calls": sum(t["calls"] for t in by_task),
             "total_cached_tokens": total_cached,
             "cache_hit_rate": cache_hit_rate,
@@ -407,17 +516,20 @@ def analyze_with_gemini(
         raise RuntimeError("GEMINI_API_KEY를 .env 파일 또는 환경변수에 설정해 주세요.")
 
     is_fast = (analysis_mode or "full").strip().lower() == "fast"
-    prompt_text = (
-        build_fast_grader_prompt(photo, category_hint=category_hint)
-        if is_fast
-        else build_grader_prompt(photo, category_hint=category_hint)
-    )
-    target_schema = FastPhotoAnalysis.model_json_schema() if is_fast else PhotoAnalysis.model_json_schema()
-    task_label = "사진 경량 분석" if is_fast else "사진 분석"
+    if is_fast:
+        system_instruction = get_fast_grader_system_prompt()
+        user_prompt_text = build_fast_grader_user_prompt(photo, category_hint=category_hint)
+        target_schema = FastPhotoAnalysis.model_json_schema()
+        task_label = "사진 경량 분석"
+    else:
+        system_instruction = get_grader_system_prompt()
+        user_prompt_text = build_grader_user_prompt(photo, category_hint=category_hint)
+        target_schema = PhotoAnalysis.model_json_schema()
+        task_label = "사진 분석"
 
     client = _dispatch_get_client(api_key)
     input_payload = [
-        {"type": "text", "text": prompt_text},
+        {"type": "text", "text": user_prompt_text},
         {
             "type": "image",
             "data": base64.b64encode(photo.upload_bytes).decode("ascii"),
@@ -436,6 +548,7 @@ def analyze_with_gemini(
                 input_payload=input_payload,
                 schema=target_schema,
                 task_desc=task_label,
+                system_instruction=system_instruction,
             )
             with _GEMINI_COORD_LOCK:
                 _GEMINI_WARMED_PHOTOS[coord_key] = time.monotonic() + GEMINI_CACHE_WARM_TTL_SECONDS
@@ -446,6 +559,7 @@ def analyze_with_gemini(
             input_payload=input_payload,
             schema=target_schema,
             task_desc=task_label,
+            system_instruction=system_instruction,
         )
     if is_fast:
         return FastPhotoAnalysis.from_llm_json(output_text).to_photo_analysis()
@@ -467,17 +581,19 @@ def cross_check_with_gemini(
 
     is_fast = (analysis_mode or "fast").strip().lower() == "fast"
     if is_fast:
-        prompt_text = build_fast_grader_prompt(photo, category_hint=category_hint)
+        system_instruction = get_fast_grader_system_prompt()
+        user_prompt_text = build_fast_grader_user_prompt(photo, category_hint=category_hint)
         target_schema = FastPhotoAnalysis.model_json_schema()
         task_label = "Gemini 크로스 체크(경량)"
     else:
-        prompt_text = build_grader_prompt(photo, category_hint=category_hint)
+        system_instruction = get_grader_system_prompt()
+        user_prompt_text = build_grader_user_prompt(photo, category_hint=category_hint)
         target_schema = PhotoAnalysis.model_json_schema()
         task_label = "Gemini 크로스 체크"
 
     client = _dispatch_get_client(resolved_key)
     input_payload = [
-        {"type": "text", "text": prompt_text},
+        {"type": "text", "text": user_prompt_text},
         {
             "type": "image",
             "data": base64.b64encode(photo.upload_bytes).decode("ascii"),
@@ -496,6 +612,7 @@ def cross_check_with_gemini(
                 input_payload=input_payload,
                 schema=target_schema,
                 task_desc=task_label,
+                system_instruction=system_instruction,
             )
             with _GEMINI_COORD_LOCK:
                 _GEMINI_WARMED_PHOTOS[coord_key] = time.monotonic() + GEMINI_CACHE_WARM_TTL_SECONDS
@@ -506,6 +623,7 @@ def cross_check_with_gemini(
             input_payload=input_payload,
             schema=target_schema,
             task_desc=task_label,
+            system_instruction=system_instruction,
         )
     if is_fast:
         fast_analysis = FastPhotoAnalysis.from_llm_json(output_text)

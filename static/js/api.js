@@ -139,8 +139,11 @@ const API = {
     return await res.json();
   },
 
-  async fetchUsageStats() {
-    const res = await fetch(`/api/usage-stats?_t=${Date.now()}`, { cache: 'no-store' });
+  async fetchUsageStats(period = 'all', dateFrom = '', dateTo = '') {
+    const params = new URLSearchParams({ period: period || 'all', _t: String(Date.now()) });
+    if (dateFrom) params.set('date_from', dateFrom);
+    if (dateTo) params.set('date_to', dateTo);
+    const res = await fetch(`/api/usage-stats?${params.toString()}`, { cache: 'no-store' });
     if (!res.ok) throw new Error(`사용 통계 조회 오류: ${res.status}`);
     return await res.json();
   },

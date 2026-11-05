@@ -433,11 +433,35 @@
 
 <!-- API Usage Modal -->
 <div class="modal-overlay" id="usage-modal" onclick="closeUsageModal(event)">
-  <div class="modal-content" style="max-width:860px;max-height:88vh;overflow-y:auto;" onclick="event.stopPropagation()">
+  <div class="modal-content" style="max-width:880px;max-height:88vh;overflow-y:auto;" onclick="event.stopPropagation()">
     <button class="close-btn" onclick="closeUsageModal()">&times;</button>
-    <div style="display:flex;align-items:center;gap:12px;margin:0 0 6px;">
-      <h2 style="margin:0;">📊 API 사용량 및 프롬프트 캐싱 통계</h2>
-      <button class="upload-btn" style="padding:4px 12px;font-size:0.78rem;background:#475569;" onclick="refreshUsageStats()">새로고침</button>
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin:0 0 10px;">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <h2 style="margin:0;">📊 API 사용량 및 프롬프트 캐싱 통계</h2>
+        <button class="upload-btn" style="padding:4px 12px;font-size:0.78rem;background:#475569;" onclick="refreshUsageStats()">새로고침</button>
+      </div>
+      <div class="usage-period-pills" id="usage-period-pills">
+        <button type="button" class="usage-period-btn active" data-period="all" onclick="setUsagePeriod('all')">전체</button>
+        <button type="button" class="usage-period-btn" data-period="today" onclick="setUsagePeriod('today')">오늘</button>
+        <button type="button" class="usage-period-btn" data-period="yesterday" onclick="setUsagePeriod('yesterday')">어제</button>
+        <button type="button" class="usage-period-btn" data-period="24h" onclick="setUsagePeriod('24h')">최근 24시간</button>
+        <button type="button" class="usage-period-btn" data-period="7d" onclick="setUsagePeriod('7d')">최근 7일</button>
+        <button type="button" class="usage-period-btn" data-period="30d" onclick="setUsagePeriod('30d')">최근 30일</button>
+      </div>
+    </div>
+    <div class="usage-date-toolbar">
+      <div class="usage-date-inputs">
+        <span style="font-weight:700;color:var(--muted);">📅 직접 지정:</span>
+        <input type="date" id="usage-date-from" onchange="onUsageCustomDateChange()">
+        <span style="color:var(--muted);">~</span>
+        <input type="date" id="usage-date-to" onchange="onUsageCustomDateChange()">
+        <button type="button" class="usage-apply-btn" onclick="applyUsageCustomDate()">적용</button>
+      </div>
+      <div id="usage-sync-toolbar" style="display:flex;align-items:center;gap:6px;">
+        <button type="button" id="btn-sync-dashboard-date" class="usage-sync-btn" onclick="syncUsageWithDashboardScope()" title="대시보드 상단의 활성 기간 범위로 즉시 동기화합니다">
+          🔗 대시보드 기간 동기화
+        </button>
+      </div>
     </div>
     <p style="color:var(--muted);font-size:0.85rem;margin:0 0 14px;">호출 횟수, 프롬프트 캐시 적중률(%), 재시도/폴백, 입출력 토큰, 소요 시간을 모델 및 기능별로 집계합니다.</p>
     <div id="usage-body"></div>

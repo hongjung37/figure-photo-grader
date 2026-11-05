@@ -138,9 +138,10 @@ class PhotoAnalyzerTests(unittest.TestCase):
                 self.assertIn('"FNumber": 5.6', prompt)
                 self.assertIn('"ISOSpeedRatings": 400', prompt)
                 self.assertNotIn("2026:01:02 03:04:05", prompt)
-                self.assertIn("aesthetic_tags", prompt)
-                self.assertIn("shot_scale", prompt)
-                self.assertIn("정확히 1개씩", prompt)
+                sys_instruction = request.get("system_instruction", "")
+                self.assertIn("aesthetic_tags", sys_instruction)
+                self.assertIn("shot_scale", sys_instruction)
+                self.assertIn("정확히 1개씩", sys_instruction)
                 schema = request["response_format"]["schema"]
                 self.assertIn("aesthetic_tags", schema["required"])
                 self.assertEqual(
@@ -415,7 +416,7 @@ class PhotoAnalyzerTests(unittest.TestCase):
             first_photo = first_dir / "same.jpg"
             second_photo = second_dir / "same.jpg"
             self._make_jpeg(first_photo)
-            self._make_jpeg(second_photo)
+            self._make_jpeg(second_photo, with_exif=True)
 
             report_dir = root / "reports"
             with patch.object(photo_analyzer, "analyze_with_gemini", return_value=self._valid_analysis()):
@@ -1069,6 +1070,89 @@ class PhotoAnalyzerTests(unittest.TestCase):
             row = stats["by_task"][0]
             self.assertEqual(row["cached_tokens"], 800)
             self.assertEqual(row["input_tokens"], 1000)
+
+    def test_usage_stats_period_filter(self) -> None:
+        import photo_analyzer
+        import sqlite3
+        from contextlib import closing
+        from datetime import datetime, timedelta, timezone
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            db_path = Path(temporary_directory) / "usage_filter.sqlite3"
+            now = datetime.now(timezone.utc)
+            t_now = now.isoformat(timespec="seconds")
+            t_2d_ago = (now - timedelta(days=2)).isoformat(timespec="seconds")
+            t_10d_ago = (now - timedelta(days=10)).isoformat(timespec="seconds")
+            t_40d_ago = (now - timedelta(days=40)).isoformat(timespec="seconds")
+
+            with closing(sqlite3.connect(db_path)) as conn:
+                conn.execute(
+                    """CREATE TABLE api_usage_log (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        created_at TEXT NOT NULL,
+                        task TEXT NOT NULL,
+                        requested_model TEXT NOT NULL,
+                        used_model TEXT NOT NULL,
+                        fallback INTEGER NOT NULL,
+                        attempts INTEGER NOT NULL,
+                        duration_ms INTEGER NOT NULL,
+                        input_tokens INTEGER,
+                        output_tokens INTEGER,
+                        cached_tokens INTEGER,
+                        success INTEGER NOT NULL,
+                        error TEXT
+                    )"""
+                )
+                conn.executemany(
+                    """INSERT INTO api_usage_log (
+                        created_at, task, requested_model, used_model, fallback, attempts,
+                        duration_ms, input_tokens, output_tokens, cached_tokens, success, error
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    [
+                        (t_now, "task1", "m1", "m1", 0, 1, 100, 100, 20, 50, 1, None),
+                        (t_2d_ago, "task1", "m1", "m1", 0, 1, 150, 200, 30, 0, 1, None),
+                        (t_10d_ago, "task2", "m2", "m2", 0, 1, 200, 300, 40, 100, 1, None),
+                        (t_40d_ago, "task2", "m2", "m2", 0, 1, 250, 400, 50, 0, 1, None),
+                    ],
+                )
+                conn.commit()
+
+            # 1. period="all" -> 4 records
+            stats_all = photo_analyzer.get_usage_stats(db_path, period="all")
+            self.assertEqual(stats_all["total_calls"], 4)
+            self.assertEqual(stats_all["period"], "all")
+
+            # 2. period="24h" -> only t_now (1 record)
+            stats_24h = photo_analyzer.get_usage_stats(db_path, period="24h")
+            self.assertEqual(stats_24h["total_calls"], 1)
+            self.assertEqual(stats_24h["period"], "24h")
+            self.assertEqual(stats_24h["by_task"][0]["task"], "task1")
+
+            # 3. period="7d" -> t_now + t_2d_ago (2 records)
+            stats_7d = photo_analyzer.get_usage_stats(db_path, period="7d")
+            self.assertEqual(stats_7d["total_calls"], 2)
+            self.assertEqual(stats_7d["period"], "7d")
+
+            # 4. period="30d" -> t_now + t_2d_ago + t_10d_ago (3 records)
+            stats_30d = photo_analyzer.get_usage_stats(db_path, period="30d")
+            self.assertEqual(stats_30d["total_calls"], 3)
+            self.assertEqual(stats_30d["period"], "30d")
+
+            # 5. Invalid period falls back to "all"
+            stats_invalid = photo_analyzer.get_usage_stats(db_path, period="invalid_val")
+            self.assertEqual(stats_invalid["total_calls"], 4)
+            self.assertEqual(stats_invalid["period"], "all")
+
+            # 6. period="today"
+            stats_today = photo_analyzer.get_usage_stats(db_path, period="today")
+            self.assertIn(stats_today["total_calls"], (0, 1))
+
+            # 7. date_from & date_to custom range
+            d_from = (now - timedelta(days=15)).strftime("%Y-%m-%d")
+            d_to = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+            stats_custom = photo_analyzer.get_usage_stats(db_path, date_from=d_from, date_to=d_to)
+            self.assertEqual(stats_custom["period"], "custom")
+            self.assertEqual(stats_custom["total_calls"], 2)  # t_2d_ago + t_10d_ago
 
     def test_missing_model_falls_back_to_stable_model(self) -> None:
         import photo_analyzer
