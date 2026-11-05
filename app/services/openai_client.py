@@ -55,7 +55,7 @@ T = TypeVar("T")
 
 _CLIENT_LOCK = threading.Lock()
 _CLIENT_CACHE: dict[str, OpenAI] = {}
-MAX_CONCURRENT_OPENAI_CALLS = 3
+MAX_CONCURRENT_OPENAI_CALLS = int(os.environ.get("OPENAI_MAX_CONCURRENCY", "6"))
 _OPENAI_SEMAPHORE = threading.BoundedSemaphore(MAX_CONCURRENT_OPENAI_CALLS)
 
 # Prompt Cache Coordination: prevents cold-cache thundering herd and replica spillover on concurrent bursts

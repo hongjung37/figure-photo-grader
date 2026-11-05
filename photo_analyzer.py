@@ -94,6 +94,7 @@ from app.services.gemini_client import (
     _call_gemini_interaction,
     _get_client,
     analyze_with_gemini,
+    clear_explicit_gemini_caches,
     generate_all_sns_crops,
     generate_lightroom_advice,
     generate_single_sns_crop,

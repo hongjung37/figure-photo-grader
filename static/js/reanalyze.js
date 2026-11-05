@@ -151,13 +151,18 @@ function renderReanalyzePanel(item) {
       </div>
 
       <div id="reanalyze-sampling-wrap-${item.id}" class="reanalyze-sampling-wrap" style="margin-top: 10px; padding: 9px 12px; background: rgba(99,102,241,0.06); border: 1px dashed rgba(99,102,241,0.32); border-radius: 8px;">
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:0.83rem;font-weight:600;color:var(--text);user-select:none;">
-          <input type="checkbox" id="reanalyze-median-${item.id}" ${(window.ModelSettings && window.ModelSettings.get('median_sampling') === 'true') ? 'checked' : ''} style="width:16px;height:16px;accent-color:#4f46e5;cursor:pointer;" onchange="if(window.ModelSettings) window.ModelSettings.set('median_sampling', this.checked ? 'true' : 'false');">
-          <span>🎯 3회 병렬 채점 후 중앙값(Median) 채택</span>
-          <span style="background:rgba(99,102,241,0.15);color:#4f46e5;padding:2px 6px;border-radius:4px;font-size:0.72rem;font-weight:700;">진동 0.1 이내 안정화</span>
-        </label>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:0.83rem;font-weight:600;color:var(--text);user-select:none;margin:0;">
+            <input type="checkbox" id="reanalyze-median-${item.id}" ${(window.ModelSettings && window.ModelSettings.get('median_sampling') === 'true') ? 'checked' : ''} style="width:16px;height:16px;accent-color:#4f46e5;cursor:pointer;" onchange="if(window.ModelSettings) window.ModelSettings.set('median_sampling', this.checked ? 'true' : 'false');">
+            <span>🎯 병렬 채점 후 중앙값(Median) 채택</span>
+          </label>
+          <select id="reanalyze-sample-count-${item.id}" class="select-input" style="padding:2px 8px;font-size:0.75rem;height:auto;width:auto;" onclick="event.stopPropagation();">
+            <option value="3" selected>3회 병렬 (권장)</option>
+            <option value="5">🔥 5회 병렬 (초정밀)</option>
+          </select>
+        </div>
         <div style="font-size:0.75rem;color:var(--muted);margin-top:3px;padding-left:24px;line-height:1.4;">
-          동일 사진을 3회 동시 병렬 채점하여 단발성 튀는 점수(Outlier)를 배제하고 가장 신뢰도 높은 중앙값 분석을 저장합니다.
+          동일 사진을 여러 번 동시 병렬 채점하여 단발성 튀는 점수(Outlier)를 배제하고 가장 신뢰도 높은 중앙값 분석을 저장합니다.
         </div>
       </div>
 
@@ -191,7 +196,9 @@ async function executeReanalyze(id) {
   const category = catSelect ? catSelect.value : 'auto';
 
   const medianCheckbox = document.getElementById(`reanalyze-median-${id}`);
-  const sampleCount = (medianCheckbox && medianCheckbox.checked && mode === 'full') ? 3 : 1;
+  const sampleSelect = document.getElementById(`reanalyze-sample-count-${id}`);
+  const chosenSampleCount = sampleSelect ? (parseInt(sampleSelect.value, 10) || 3) : 3;
+  const sampleCount = (medianCheckbox && medianCheckbox.checked && mode === 'full') ? chosenSampleCount : 1;
 
   const submitBtn = document.getElementById(`reanalyze-submit-btn-${id}`);
   const statusEl = document.getElementById(`reanalyze-status-${id}`);
@@ -493,7 +500,9 @@ async function executeBatchReanalyze() {
   const categoryChoice = document.getElementById('batch-reanalyze-category')?.value || 'keep';
   const concurrency = parseInt(document.getElementById('batch-reanalyze-concurrency')?.value, 10) || 2;
   const useMedian = isCrossCheckOnly ? false : (document.getElementById('batch-reanalyze-median')?.checked || false);
-  const sampleCount = useMedian ? 3 : 1;
+  const batchSampleSelect = document.getElementById('batch-reanalyze-sample-count');
+  const chosenBatchSamples = batchSampleSelect ? (parseInt(batchSampleSelect.value, 10) || 3) : 3;
+  const sampleCount = useMedian ? chosenBatchSamples : 1;
 
   // Show progress section
   document.getElementById('batch-reanalyze-config-section').style.display = 'none';

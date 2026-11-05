@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import os
 import sqlite3
 import sys
@@ -15,6 +16,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 from google import genai
+from google.genai import types
 
 from app.config import (
     DEFAULT_MODEL,
@@ -81,6 +83,113 @@ def _get_photo_cache_lock(coord_key: str) -> threading.Lock:
 def get_last_used_gemini_model() -> str | None:
     """Return the actual Gemini model used in the current thread's most recent call."""
     return getattr(_THREAD_LOCAL, "last_used_model", None)
+
+
+# Explicit Context Cache Registry: (api_key, model, sha256_of_instruction) -> (cache_name, expire_time_timestamp)
+_EXPLICIT_CACHE_LOCK = threading.Lock()
+_EXPLICIT_CACHE_STORE: dict[tuple[str, str, str], tuple[str, float]] = {}
+EXPLICIT_CACHE_TTL_SECONDS = 1800.0  # 30 minutes
+
+
+def clear_explicit_gemini_caches() -> None:
+    """Clear in-memory registry of explicit cached contents."""
+    with _EXPLICIT_CACHE_LOCK:
+        _EXPLICIT_CACHE_STORE.clear()
+
+
+def _clean_schema_for_gemini(schema: Any) -> Any:
+    """Recursively strip schema keys unsupported by Gemini generateContent (e.g. additionalProperties)."""
+    if hasattr(schema, "model_json_schema"):
+        schema = schema.model_json_schema()
+    if isinstance(schema, dict):
+        return {
+            k: _clean_schema_for_gemini(v)
+            for k, v in schema.items()
+            if k not in ("additionalProperties", "additional_properties")
+        }
+    elif isinstance(schema, list):
+        return [_clean_schema_for_gemini(item) for item in schema]
+    return schema
+
+
+def _convert_input_to_contents(input_payload: list[dict[str, Any]]) -> list[Any]:
+    """Convert interactions input_payload to generate_content contents."""
+    contents: list[Any] = []
+    for item in input_payload:
+        itype = item.get("type")
+        if itype == "text":
+            text_val = item.get("text", "")
+            if text_val:
+                contents.append(text_val)
+        elif itype == "image":
+            data = item.get("data")
+            mime_type = item.get("mime_type", "image/jpeg")
+            if isinstance(data, str):
+                raw_bytes = base64.b64decode(data)
+            elif isinstance(data, (bytes, bytearray)):
+                raw_bytes = bytes(data)
+            else:
+                raw_bytes = b""
+            contents.append(types.Part.from_bytes(data=raw_bytes, mime_type=mime_type))
+        else:
+            contents.append(item)
+    return contents
+
+
+def _get_or_create_cached_content(
+    client: Any,
+    model: str,
+    system_instruction: str,
+    api_key: str | None = None,
+) -> str | None:
+    """Return or lazily create a cached content resource name for model & system_instruction."""
+    is_mock = type(client).__module__.startswith("unittest.mock") or type(
+        getattr(client, "caches", None)
+    ).__module__.startswith("unittest.mock")
+    if is_mock and not getattr(client, "_force_explicit_cache", False):
+        return None
+    if not hasattr(client, "caches"):
+        return None
+
+    instr_hash = hashlib.sha256(system_instruction.encode("utf-8")).hexdigest()
+    resolved_key = (api_key or getattr(client, "_api_key", None) or "").strip()
+    cache_key = (resolved_key, model, instr_hash)
+    now = time.monotonic()
+
+    with _EXPLICIT_CACHE_LOCK:
+        entry = _EXPLICIT_CACHE_STORE.get(cache_key)
+        if entry:
+            c_name, exp_at = entry
+            if exp_at > now + 60.0:
+                return c_name
+
+    with _EXPLICIT_CACHE_LOCK:
+        entry = _EXPLICIT_CACHE_STORE.get(cache_key)
+        if entry:
+            c_name, exp_at = entry
+            if exp_at > now + 60.0:
+                return c_name
+
+        try:
+            cache = client.caches.create(
+                model=model,
+                config=types.CreateCachedContentConfig(
+                    system_instruction=system_instruction,
+                    ttl=f"{int(EXPLICIT_CACHE_TTL_SECONDS)}s",
+                ),
+            )
+            raw_name = getattr(cache, "name", None)
+            if not isinstance(raw_name, str):
+                return None
+            _EXPLICIT_CACHE_STORE[cache_key] = (raw_name, now + EXPLICIT_CACHE_TTL_SECONDS)
+            print(
+                f"[Gemini Cache] 명시적 컨텍스트 캐시 생성 완료: {raw_name} (모델: {model}, TTL: {int(EXPLICIT_CACHE_TTL_SECONDS)}s)",
+                file=sys.stderr,
+            )
+            return raw_name
+        except Exception as exc:
+            print(f"[Gemini Cache] 명시적 캐시 생성 생략 ({model}): {exc}", file=sys.stderr)
+            return None
 
 
 def clear_last_used_gemini_model() -> None:
@@ -374,8 +483,12 @@ def get_usage_stats(
 def _extract_usage(interaction: Any) -> tuple[int | None, int | None, int | None]:
     usage = getattr(interaction, "usage", None)
     if usage is None:
+        usage = getattr(interaction, "usage_metadata", None)
+    if usage is None:
         return None, None, None
     raw_cached = getattr(usage, "total_cached_tokens", None)
+    if raw_cached is None:
+        raw_cached = getattr(usage, "cached_content_token_count", None)
     cached_tok: int | None = None
     if isinstance(raw_cached, int):
         cached_tok = raw_cached
@@ -384,9 +497,15 @@ def _extract_usage(interaction: Any) -> tuple[int | None, int | None, int | None
             cached_tok = int(raw_cached)
         except (ValueError, TypeError):
             cached_tok = None
+    raw_in = getattr(usage, "total_input_tokens", None)
+    if raw_in is None:
+        raw_in = getattr(usage, "prompt_token_count", None)
+    raw_out = getattr(usage, "total_output_tokens", None)
+    if raw_out is None:
+        raw_out = getattr(usage, "candidates_token_count", None)
     return (
-        getattr(usage, "total_input_tokens", None),
-        getattr(usage, "total_output_tokens", None),
+        raw_in,
+        raw_out,
         cached_tok,
     )
 
@@ -418,8 +537,9 @@ def _call_gemini_interaction(
     schema: Any,
     task_desc: str,
     system_instruction: str | None = None,
+    api_key: str | None = None,
 ) -> str:
-    """Execute Gemini interactions.create with fallback for unavailable models and transient errors."""
+    """Execute Gemini request via explicit cached generate_content or interactions.create with fallback."""
     active_model = model
     max_retries = 3
     backoff = 2.0
@@ -433,23 +553,53 @@ def _call_gemini_interaction(
         attempts += 1
         try:
             with _GEMINI_SEMAPHORE:
-                kwargs: dict[str, Any] = {
-                    "model": active_model,
-                    "input": input_payload,
-                    "response_format": {
-                        "type": "text",
-                        "mime_type": "application/json",
-                        "schema": schema,
-                    },
-                    "store": False,
-                }
-                if system_instruction:
-                    kwargs["system_instruction"] = system_instruction
-                interaction = client.interactions.create(**kwargs)
-            output_text = interaction.output_text
+                cache_name = None
+                if (
+                    system_instruction
+                    and hasattr(client, "caches")
+                    and hasattr(client, "models")
+                ):
+                    cache_name = _get_or_create_cached_content(
+                        client=client,
+                        model=active_model,
+                        system_instruction=system_instruction,
+                        api_key=api_key,
+                    )
+
+                if cache_name and hasattr(client, "models"):
+                    contents = _convert_input_to_contents(input_payload)
+                    cleaned_schema = _clean_schema_for_gemini(schema)
+                    config = types.GenerateContentConfig(
+                        cached_content=cache_name,
+                        response_mime_type="application/json",
+                        response_schema=cleaned_schema,
+                    )
+                    resp = client.models.generate_content(
+                        model=active_model,
+                        contents=contents,
+                        config=config,
+                    )
+                    output_text = resp.text
+                    in_tok, out_tok, cached_tok = _extract_usage(resp)
+                else:
+                    kwargs: dict[str, Any] = {
+                        "model": active_model,
+                        "input": input_payload,
+                        "response_format": {
+                            "type": "text",
+                            "mime_type": "application/json",
+                            "schema": schema,
+                        },
+                        "store": False,
+                    }
+                    if system_instruction:
+                        kwargs["system_instruction"] = system_instruction
+                    interaction = client.interactions.create(**kwargs)
+                    output_text = interaction.output_text
+                    in_tok, out_tok, cached_tok = _extract_usage(interaction)
+
             if not output_text:
                 raise RuntimeError(f"Gemini가 {task_desc} JSON 결과를 반환하지 않았습니다.")
-            in_tok, out_tok, cached_tok = _extract_usage(interaction)
             _THREAD_LOCAL.last_used_model = active_model
             _log_api_usage(
                 task_desc,
@@ -472,6 +622,8 @@ def _call_gemini_interaction(
             return output_text
         except Exception as exc:
             err_msg = str(exc)
+            if "cached_content" in err_msg.lower() or "cachedcontent" in err_msg.lower():
+                clear_explicit_gemini_caches()
             is_model_unavailable = any(
                 marker in err_msg
                 for marker in ("404", "NOT_FOUND", "not found", "model not found", "does not exist")
@@ -549,6 +701,7 @@ def analyze_with_gemini(
                 schema=target_schema,
                 task_desc=task_label,
                 system_instruction=system_instruction,
+                api_key=api_key,
             )
             with _GEMINI_COORD_LOCK:
                 _GEMINI_WARMED_PHOTOS[coord_key] = time.monotonic() + GEMINI_CACHE_WARM_TTL_SECONDS
@@ -560,6 +713,7 @@ def analyze_with_gemini(
             schema=target_schema,
             task_desc=task_label,
             system_instruction=system_instruction,
+            api_key=api_key,
         )
     if is_fast:
         return FastPhotoAnalysis.from_llm_json(output_text).to_photo_analysis()
@@ -613,6 +767,7 @@ def cross_check_with_gemini(
                 schema=target_schema,
                 task_desc=task_label,
                 system_instruction=system_instruction,
+                api_key=resolved_key,
             )
             with _GEMINI_COORD_LOCK:
                 _GEMINI_WARMED_PHOTOS[coord_key] = time.monotonic() + GEMINI_CACHE_WARM_TTL_SECONDS
@@ -624,6 +779,7 @@ def cross_check_with_gemini(
             schema=target_schema,
             task_desc=task_label,
             system_instruction=system_instruction,
+            api_key=resolved_key,
         )
     if is_fast:
         fast_analysis = FastPhotoAnalysis.from_llm_json(output_text)

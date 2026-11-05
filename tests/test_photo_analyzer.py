@@ -1851,6 +1851,90 @@ class PhotoAnalyzerTests(unittest.TestCase):
             self.assertTrue(delete_collection(db_path, col_id))
             self.assertEqual(len(get_all_collections(db_path)), 0)
 
+    def test_explicit_gemini_context_caching_helpers(self) -> None:
+        import app.services.gemini_client as gc
+        from types import SimpleNamespace
+
+        # 1. Test schema cleaner
+        dirty_schema = {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "tags": {
+                    "type": "object",
+                    "additional_properties": {"type": "string"},
+                },
+                "items": [
+                    {"type": "object", "additionalProperties": False}
+                ],
+            },
+        }
+        cleaned = gc._clean_schema_for_gemini(dirty_schema)
+        self.assertNotIn("additionalProperties", cleaned)
+        self.assertNotIn("additional_properties", cleaned["properties"]["tags"])
+        self.assertNotIn("additionalProperties", cleaned["properties"]["items"][0])
+
+        # 2. Test contents converter
+        dummy_b64 = base64.b64encode(b"hello image").decode("ascii")
+        payload = [
+            {"type": "text", "text": "Analyze this"},
+            {"type": "image", "data": dummy_b64, "mime_type": "image/webp"},
+        ]
+        contents = gc._convert_input_to_contents(payload)
+        self.assertEqual(len(contents), 2)
+        self.assertEqual(contents[0], "Analyze this")
+        self.assertEqual(contents[1].inline_data.mime_type, "image/webp")
+        self.assertEqual(contents[1].inline_data.data, b"hello image")
+
+        # 3. Test explicit cache reuse
+        gc.clear_explicit_gemini_caches()
+        create_calls: list[dict[str, Any]] = []
+
+        class FakeCaches:
+            def create(self, model: str, config: Any):
+                create_calls.append({"model": model, "config": config})
+                return SimpleNamespace(name=f"cachedContents/fake_{len(create_calls)}")
+
+        class FakeModels:
+            def generate_content(self, model: str, contents: Any, config: Any):
+                return SimpleNamespace(
+                    text='{"result": "ok"}',
+                    usage_metadata=SimpleNamespace(
+                        prompt_token_count=6000,
+                        candidates_token_count=100,
+                        cached_content_token_count=5000,
+                    ),
+                )
+
+        fake_client = SimpleNamespace(
+            caches=FakeCaches(),
+            models=FakeModels(),
+            _force_explicit_cache=True,
+            _api_key="test-api-key",
+        )
+
+        sys_instr = "You are a professional photography grader."
+        cache_id1 = gc._get_or_create_cached_content(fake_client, "gemini-3.5-flash-lite", sys_instr)
+        self.assertEqual(cache_id1, "cachedContents/fake_1")
+        self.assertEqual(len(create_calls), 1)
+
+        # Immediate second call should reuse cached content without re-creating
+        cache_id2 = gc._get_or_create_cached_content(fake_client, "gemini-3.5-flash-lite", sys_instr)
+        self.assertEqual(cache_id2, "cachedContents/fake_1")
+        self.assertEqual(len(create_calls), 1)
+
+        # 4. Test _call_gemini_interaction uses models.generate_content when cache is active
+        out = gc._call_gemini_interaction(
+            client=fake_client,
+            model="gemini-3.5-flash-lite",
+            input_payload=payload,
+            schema={"type": "object"},
+            task_desc="캐시 테스트",
+            system_instruction=sys_instr,
+        )
+        self.assertEqual(out, '{"result": "ok"}')
+        gc.clear_explicit_gemini_caches()
+
 
 if __name__ == "__main__":
     unittest.main()

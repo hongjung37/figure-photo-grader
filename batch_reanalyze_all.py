@@ -6,8 +6,10 @@ import json
 import sqlite3
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
+import threading
 from typing import Any
 
 import argparse
@@ -27,6 +29,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Batch reanalyze figure photos")
     parser.add_argument("--model", default=DEFAULT_MODEL_NAME, help="Model to use (e.g. gpt-6-luna, luna, standard)")
     parser.add_argument("--delay", type=float, default=RPM_DELAY_SECONDS, help="Delay between requests in seconds")
+    parser.add_argument("--concurrency", "-c", type=int, default=1, help="Concurrent workers (e.g. 1, 2, 3, 5)")
     parser.add_argument("--only-flash-lite", action="store_true", help="Only reanalyze photos currently using flash lite")
     args = parser.parse_args()
 
@@ -35,7 +38,7 @@ def main() -> None:
     delay_sec = 4.3 if "gemini" in resolved_model else args.delay
 
     print(f"=== [{resolved_model}] 일괄 재분석 시작 ===")
-    print(f"제공자: {provider} | 요청 간 대기: {delay_sec}초 | 대상: {'Flash-Lite 대상만' if args.only_flash_lite else '전체'}")
+    print(f"제공자: {provider} | 동시 병렬: {args.concurrency}개 | 요청 간 대기: {delay_sec}초 | 대상: {'Flash-Lite 대상만' if args.only_flash_lite else '전체'}")
     print(f"DB 경로: {DB_PATH.resolve()}")
 
     with sqlite3.connect(DB_PATH) as conn:
@@ -52,8 +55,12 @@ def main() -> None:
 
     results: list[dict[str, Any]] = []
     start_time = time.time()
+    completed_count = 0
+    progress_lock = threading.Lock()
 
-    for idx, r in enumerate(rows, start=1):
+    def _process_single_row(item: tuple[int, sqlite3.Row]) -> dict[str, Any] | None:
+        nonlocal completed_count
+        idx, r = item
         record_id = r["id"]
         filename = r["source_filename"]
         old_model = r["model"]
@@ -67,14 +74,18 @@ def main() -> None:
 
         row_full = get_analysis_row_by_id(DB_PATH, record_id)
         if not row_full:
-            print(f"[{idx}/{total}] ID {record_id} ({filename}): 로드 실패 (건너뜀)")
-            continue
+            with progress_lock:
+                completed_count += 1
+                print(f"[{completed_count}/{total}] ID {record_id} ({filename}): 로드 실패 (건너뜀)")
+            return None
 
         try:
             prep = _load_prepared_photo_for_record(DB_PATH, row_full)
         except Exception as e:
-            print(f"[{idx}/{total}] ID {record_id} ({filename}): 이미지 로드 에러 ({e})")
-            continue
+            with progress_lock:
+                completed_count += 1
+                print(f"[{completed_count}/{total}] ID {record_id} ({filename}): 이미지 로드 에러 ({e})")
+            return None
 
         # Analysis with retry logic
         new_analysis = None
@@ -93,17 +104,21 @@ def main() -> None:
                 err_msg = str(e)
                 if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg or "quota" in err_msg.lower():
                     wait_time = 15.0 * attempt
-                    print(f"  [429 Quota] {attempt}/{MAX_RETRIES}회 재시도 대기 ({wait_time}초)...")
+                    with progress_lock:
+                        print(f"  [429 Quota] {attempt}/{MAX_RETRIES}회 재시도 대기 ({wait_time}초)...")
                     time.sleep(wait_time)
                 else:
-                    print(f"  [Error] {filename} 분석 중 예외 발생: {e}")
+                    with progress_lock:
+                        print(f"  [Error] {filename} 분석 중 예외 발생: {e}")
                     if attempt == MAX_RETRIES:
                         break
                     time.sleep(3.0)
 
         if not new_analysis:
-            print(f"[{idx}/{total}] ID {record_id} ({filename}): 분석 실패")
-            continue
+            with progress_lock:
+                completed_count += 1
+                print(f"[{completed_count}/{total}] ID {record_id} ({filename}): 분석 실패")
+            return None
 
         # Save to database
         update_analysis(DB_PATH, record_id, resolved_model, new_analysis)
@@ -114,21 +129,29 @@ def main() -> None:
         diff_str = f"+{diff}" if diff > 0 else f"{diff}"
 
         # Progress & ETA calculation
-        elapsed = time.time() - start_time
-        avg_per_item = elapsed / idx
-        remaining_items = total - idx
-        remaining_seconds = int(avg_per_item * remaining_items)
-        rem_min = remaining_seconds // 60
-        rem_sec = remaining_seconds % 60
+        with progress_lock:
+            completed_count += 1
+            curr_done = completed_count
+            elapsed = time.time() - start_time
+            avg_per_item = elapsed / curr_done
+            remaining_items = total - curr_done
+            remaining_seconds = int(avg_per_item * remaining_items)
+            rem_min = remaining_seconds // 60
+            rem_sec = remaining_seconds % 60
 
-        msg = (
-            f"[{idx:03d}/{total:03d}] ({idx/total*100:4.1f}%) {filename[:25]:<25} | "
-            f"구: {old_score:4.1f}점 -> 신: {new_score:4.1f}점 ({diff_str:>5}) | "
-            f"카테고리: {new_cat} | ETA: {rem_min}분 {rem_sec:02d}초"
-        )
-        print(msg, flush=True)
+            msg = (
+                f"[{curr_done:03d}/{total:03d}] ({curr_done/total*100:4.1f}%) {filename[:25]:<25} | "
+                f"구: {old_score:4.1f}점 -> 신: {new_score:4.1f}점 ({diff_str:>5}) | "
+                f"카테고리: {new_cat} | ETA: {rem_min}분 {rem_sec:02d}초"
+            )
+            print(msg, flush=True)
 
-        results.append({
+        if args.concurrency <= 1:
+            req_duration = time.time() - req_start
+            if req_duration < delay_sec:
+                time.sleep(delay_sec - req_duration)
+
+        return {
             "id": record_id,
             "filename": filename,
             "old_model": old_model,
@@ -145,12 +168,19 @@ def main() -> None:
             "final_reason": new_analysis.final_reason,
             "strengths": new_analysis.strengths,
             "improvements": new_analysis.improvements,
-        })
+        }
 
-        # Throttle delay
-        req_duration = time.time() - req_start
-        if req_duration < delay_sec:
-            time.sleep(delay_sec - req_duration)
+    indexed_rows = list(enumerate(rows, start=1))
+    if args.concurrency > 1:
+        with ThreadPoolExecutor(max_workers=args.concurrency) as executor:
+            for item_result in executor.map(_process_single_row, indexed_rows):
+                if item_result:
+                    results.append(item_result)
+    else:
+        for row_item in indexed_rows:
+            item_result = _process_single_row(row_item)
+            if item_result:
+                results.append(item_result)
 
     # Save JSON Report
     REPORT_JSON_PATH.parent.mkdir(parents=True, exist_ok=True)
