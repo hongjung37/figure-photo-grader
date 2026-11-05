@@ -29,7 +29,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Batch reanalyze figure photos")
     parser.add_argument("--model", default=DEFAULT_MODEL_NAME, help="Model to use (e.g. gpt-6-luna, luna, standard)")
     parser.add_argument("--delay", type=float, default=RPM_DELAY_SECONDS, help="Delay between requests in seconds")
-    parser.add_argument("--concurrency", "-c", type=int, default=1, help="Concurrent workers (e.g. 1, 2, 3, 5)")
+    parser.add_argument("--concurrency", "-c", type=int, default=1, help="Concurrent workers (e.g. 1, 2, 3, 5, 10, 50)")
     parser.add_argument("--only-flash-lite", action="store_true", help="Only reanalyze photos currently using flash lite")
     args = parser.parse_args()
 
