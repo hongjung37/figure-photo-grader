@@ -175,7 +175,7 @@ def render_html_report(
         f'<article class="tag-card"><h3>{escape(category_label)}</h3>'
         + (
             "<div class=\"tag-list\">"
-            + "".join(f'<span class="tag-pill">{escape(tag)}</span>' for tag in aesthetic_tags.get(category_key, []))
+            + "".join(f'<span class="tag-pill">{escape(tag)}</span>' for tag in (aesthetic_tags.get(category_key) if isinstance(aesthetic_tags.get(category_key), (list, tuple)) else ([aesthetic_tags.get(category_key)] if aesthetic_tags.get(category_key) else [])))
             + "</div>"
             if aesthetic_tags.get(category_key)
             else '<p class="empty-tag">관찰된 태그 없음</p>'

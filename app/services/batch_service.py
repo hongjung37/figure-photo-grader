@@ -102,7 +102,7 @@ def run_batch_pipeline(
                 rel_report = report_path.as_posix()
 
         if generate_xmp:
-            tags_list = [t for sub in analysis.aesthetic_tags.model_dump().values() for t in sub]
+            tags_list = [t for sub in analysis.aesthetic_tags.model_dump().values() for t in (sub if isinstance(sub, (list, tuple)) else ([sub] if sub else []))]
             write_xmp_sidecar(
                 photo_path=photo_path,
                 score=analysis.final_score,

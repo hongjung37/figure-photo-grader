@@ -76,9 +76,9 @@ class PhotoAnalyzerTests(unittest.TestCase):
             improvements=["배경을 단순화해 보세요."],
             aesthetic_tags=AestheticTags.empty().model_copy(
                 update={
-                    "viewpoint": ["정면"],
-                    "composition_space": ["삼분할 구도"],
-                    "mood": ["고요함"],
+                    "shot_scale": "바스트샷(상반신)",
+                    "camera_angle": "아이레벨(눈높이)",
+                    "light_direction": "측광(사광)",
                 }
             ),
         )
@@ -139,8 +139,8 @@ class PhotoAnalyzerTests(unittest.TestCase):
                 self.assertIn('"ISOSpeedRatings": 400', prompt)
                 self.assertNotIn("2026:01:02 03:04:05", prompt)
                 self.assertIn("aesthetic_tags", prompt)
-                self.assertIn("정면, 측면, 후면", prompt)
-                self.assertIn("0~3개 선택하세요", prompt)
+                self.assertIn("shot_scale", prompt)
+                self.assertIn("정확히 1개씩", prompt)
                 schema = request["response_format"]["schema"]
                 self.assertIn("aesthetic_tags", schema["required"])
                 self.assertEqual(
@@ -150,7 +150,7 @@ class PhotoAnalyzerTests(unittest.TestCase):
                 tag_properties = schema["$defs"]["AestheticTags"]["properties"]
                 for category_key, allowed_tags in AESTHETIC_TAG_OPTIONS.items():
                     self.assertEqual(
-                        tag_properties[category_key]["items"]["enum"],
+                        tag_properties[category_key]["enum"],
                         list(allowed_tags),
                     )
 
@@ -186,19 +186,19 @@ class PhotoAnalyzerTests(unittest.TestCase):
 
     def test_unknown_or_excessive_aesthetic_tags_are_rejected(self) -> None:
         payload = self._valid_analysis().model_dump()
-        payload["aesthetic_tags"]["viewpoint"] = ["정면", "측면", "후면", "사선"]
+        payload["aesthetic_tags"]["shot_scale"] = ["바스트샷(상반신)", "풀샷(전신)"]
         with self.assertRaises(ValidationError):
             PhotoAnalysis.model_validate(payload)
 
-        payload["aesthetic_tags"]["viewpoint"] = ["파노라마 시점"]
+        payload["aesthetic_tags"]["shot_scale"] = "파노라마 시점"
         with self.assertRaises(ValidationError):
             PhotoAnalysis.model_validate(payload)
 
     def test_legacy_analysis_without_tag_field_uses_empty_tag_defaults(self) -> None:
         payload = self._valid_analysis().model_dump(exclude={"aesthetic_tags"})
         restored = PhotoAnalysis.model_validate(payload)
-        self.assertEqual(restored.aesthetic_tags.viewpoint, [])
-        self.assertEqual(restored.aesthetic_tags.narrative_implication, [])
+        self.assertEqual(restored.aesthetic_tags.shot_scale, "")
+        self.assertEqual(restored.aesthetic_tags.color_tone, "")
 
     def test_validated_analysis_and_safe_exif_are_saved_to_sqlite(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -235,7 +235,11 @@ class PhotoAnalyzerTests(unittest.TestCase):
             self.assertEqual(analysis_data["final_score"], 7.8)
             self.assertEqual(
                 stored_tags,
-                [("composition_space", "삼분할 구도"), ("mood", "고요함"), ("viewpoint", "정면")],
+                [
+                    ("camera_angle", "아이레벨(눈높이)"),
+                    ("light_direction", "측광(사광)"),
+                    ("shot_scale", "바스트샷(상반신)"),
+                ],
             )
             self.assertGreater(catalog_count, 0)
 
@@ -281,10 +285,10 @@ class PhotoAnalyzerTests(unittest.TestCase):
         self.assertIn("Flash 3.8", photo_dashboard.DASHBOARD_HTML)
 
     def test_aesthetic_mood_tags_registered(self) -> None:
-        self.assertIn("차가움", AESTHETIC_TAG_OPTIONS["mood"])
-        self.assertIn("따뜻함", AESTHETIC_TAG_OPTIONS["mood"])
-        self.assertIn("쿨톤(차가움)", AESTHETIC_TAG_OPTIONS["color_impression"])
-        self.assertIn("웜톤(따뜻함)", AESTHETIC_TAG_OPTIONS["color_impression"])
+        self.assertIn("하이키/쿨톤", AESTHETIC_TAG_OPTIONS["color_tone"])
+        self.assertIn("하이키/웜톤", AESTHETIC_TAG_OPTIONS["color_tone"])
+        self.assertIn("측광(사광)", AESTHETIC_TAG_OPTIONS["light_direction"])
+        self.assertIn("접사(페이스/디테일)", AESTHETIC_TAG_OPTIONS["shot_scale"])
 
         with tempfile.TemporaryDirectory() as temporary_directory:
             db_path = Path(temporary_directory) / "test.sqlite3"
@@ -292,10 +296,10 @@ class PhotoAnalyzerTests(unittest.TestCase):
                 conn.execute("CREATE TABLE photo_analyses (id INTEGER PRIMARY KEY)")
             photo_dashboard.ensure_db_columns(db_path)
             with closing(sqlite3.connect(db_path)) as conn:
-                tags = [r[0] for r in conn.execute("SELECT tag FROM photo_tag_catalog WHERE category_key = 'mood'").fetchall()]
-                self.assertIn("차가움", tags)
-                self.assertIn("따뜻함", tags)
-                self.assertIn("청량함", tags)
+                tags = [r[0] for r in conn.execute("SELECT tag FROM photo_tag_catalog WHERE category_key = 'color_tone'").fetchall()]
+                self.assertIn("하이키/쿨톤", tags)
+                self.assertIn("하이키/웜톤", tags)
+                self.assertIn("뉴트럴(표준톤)", tags)
 
     def test_blind_tournament_ui_and_status_update(self) -> None:
         self.assertIn("tournament-modal", photo_dashboard.DASHBOARD_HTML)
@@ -1031,6 +1035,41 @@ class PhotoAnalyzerTests(unittest.TestCase):
             self.assertEqual(row["input_tokens"], 120)
             self.assertEqual(row["output_tokens"], 30)
 
+    def test_gemini_interaction_logs_cached_tokens_and_hit_rate(self) -> None:
+        import photo_analyzer
+        from types import SimpleNamespace
+
+        class FakeInteractions:
+            def create(self, model, **kwargs):
+                return SimpleNamespace(
+                    output_text='{"status": "ok"}',
+                    usage=SimpleNamespace(
+                        total_input_tokens=1000,
+                        total_output_tokens=50,
+                        total_cached_tokens=800,
+                    ),
+                )
+
+        fake = SimpleNamespace(interactions=FakeInteractions())
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            db_path = Path(temporary_directory) / "usage_cache.sqlite3"
+            photo_analyzer.set_usage_log_db(db_path)
+            try:
+                out = photo_analyzer._call_gemini_interaction(
+                    client=fake, model="gemini-3.8-flash", input_payload=[], schema={}, task_desc="캐시 테스트"
+                )
+            finally:
+                photo_analyzer.set_usage_log_db(None)
+
+            self.assertEqual(out, '{"status": "ok"}')
+            stats = photo_analyzer.get_usage_stats(db_path)
+            self.assertEqual(stats["total_calls"], 1)
+            self.assertEqual(stats["total_cached_tokens"], 800)
+            self.assertEqual(stats["cache_hit_rate"], 80.0)
+            row = stats["by_task"][0]
+            self.assertEqual(row["cached_tokens"], 800)
+            self.assertEqual(row["input_tokens"], 1000)
+
     def test_missing_model_falls_back_to_stable_model(self) -> None:
         import photo_analyzer
         from types import SimpleNamespace
@@ -1460,14 +1499,12 @@ class PhotoAnalyzerTests(unittest.TestCase):
             "focus_status": "완벽 칼초plet",
             "focus_notes": "눈동자에 핀이 완벽히 맞음",
             "aesthetic_tags": {
-                "viewpoint": ["정면", "정면"],
-                "composition_space": ["중앙구도", "클로즈업", "얕은 심도", "깊은 심도"],
-                "pose_gaze": ["정면 응시"],
-                "mood": ["존재하지않는이상한태그", "따뜻함"],
-                "subject_background": [],
-                "light_expression": [],
-                "color_impression": [],
-                "narrative_implication": []
+                "shot_scale": "바스트샷",
+                "camera_angle": "아이레벨",
+                "light_direction": "측광",
+                "light_quality": "소프트",
+                "depth_of_field": "중간심도",
+                "color_tone": "하이키/쿨톤"
             }
         }
         ```"""
@@ -1484,11 +1521,13 @@ class PhotoAnalyzerTests(unittest.TestCase):
         self.assertEqual(analysis.color_score, 0.0)
         self.assertEqual(analysis.technique_score, 8.5)
 
-        # 4. aesthetic_tags healed, deduplicated, and limited to 3
-        self.assertEqual(analysis.aesthetic_tags.viewpoint, ["정면"])
-        self.assertIn("중앙 구도", analysis.aesthetic_tags.composition_space)
-        self.assertLessEqual(len(analysis.aesthetic_tags.composition_space), 3)
-        self.assertEqual(analysis.aesthetic_tags.mood, ["따뜻함"])
+        # 4. aesthetic_tags healed and normalized to categorical choices
+        self.assertEqual(analysis.aesthetic_tags.shot_scale, "바스트샷(상반신)")
+        self.assertEqual(analysis.aesthetic_tags.camera_angle, "아이레벨(눈높이)")
+        self.assertEqual(analysis.aesthetic_tags.light_direction, "측광(사광)")
+        self.assertEqual(analysis.aesthetic_tags.light_quality, "소프트(부드러운 확산광)")
+        self.assertEqual(analysis.aesthetic_tags.depth_of_field, "중간심도(배경형태인식)")
+        self.assertEqual(analysis.aesthetic_tags.color_tone, "하이키/쿨톤")
 
         # 5. Unknown focus_status falls back to '판별 불가'
         unknown_output = raw_llm_output.replace("완벽 칼초plet", "완전알수없는말")
@@ -1623,7 +1662,7 @@ class PhotoAnalyzerTests(unittest.TestCase):
             self.assertEqual(full_obj.final_score, 8.5)
             self.assertEqual(full_obj.composition_notes, "")
             self.assertEqual(full_obj.strengths, [])
-            self.assertEqual(full_obj.aesthetic_tags.viewpoint, [])
+            self.assertEqual(full_obj.aesthetic_tags.shot_scale, "")
 
             db_path = Path(temporary_directory) / "fast_test.sqlite3"
             rec_id = save_analysis(db_path, photo, "gpt-6-luna", full_obj)

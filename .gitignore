@@ -35,3 +35,4 @@ photo_analysis_report*.html
 .work/
 outputs/
 test_photo/
+scratch/

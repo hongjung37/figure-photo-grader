@@ -85,13 +85,18 @@ def sync_analysis_tags(
         "DELETE FROM photo_analysis_tags WHERE analysis_id = ?",
         (analysis_id,),
     )
+    insert_items = []
+    for category_key, value in tags.model_dump(mode="python").items():
+        if isinstance(value, (list, tuple)):
+            for tag in value:
+                if tag:
+                    insert_items.append((analysis_id, category_key, str(tag).strip()))
+        elif isinstance(value, str) and value.strip():
+            insert_items.append((analysis_id, category_key, value.strip()))
+
     connection.executemany(
         "INSERT INTO photo_analysis_tags (analysis_id, category_key, tag) VALUES (?, ?, ?)",
-        [
-            (analysis_id, category_key, tag)
-            for category_key, values in tags.model_dump(mode="python").items()
-            for tag in values
-        ],
+        insert_items,
     )
 
 

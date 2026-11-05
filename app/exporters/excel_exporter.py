@@ -190,7 +190,7 @@ def _excel_record(row: dict[str, Any]) -> dict[str, Any]:
             record[header] = value
     tag_data = analysis.aesthetic_tags.model_dump(mode="python")
     for header, category_key in AESTHETIC_TAG_HEADERS.items():
-        record[header] = "\n".join(tag_data[category_key])
+        record[header] = "\n".join(tag_data[category_key]) if isinstance(tag_data.get(category_key), (list, tuple)) else str(tag_data.get(category_key) or "")
     record[STATUS_HEADER] = row.get("review_status") or REVIEW_STATUSES[0]
     record[USER_NOTES_HEADER] = row.get("user_notes") or ""
     return record

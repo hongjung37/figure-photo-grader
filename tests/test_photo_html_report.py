@@ -41,7 +41,7 @@ class PhotoHtmlReportTests(unittest.TestCase):
             strengths=["선명한 피사체", "자연스러운 색"],
             improvements=["배경을 단순화해 보세요."],
             aesthetic_tags=AestheticTags.empty().model_copy(
-                update={"viewpoint": ["측면"], "mood": ["고요함"]}
+                update={"camera_angle": "로우앵글(앙각)", "color_tone": "하이키/쿨톤"}
             ),
         )
         return photo, analysis
@@ -60,10 +60,10 @@ class PhotoHtmlReportTests(unittest.TestCase):
         self.assertIn(base64.b64encode(b"safe-preview-bytes").decode("ascii"), report)
         self.assertIn('role="meter"', report)
         self.assertIn("미학 태그", report)
-        self.assertIn("시점", report)
-        self.assertIn("측면", report)
-        self.assertIn("분위기", report)
-        self.assertIn("고요함", report)
+        self.assertIn("카메라 앵글", report)
+        self.assertIn("로우앵글(앙각)", report)
+        self.assertIn("노출 및 색조", report)
+        self.assertIn("하이키/쿨톤", report)
         self.assertIn("매우 우수", report)
         self.assertIn("주요 장점", report)
         self.assertIn("단점 및 개선점", report)

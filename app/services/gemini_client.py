@@ -58,6 +58,21 @@ _GEMINI_SEMAPHORE = threading.BoundedSemaphore(MAX_CONCURRENT_GEMINI_CALLS)
 _USAGE_LOG_DB: Path | None = None
 _THREAD_LOCAL = threading.local()
 
+# Prompt Cache Coordination: prevents cold-cache stampede on concurrent same-photo calls (e.g. sample_count=3)
+_GEMINI_COORD_LOCK = threading.Lock()
+_GEMINI_PHOTO_LOCKS: dict[str, threading.Lock] = {}
+_GEMINI_WARMED_PHOTOS: dict[str, float] = {}
+GEMINI_CACHE_WARM_TTL_SECONDS = 300.0
+
+
+def _get_photo_cache_lock(coord_key: str) -> threading.Lock:
+    with _GEMINI_COORD_LOCK:
+        lock = _GEMINI_PHOTO_LOCKS.get(coord_key)
+        if lock is None:
+            lock = threading.Lock()
+            _GEMINI_PHOTO_LOCKS[coord_key] = lock
+        return lock
+
 
 def get_last_used_gemini_model() -> str | None:
     """Return the actual Gemini model used in the current thread's most recent call."""
@@ -247,13 +262,23 @@ def get_usage_stats(db_path: str | Path) -> dict[str, Any]:
         }
 
 
-def _extract_usage(interaction: Any) -> tuple[int | None, int | None]:
+def _extract_usage(interaction: Any) -> tuple[int | None, int | None, int | None]:
     usage = getattr(interaction, "usage", None)
     if usage is None:
-        return None, None
+        return None, None, None
+    raw_cached = getattr(usage, "total_cached_tokens", None)
+    cached_tok: int | None = None
+    if isinstance(raw_cached, int):
+        cached_tok = raw_cached
+    elif raw_cached is not None:
+        try:
+            cached_tok = int(raw_cached)
+        except (ValueError, TypeError):
+            cached_tok = None
     return (
         getattr(usage, "total_input_tokens", None),
         getattr(usage, "total_output_tokens", None),
+        cached_tok,
     )
 
 
@@ -283,6 +308,7 @@ def _call_gemini_interaction(
     input_payload: list[dict[str, Any]],
     schema: Any,
     task_desc: str,
+    system_instruction: str | None = None,
 ) -> str:
     """Execute Gemini interactions.create with fallback for unavailable models and transient errors."""
     active_model = model
@@ -298,22 +324,42 @@ def _call_gemini_interaction(
         attempts += 1
         try:
             with _GEMINI_SEMAPHORE:
-                interaction = client.interactions.create(
-                    model=active_model,
-                    input=input_payload,
-                    response_format={
+                kwargs: dict[str, Any] = {
+                    "model": active_model,
+                    "input": input_payload,
+                    "response_format": {
                         "type": "text",
                         "mime_type": "application/json",
                         "schema": schema,
                     },
-                    store=False,
-                )
+                    "store": False,
+                }
+                if system_instruction:
+                    kwargs["system_instruction"] = system_instruction
+                interaction = client.interactions.create(**kwargs)
             output_text = interaction.output_text
             if not output_text:
                 raise RuntimeError(f"Gemini가 {task_desc} JSON 결과를 반환하지 않았습니다.")
-            in_tok, out_tok = _extract_usage(interaction)
+            in_tok, out_tok, cached_tok = _extract_usage(interaction)
             _THREAD_LOCAL.last_used_model = active_model
-            _log_api_usage(task_desc, model, active_model, attempts, _elapsed_ms(), in_tok, out_tok, True, None)
+            _log_api_usage(
+                task_desc,
+                model,
+                active_model,
+                attempts,
+                _elapsed_ms(),
+                in_tok,
+                out_tok,
+                True,
+                None,
+                cached_tokens=cached_tok,
+            )
+            if isinstance(cached_tok, int) and isinstance(in_tok, int) and in_tok > 0 and cached_tok > 0:
+                cache_pct = (cached_tok / in_tok) * 100
+                print(
+                    f"[Gemini Cache] {task_desc} ({active_model}) | 총 입력: {in_tok:,} 토큰 | 캐시 히트: {cached_tok:,} 토큰 ({cache_pct:.1f}%)",
+                    file=sys.stderr,
+                )
             return output_text
         except Exception as exc:
             err_msg = str(exc)
@@ -378,13 +424,29 @@ def analyze_with_gemini(
             "mime_type": photo.upload_mime_type,
         },
     ]
-    output_text = _dispatch_call_gemini_interaction(
-        client=client,
-        model=model,
-        input_payload=input_payload,
-        schema=target_schema,
-        task_desc=task_label,
-    )
+    photo_sha = getattr(photo, "sha256", None)
+    coord_key = f"{model}:{photo_sha}:{analysis_mode}" if photo_sha else None
+
+    if coord_key:
+        photo_lock = _get_photo_cache_lock(coord_key)
+        with photo_lock:
+            output_text = _dispatch_call_gemini_interaction(
+                client=client,
+                model=model,
+                input_payload=input_payload,
+                schema=target_schema,
+                task_desc=task_label,
+            )
+            with _GEMINI_COORD_LOCK:
+                _GEMINI_WARMED_PHOTOS[coord_key] = time.monotonic() + GEMINI_CACHE_WARM_TTL_SECONDS
+    else:
+        output_text = _dispatch_call_gemini_interaction(
+            client=client,
+            model=model,
+            input_payload=input_payload,
+            schema=target_schema,
+            task_desc=task_label,
+        )
     if is_fast:
         return FastPhotoAnalysis.from_llm_json(output_text).to_photo_analysis()
     return PhotoAnalysis.from_llm_json(output_text)
@@ -422,13 +484,29 @@ def cross_check_with_gemini(
             "mime_type": photo.upload_mime_type,
         },
     ]
-    output_text = _dispatch_call_gemini_interaction(
-        client=client,
-        model=model,
-        input_payload=input_payload,
-        schema=target_schema,
-        task_desc=task_label,
-    )
+    photo_sha = getattr(photo, "sha256", None)
+    coord_key = f"{model}:{photo_sha}:{analysis_mode}" if photo_sha else None
+
+    if coord_key:
+        photo_lock = _get_photo_cache_lock(coord_key)
+        with photo_lock:
+            output_text = _dispatch_call_gemini_interaction(
+                client=client,
+                model=model,
+                input_payload=input_payload,
+                schema=target_schema,
+                task_desc=task_label,
+            )
+            with _GEMINI_COORD_LOCK:
+                _GEMINI_WARMED_PHOTOS[coord_key] = time.monotonic() + GEMINI_CACHE_WARM_TTL_SECONDS
+    else:
+        output_text = _dispatch_call_gemini_interaction(
+            client=client,
+            model=model,
+            input_payload=input_payload,
+            schema=target_schema,
+            task_desc=task_label,
+        )
     if is_fast:
         fast_analysis = FastPhotoAnalysis.from_llm_json(output_text)
         return fast_analysis.to_cross_check_opinion(model_name=model)

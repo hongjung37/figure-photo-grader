@@ -230,10 +230,12 @@ function computeClientTagStats(minCount) {
     const tScore = d.technique_score || 0;
     const colScore = d.color_score || 0;
 
-    for (const [ckey, list] of Object.entries(tags)) {
-      if (Array.isArray(list)) {
+    for (const [ckey, val] of Object.entries(tags)) {
+      const list = Array.isArray(val) ? val : (typeof val === 'string' && val.trim() ? [val.trim()] : []);
+      if (list.length) {
         const cname = categoriesMap[ckey] || ckey;
         list.forEach(t => {
+          if (!t) return;
           const key = ckey + '::' + t;
           if (!tagData[key]) {
             tagData[key] = {
@@ -241,6 +243,7 @@ function computeClientTagStats(minCount) {
               category_name: cname,
               tag: t,
               count: 0,
+              a_cut_count: 0,
               ai_scores: [],
               user_scores: [],
               lighting_scores: [],
@@ -251,6 +254,7 @@ function computeClientTagStats(minCount) {
           }
           const td = tagData[key];
           td.count += 1;
+          if (aiScore >= 8.0) td.a_cut_count += 1;
           td.ai_scores.push(aiScore);
           if (uScore !== null) td.user_scores.push(uScore);
           td.lighting_scores.push(lScore);
@@ -273,12 +277,15 @@ function computeClientTagStats(minCount) {
     const avgColor = td.color_scores.length ? (td.color_scores.reduce((a, b) => a + b, 0) / td.color_scores.length) : 0;
 
     const diff = (avgUser !== null) ? Math.round((avgUser - avgAi) * 10) / 10 : null;
+    const aCutRate = td.count ? Math.round((td.a_cut_count / td.count) * 100) : 0;
 
     allTags.push({
       category_key: td.category_key,
       category_name: td.category_name,
       tag: td.tag,
       count: td.count,
+      a_cut_count: td.a_cut_count,
+      a_cut_rate: aCutRate,
       avg_ai_score: Math.round(avgAi * 10) / 10,
       avg_user_score: (avgUser !== null) ? Math.round(avgUser * 10) / 10 : null,
       score_diff: diff,
@@ -954,6 +961,141 @@ function renderFocalInsightsContent(fStats, dataList) {
   `;
 }
 
+const CATEGORY_META = {
+  "shot_scale": { icon: "🔍", desc: "초근접 접사부터 전신까지, 피사체 프레이밍 배율" },
+  "camera_angle": { icon: "📐", desc: "아이레벨, 로우, 하이, 더치 앵글 안정성" },
+  "light_direction": { icon: "💡", desc: "순광, 측광, 역광 등 주광(Key Light)의 방향" },
+  "light_quality": { icon: "☁️", desc: "부드러운 확산광 vs 강한 직사광 대비 성질" },
+  "depth_of_field": { icon: "🎯", desc: "배경 날림(아웃포커싱) vs 팬포커스 심도" },
+  "color_tone": { icon: "🎨", desc: "밝기(High/Low-key)와 색온도(Cool/Warm) 톤" },
+};
+
+function renderGoldenRecipeCard(goldenRecipe) {
+  const keys = [
+    { key: 'shot_scale', label: '프레이밍', icon: '🔍' },
+    { key: 'camera_angle', label: '앵글', icon: '📐' },
+    { key: 'light_direction', label: '조명 방향', icon: '💡' },
+    { key: 'light_quality', label: '광질', icon: '☁️' },
+    { key: 'depth_of_field', label: '심도', icon: '🎯' },
+    { key: 'color_tone', label: '톤 & 색온도', icon: '🎨' },
+  ];
+
+  const recipeItems = keys.map(k => {
+    const item = goldenRecipe[k.key];
+    if (!item) return null;
+    return { ...k, item };
+  }).filter(Boolean);
+
+  if (recipeItems.length < 2) return '';
+
+  const avgScores = recipeItems.map(r => r.item.avg_ai_score);
+  const goldenAvg = (avgScores.reduce((a, b) => a + b, 0) / avgScores.length).toFixed(1);
+
+  return `
+    <div style="margin-bottom:22px;padding:18px 22px;background:linear-gradient(135deg, rgba(254,243,199,0.85) 0%, rgba(253,230,138,0.5) 100%);border:1px solid #fde68a;border-radius:16px;box-shadow:0 4px 14px rgba(217,119,6,0.08);">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-size:1.5rem;">🏆</span>
+          <div>
+            <h3 style="margin:0;font-size:1.05rem;font-weight:900;color:#92400e;">나의 최고 득점 필승 촬영 공식 (Golden Recipe)</h3>
+            <span style="font-size:0.75rem;color:#b45309;">6대 핵심 촬영 변수 중 가장 높은 평균 평점을 기록한 베스트 세팅 조합</span>
+          </div>
+        </div>
+        <div style="background:#fffbeb;border:1px solid #fcd34d;padding:4px 12px;border-radius:999px;font-size:0.85rem;font-weight:900;color:#b45309;">
+          조합 예상 평점: <span style="font-size:1.1rem;color:#d97706;">${goldenAvg}점</span>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-wrap:wrap;gap:8px;">
+        ${recipeItems.map(r => `
+          <div style="background:rgba(255,255,255,0.9);border:1px solid #fde68a;border-radius:10px;padding:6px 12px;display:flex;align-items:center;gap:6px;cursor:pointer;"
+               data-tag-action="toggle" data-tag="${escapeHtml(r.item.tag)}" title="클릭하여 #${escapeHtml(r.item.tag)} 사진 모아보기">
+            <span style="font-size:0.82rem;">${r.icon}</span>
+            <span style="font-size:0.75rem;color:#92400e;font-weight:700;">${r.label}:</span>
+            <strong style="font-size:0.82rem;color:#78350f;">#${escapeHtml(r.item.tag)}</strong>
+            <span style="font-size:0.72rem;background:#fef3c7;color:#b45309;padding:1px 5px;border-radius:4px;font-weight:800;">${r.item.avg_ai_score.toFixed(1)}점</span>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function renderColorToneMatrix(stats) {
+  const colorTags = (stats && stats.categories && stats.categories['color_tone']) || [];
+  const tagMap = {};
+  colorTags.forEach(t => { tagMap[t.tag] = t; });
+
+  const renderQuadrant = (tagKey, title, sub, bgStyle) => {
+    const t = tagMap[tagKey];
+    if (!t) {
+      return `
+        <div style="background:${bgStyle};padding:14px;border-radius:12px;border:1px solid rgba(0,0,0,0.06);text-align:center;">
+          <div style="font-size:0.88rem;font-weight:800;margin-bottom:4px;color:var(--navy);">${title}</div>
+          <div style="font-size:0.72rem;color:var(--muted);">${sub}</div>
+          <div style="font-size:0.78rem;color:var(--muted);margin-top:10px;">등록 사진 없음</div>
+        </div>
+      `;
+    }
+    const scoreColor = getScoreColor(t.avg_ai_score);
+    return `
+      <div style="background:${bgStyle};padding:14px;border-radius:12px;border:1px solid rgba(0,0,0,0.06);cursor:pointer;transition:transform 0.15s ease;" 
+           data-tag-action="toggle" data-tag="${escapeHtml(t.tag)}" title="클릭하여 #${escapeHtml(t.tag)} 사진 모아보기">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+          <strong style="font-size:0.88rem;color:var(--navy);">${title}</strong>
+          <span style="font-size:0.72rem;background:rgba(255,255,255,0.7);padding:2px 6px;border-radius:6px;font-weight:700;">${t.count}장</span>
+        </div>
+        <div style="font-size:0.72rem;color:var(--muted);margin-bottom:8px;">${sub}</div>
+        <div style="display:flex;align-items:baseline;justify-content:space-between;">
+          <div>
+            <span style="font-size:1.3rem;font-weight:900;color:${scoreColor};">${t.avg_ai_score.toFixed(1)}</span>
+            <small style="font-size:0.75rem;color:var(--muted);">/10</small>
+          </div>
+          <span style="font-size:0.75rem;font-weight:800;color:${t.a_cut_rate >= 60 ? '#059669' : '#64748b'};">
+            A컷 ${t.a_cut_rate}%
+          </span>
+        </div>
+      </div>
+    `;
+  };
+
+  const neutral = tagMap['뉴트럴(표준톤)'];
+
+  return `
+    <div style="margin-top:24px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.03);">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+        <div>
+          <h3 style="margin:0;font-size:1.05rem;font-weight:800;color:var(--navy);display:flex;align-items:center;gap:6px;">
+            <span>🎨</span> 노출 × 색온도 4분면 매트릭스 (Color & Tone Matrix)
+          </h3>
+          <span style="font-size:0.78rem;color:var(--muted);">밝기(High/Low-Key)와 색온도(Cool/Warm) 조합별 평점과 A컷 달성률</span>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        ${renderQuadrant('하이키/쿨톤', '하이키 쿨톤 (청량·화사)', 'High-Key × Cool', '#f0f9ff')}
+        ${renderQuadrant('하이키/웜톤', '하이키 웜톤 (따뜻·온화)', 'High-Key × Warm', '#fefce8')}
+        ${renderQuadrant('로우키/쿨톤', '로우키 쿨톤 (시네마틱·무드)', 'Low-Key × Cool', '#f1f5f9')}
+        ${renderQuadrant('로우키/웜톤', '로우키 웜톤 (다크·빈티지)', 'Low-Key × Warm', '#fff7ed')}
+      </div>
+
+      ${neutral ? `
+        <div style="margin-top:10px;padding:10px 14px;background:var(--card-sub,#f8fafc);border-radius:10px;border:1px solid var(--line,#e2e8f0);display:flex;justify-content:space-between;align-items:center;cursor:pointer;"
+             data-tag-action="toggle" data-tag="뉴트럴(표준톤)" title="클릭하여 #뉴트럴(표준톤) 사진 모아보기">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <strong style="font-size:0.84rem;color:var(--navy);">⚪ 뉴트럴(표준톤)</strong>
+            <span style="font-size:0.75rem;color:var(--muted);">${neutral.count}장 등록됨</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <strong style="color:${getScoreColor(neutral.avg_ai_score)};font-size:0.95rem;">${neutral.avg_ai_score.toFixed(1)}점</strong>
+            <span style="font-size:0.75rem;color:var(--muted);font-weight:700;">A컷 ${neutral.a_cut_rate}%</span>
+          </div>
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
 function renderTagInsights() {
   const container = document.getElementById('insights-view');
   if (!container) return;
@@ -983,8 +1125,8 @@ function renderTagInsights() {
   const topAi = stats.allTags.length ? [...stats.allTags].sort((a, b) => b.avg_ai_score - a.avg_ai_score)[0] : null;
   const userRatePct = stats.totalPhotos ? Math.round((stats.userRatedPhotos / stats.totalPhotos) * 100) : 0;
   const categoriesMap = (typeof TAG_CATEGORIES !== 'undefined' ? TAG_CATEGORIES : (window.TAG_CATEGORIES || {}));
-  const isFocalMode = insightsDimension === 'focal';
-  const scopedForExclude = (typeof getScopedData === 'function') ? getScopedData(rawAll) : rawAll;
+  const isFocalMode = insightsDimension === 'focal';
+  const scopedForExclude = (typeof getScopedData === 'function') ? getScopedData(rawAll) : rawAll;
   const excludedCount = scopedForExclude.filter(d => d.is_excluded).length;
 
   const scopeBannerHtml = scopeActive ? `
@@ -1004,7 +1146,7 @@ function renderTagInsights() {
         <!-- Dimension Switcher: Tag vs Focal Length -->
         <div style="display:inline-flex;background:var(--filter-btn-bg, #e2e8f0);border:1px solid var(--line, #cbd5e1);border-radius:12px;padding:3px;gap:3px;">
           <button type="button" class="toggle-logic-btn ${!isFocalMode ? 'active' : ''}" onclick="setInsightsDimension('tag')" style="font-size:0.84rem;padding:6px 14px;">
-            🏷️ 시각 태그별 강점·약점 (${stats.filteredCount})
+            🏷️ 6대 촬영 레시피 분석 (${stats.filteredCount})
           </button>
           <button type="button" class="toggle-logic-btn ${isFocalMode ? 'active' : ''}" onclick="setInsightsDimension('focal')" style="font-size:0.84rem;padding:6px 14px;">
             🔭 화각(초점거리)별 강점·약점 (${fStats.identifiedPhotos}장)
@@ -1012,7 +1154,7 @@ function renderTagInsights() {
         </div>
 
         <span style="font-size:1.05rem;font-weight:900;color:var(--navy);display:flex;align-items:center;gap:6px;">
-          ${isFocalMode ? '🔭 화각(24mm ~ 100mm+)별 강점·약점 & 심사 분석' : '📊 시각 태그별 평균 점수 & 미학 경향성 인사이트'}
+          ${isFocalMode ? '🔭 화각(24mm ~ 100mm+)별 강점·약점 & 심사 분석' : '📊 6대 핵심 물리 촬영 변수별 성적표 & 레시피 분석'}
         </span>
       </div>
 
@@ -1048,14 +1190,29 @@ function renderTagInsights() {
     return;
   }
 
+  // Golden Recipe calculation
+  const goldenRecipe = {};
+  const recipeKeys = ["shot_scale", "camera_angle", "light_direction", "light_quality", "depth_of_field", "color_tone"];
+  recipeKeys.forEach(k => {
+    const catList = stats.categories[k] || [];
+    if (catList.length > 0) {
+      const sorted = [...catList].sort((a, b) => b.avg_ai_score - a.avg_ai_score);
+      goldenRecipe[k] = sorted[0];
+    }
+  });
+
+  const goldenRecipeHtml = renderGoldenRecipeCard(goldenRecipe);
+  const colorToneMatrixHtml = renderColorToneMatrix(stats);
+
   container.innerHTML = toolbarHtml + `
+    ${goldenRecipeHtml}
 
     <!-- KPI Summary Cards -->
     <div class="insights-kpi-grid">
       <div class="insights-kpi-card">
         <div class="insights-kpi-title">📷 총 분석 데이터</div>
         <div class="insights-kpi-value">${stats.totalPhotos} <small style="font-size:0.9rem;font-weight:500;color:var(--muted)">장</small></div>
-        <div class="insights-kpi-sub">고유 시각 태그 ${stats.totalUniqueTags}개 추출</div>
+        <div class="insights-kpi-sub">6대 핵심 물리 변수 100% 매핑</div>
       </div>
 
       <div class="insights-kpi-card">
@@ -1065,19 +1222,19 @@ function renderTagInsights() {
       </div>
 
       <div class="insights-kpi-card">
-        <div class="insights-kpi-title">🌟 AI 최고 평점 태그</div>
-        <div class="insights-kpi-value" style="font-size:1.2rem;color:#0d9488;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+        <div class="insights-kpi-title">🌟 최고 평점 세팅 (A컷 핵심)</div>
+        <div class="insights-kpi-value" style="font-size:1.15rem;color:#0d9488;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
           ${topAi ? `#${escapeHtml(topAi.tag)}` : '-'}
         </div>
-        <div class="insights-kpi-sub">${topAi ? `평균 ${topAi.avg_ai_score.toFixed(1)}점 (${topAi.count}장 등록)` : '데이터 없음'}</div>
+        <div class="insights-kpi-sub">${topAi ? `평균 ${topAi.avg_ai_score.toFixed(1)}점 (A컷 ${topAi.a_cut_rate}%)` : '데이터 없음'}</div>
       </div>
 
       <div class="insights-kpi-card">
-        <div class="insights-kpi-title">💡 내 취향 최고 태그 (AI 대비 +차이)</div>
-        <div class="insights-kpi-value" style="font-size:1.2rem;color:#6366f1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-          ${stats.bestFavTag ? `#${escapeHtml(stats.bestFavTag.tag)}` : '-'}
+        <div class="insights-kpi-title">⚠️ 취약 세팅 (감점 요주의)</div>
+        <div class="insights-kpi-value" style="font-size:1.15rem;color:#ef4444;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+          ${stats.bottomTags.length ? `#${escapeHtml(stats.bottomTags[0].tag)}` : '-'}
         </div>
-        <div class="insights-kpi-sub">${stats.bestFavTag ? `AI 대비 +${stats.bestFavTag.score_diff.toFixed(1)}점 더 선호` : '직접 평가가 쌓이면 노출됩니다'}</div>
+        <div class="insights-kpi-sub">${stats.bottomTags.length ? `평균 ${stats.bottomTags[0].avg_ai_score.toFixed(1)}점 (${stats.bottomTags[0].count}장)` : '데이터 없음'}</div>
       </div>
     </div>
 
@@ -1089,7 +1246,7 @@ function renderTagInsights() {
       <div class="insights-rank-card">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
           <h3 style="margin:0;font-size:1.02rem;display:flex;align-items:center;gap:6px;color:#065f46;">
-            <span>🌟</span> 최고 평점 태그 Top 5 (A컷 제조 태그)
+            <span>🌟</span> 강점 세팅 Top 5 (A컷 제조 레시피)
           </h3>
           <span style="font-size:0.75rem;color:var(--muted);">클릭 시 갤러리 검색</span>
         </div>
@@ -1102,7 +1259,7 @@ function renderTagInsights() {
       <div class="insights-rank-card">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
           <h3 style="margin:0;font-size:1.02rem;display:flex;align-items:center;gap:6px;color:#991b1b;">
-            <span>🔻</span> 감점 요인 / 최저 평점 태그 Bottom 5
+            <span>🔻</span> 취약 세팅 Bottom 5 (감점 주의)
           </h3>
           <span style="font-size:0.75rem;color:var(--muted);">클릭 시 갤러리 검색</span>
         </div>
@@ -1112,30 +1269,38 @@ function renderTagInsights() {
       </div>
     </div>
 
-    <!-- 8 Aesthetic Categories Breakdown Grid -->
+    ${colorToneMatrixHtml}
+
+    <!-- 6 Recipe Categories Breakdown Grid -->
     <div style="margin-top:28px;">
       <div style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;">
         <div>
           <h3 style="margin:0;font-size:1.15rem;font-weight:800;color:var(--navy);">
-            🎨 8대 미학 카테고리별 세부 스타일 경향성
+            📷 6대 핵심 물리 촬영 변수별 성적표
           </h3>
-          <span style="font-size:0.78rem;color:var(--muted);">카테고리별로 어떤 촬영 기법과 구도가 더 높은 점수를 받는지 비교해보세요.</span>
+          <span style="font-size:0.78rem;color:var(--muted);">물리적 세팅(독립 변수)별 평균 점수와 A컷 비율을 비교해 내 강점과 약점을 파악하세요.</span>
         </div>
       </div>
 
       <div class="insights-categories-grid">
         ${Object.entries(categoriesMap).map(([ckey, cname]) => {
           const catTags = stats.categories[ckey] || [];
+          const meta = (typeof CATEGORY_META !== 'undefined' && CATEGORY_META[ckey]) ? CATEGORY_META[ckey] : { icon: '🏷️', desc: '' };
           return `
             <div class="category-insight-card">
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid #e2e8f0;">
-                <b style="font-size:0.92rem;color:var(--navy);">${cname}</b>
-                <span style="font-size:0.72rem;background:#f1f5f9;color:var(--muted);padding:2px 7px;border-radius:999px;">
-                  ${catTags.length}개 태그
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid #e2e8f0;">
+                <div>
+                  <b style="font-size:0.95rem;color:var(--navy);display:flex;align-items:center;gap:5px;">
+                    <span>${meta.icon}</span> ${cname}
+                  </b>
+                  ${meta.desc ? `<div style="font-size:0.72rem;color:var(--muted);margin-top:2px;">${meta.desc}</div>` : ''}
+                </div>
+                <span style="font-size:0.72rem;background:#f1f5f9;color:var(--muted);padding:2px 7px;border-radius:999px;white-space:nowrap;">
+                  ${catTags.length}개 세팅
                 </span>
               </div>
               <div>
-                ${catTags.length ? catTags.slice(0, 6).map((t, idx) => renderCategoryTagRow(t)).join('') : `<div style="font-size:0.78rem;color:var(--muted);padding:14px;text-align:center;">최소 등록 기준(${insightsMinCount}장)을 만족하는 태그가 아직 없습니다.</div>`}
+                ${catTags.length ? catTags.slice(0, 6).map((t, idx) => renderCategoryTagRow(t)).join('') : `<div style="font-size:0.78rem;color:var(--muted);padding:14px;text-align:center;">최소 등록 기준(${insightsMinCount}장)을 만족하는 데이터가 아직 없습니다.</div>`}
               </div>
             </div>
           `;
@@ -1187,17 +1352,23 @@ function renderCategoryTagRow(t) {
   const escapedTag = escapeHtml(t.tag);
 
   return `
-    <div style="padding:6px 0;border-bottom:1px solid #f8fafc;display:flex;align-items:center;justify-content:space-between;gap:8px;">
-      <span class="tag-pill" data-tag-action="toggle" data-tag="${escapedTag}" style="${style}cursor:pointer;font-size:0.75rem;font-weight:600;" title="클릭하여 #${escapedTag} 사진 모아보기">
-        #${escapedTag} <small style="opacity:0.75;">(${t.count})</small>
-      </span>
+    <div style="padding:7px 0;border-bottom:1px solid var(--line, #f1f5f9);display:flex;align-items:center;justify-content:space-between;gap:8px;">
+      <div style="display:flex;align-items:center;gap:6px;overflow:hidden;flex:1;">
+        <span class="tag-pill" data-tag-action="toggle" data-tag="${escapedTag}" style="${style}cursor:pointer;font-size:0.76rem;font-weight:700;white-space:nowrap;" title="클릭하여 #${escapedTag} 사진 모아보기">
+          #${escapedTag}
+        </span>
+        <small style="color:var(--muted);font-size:0.72rem;white-space:nowrap;">(${t.count}장)</small>
+      </div>
 
-      <div style="text-align:right;min-width:110px;">
-        <div style="display:flex;align-items:center;justify-content:flex-end;gap:5px;font-size:0.78rem;">
-          <span style="font-weight:800;color:${scoreColor};">${score.toFixed(1)}점</span>
+      <div style="text-align:right;min-width:130px;">
+        <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px;font-size:0.78rem;">
+          <strong style="color:${scoreColor};font-size:0.88rem;">${score.toFixed(1)}점</strong>
+          <span style="font-size:0.68rem;font-weight:800;padding:1px 5px;border-radius:4px;${t.a_cut_rate >= 60 ? 'background:#d1fae5;color:#065f46;' : 'background:#f1f5f9;color:#64748b;'}">
+            A컷 ${t.a_cut_rate}%
+          </span>
           ${t.avg_user_score !== null && insightsRatingMode !== 'user' ? `<span style="font-size:0.7rem;color:#1d4ed8;">(👤${t.avg_user_score.toFixed(1)})</span>` : ''}
         </div>
-        <div class="tag-progress-track" style="height:4px;">
+        <div class="tag-progress-track" style="height:4px;margin-top:3px;">
           <div class="tag-progress-fill" style="width:${Math.min(100, Math.max(0, score * 10))}%;background:${scoreColor};"></div>
         </div>
       </div>

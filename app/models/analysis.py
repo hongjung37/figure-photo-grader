@@ -11,85 +11,76 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 AESTHETIC_TAG_CATEGORIES = {
-    "viewpoint": "시점",
-    "composition_space": "구도·공간",
-    "pose_gaze": "포즈·시선",
-    "mood": "분위기",
-    "subject_background": "피사체-배경 관계",
-    "light_expression": "빛 표현",
-    "color_impression": "색조 인상",
-    "narrative_implication": "이야기 암시",
+    "shot_scale": "프레이밍 배율",
+    "camera_angle": "카메라 앵글",
+    "light_direction": "주광 방향",
+    "light_quality": "빛의 성질",
+    "depth_of_field": "피사계 심도",
+    "color_tone": "노출 및 색조",
 }
 
 AESTHETIC_TAG_OPTIONS = {
-    "viewpoint": (
-        "정면", "측면", "후면", "사선", "아이레벨", "로우 앵글", "하이 앵글",
-        "탑뷰", "버드아이뷰", "웜즈아이뷰", "오버숄더",
+    "shot_scale": (
+        "접사(페이스/디테일)", "바스트샷(상반신)", "풀샷(전신)", "와이드(공간/배경 중심)",
     ),
-    "composition_space": (
-        "중앙 구도", "삼분할 구도", "대칭 구도", "프레임 인 프레임", "여백 강조",
-        "클로즈업", "미디엄샷", "와이드샷", "원근 강조", "레이어드 공간", "얕은 심도", "깊은 심도",
+    "camera_angle": (
+        "아이레벨(눈높이)", "로우앵글(앙각)", "하이앵글(부감)", "더치앵글(기울임)",
     ),
-    "pose_gaze": (
-        "정면 응시", "시선 분산", "시선 회피", "시선 상향", "시선 하향", "자연스러운 동작",
-        "정지 포즈", "걷는 중", "앉은 자세", "뒷모습",
+    "light_direction": (
+        "순광(정면광)", "측광(사광)", "역광/림라이트", "탑라이트(상단광)", "전방위 확산광",
     ),
-    "mood": (
-        "차가움", "따뜻함", "청량함", "화사함", "고요함", "생동감", "몽환적", "신비로움",
-        "다크·누아르", "사이버펑크·네온", "레트로·빈티지", "시네마틱", "평온함", "쓸쓸함",
-        "고독함", "친밀함", "웅장함", "장난스러움", "역동적", "서정적", "긴장감",
+    "light_quality": (
+        "소프트(부드러운 확산광)", "하드(강한 직사광/대비)", "컬러/네온조명", "일상 앰비언트광",
     ),
-    "subject_background": (
-        "배경과 분리", "배경과 조화", "배경 단순", "배경 복잡", "자연스러운 맥락", "환경과 상호작용", "디오라마 일체감",
+    "depth_of_field": (
+        "극얕은심도(배경완전흐림)", "중간심도(배경형태인식)", "깊은심도(팬포커스)",
     ),
-    "light_expression": (
-        "자연광", "스튜디오 조명", "역광", "측광", "순광", "확산광", "강한 명암", "부드러운 그림자", "실루엣",
-        "하이라이트 강조", "저조도", "림라이트", "네온·컬러조명",
-    ),
-    "color_impression": (
-        "따뜻한 톤", "차가운 톤", "쿨톤(차가움)", "웜톤(따뜻함)", "파스텔", "비비드 컬러",
-        "저채도", "고채도", "모노톤", "자연색", "강한 색 대비", "하이키(밝음)", "로우키(어두움)",
-    ),
-    "narrative_implication": (
-        "일상의 순간", "여행 기록", "관찰자 시점", "인물 중심", "풍경 서사", "특정 상황 암시",
-        "관계 암시", "열린 결말 느낌", "정적인 장면", "결정적 순간",
+    "color_tone": (
+        "하이키/웜톤", "하이키/쿨톤", "로우키/웜톤", "로우키/쿨톤", "뉴트럴(표준톤)",
     ),
 }
 
 
 class AestheticTags(BaseModel):
-    """Controlled, category-based visual tags used for filtering and summaries."""
+    """Controlled physical photography recipe tags used for filtering and insights."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
-    viewpoint: list[str] = Field(description="시점 태그")
-    composition_space: list[str] = Field(description="구도·공간 태그")
-    pose_gaze: list[str] = Field(description="포즈·시선 태그")
-    mood: list[str] = Field(description="분위기 태그")
-    subject_background: list[str] = Field(description="피사체-배경 관계 태그")
-    light_expression: list[str] = Field(description="빛 표현 태그")
-    color_impression: list[str] = Field(description="색조 인상 태그")
-    narrative_implication: list[str] = Field(description="이야기 암시 태그")
+    shot_scale: str = Field(default="", description="프레이밍 배율")
+    camera_angle: str = Field(default="", description="카메라 앵글")
+    light_direction: str = Field(default="", description="주광 방향")
+    light_quality: str = Field(default="", description="빛의 성질")
+    depth_of_field: str = Field(default="", description="피사계 심도")
+    color_tone: str = Field(default="", description="노출 및 색조")
 
     @classmethod
     def empty(cls) -> AestheticTags:
-        """Build empty values for older analyses created before tagging existed."""
-        return cls(**{category_key: [] for category_key in AESTHETIC_TAG_OPTIONS})
+        """Build empty values for older analyses or unassigned tags."""
+        return cls(
+            shot_scale="",
+            camera_angle="",
+            light_direction="",
+            light_quality="",
+            depth_of_field="",
+            color_tone="",
+        )
 
-    @field_validator(*AESTHETIC_TAG_OPTIONS.keys())
+    @field_validator(*AESTHETIC_TAG_OPTIONS.keys(), mode="before")
     @classmethod
-    def validate_controlled_vocabulary(cls, values: list[str], info: Any) -> list[str]:
-        if len(values) > 3:
-            raise ValueError("각 태그 범주에는 최대 3개까지 입력할 수 있습니다.")
-        if any(not value or value.strip() != value for value in values):
-            raise ValueError("태그는 공백 없이 정해진 표기 그대로 입력해야 합니다.")
-        if len(set(values)) != len(values):
-            raise ValueError("같은 태그를 한 범주에 중복 입력할 수 없습니다.")
+    def validate_recipe_tag(cls, value: Any, info: Any) -> str:
+        if isinstance(value, (list, tuple)):
+            if len(value) > 1:
+                raise ValueError(f"단일 선택 태그입니다. 여러 개를 지정할 수 없습니다: {value}")
+            value = value[0] if value else ""
+        if value is None or value == "":
+            return ""
+        if not isinstance(value, str):
+            raise ValueError(f"문자열 태그여야 합니다: {value!r}")
+        value = value.strip()
         allowed = AESTHETIC_TAG_OPTIONS[info.field_name]
-        invalid = [value for value in values if value not in allowed]
-        if invalid:
-            raise ValueError(f"허용되지 않은 태그입니다: {', '.join(invalid)}")
-        return values
+        if value in allowed:
+            return value
+        raise ValueError(f"허용되지 않은 태그입니다: {value!r} (허용 목록: {', '.join(allowed)})")
 
 
 SCORE_GRADE_BENCHMARKS = (
@@ -205,10 +196,21 @@ def _heal_choice(
     if cleaned in allowed_choices:
         return cleaned
 
-    # 1. Exact choice substring match (choice contained within cleaned)
+    # 1. Exact choice substring match
     for choice in allowed_choices:
         if choice in cleaned:
             print(f"[Self-Healing] {field_name} 포함일치 교정: {value!r} -> {choice!r}", file=sys.stderr)
+            return choice
+
+    # 1b. Stem / prefix match before parentheses (e.g. '측광' -> '측광(사광)', '소프트' -> '소프트(부드러운 확산광)')
+    for choice in allowed_choices:
+        stem = choice.split("(")[0].strip()
+        if stem and (cleaned == stem or stem in cleaned or (len(cleaned) >= 2 and cleaned in stem)):
+            print(f"[Self-Healing] {field_name} 어간일치 교정: {value!r} -> {choice!r}", file=sys.stderr)
+            return choice
+    for choice in allowed_choices:
+        if len(cleaned) >= 2 and cleaned in choice:
+            print(f"[Self-Healing] {field_name} 부분일치 교정: {value!r} -> {choice!r}", file=sys.stderr)
             return choice
 
     # 2. Distinct keyword mapping dictionary
@@ -279,37 +281,28 @@ def heal_analysis_payload(data: dict[str, Any]) -> dict[str, Any]:
             print(f"[Self-Healing] {score_field} 점수 범위 조정: {val} -> {clamped}", file=sys.stderr)
         healed[score_field] = clamped
 
-    # 4. Heal aesthetic_tags
+    # 4. Heal aesthetic_tags (Physical 6-Recipe Categorical Tags)
     raw_tags = healed.get("aesthetic_tags")
     if isinstance(raw_tags, dict):
-        healed_tags: dict[str, list[str]] = {}
+        healed_tags: dict[str, str] = {}
         for cat_key, allowed_options in AESTHETIC_TAG_OPTIONS.items():
-            category_tags = raw_tags.get(cat_key, [])
-            if not isinstance(category_tags, (list, tuple)):
-                healed_tags[cat_key] = []
-                continue
-            cleaned_list: list[str] = []
-            seen: set[str] = set()
-            for t in category_tags:
-                if not isinstance(t, str) or not t.strip():
-                    continue
-                t_str = t.strip()
-                if t_str in allowed_options:
-                    choice = t_str
-                else:
-                    choice = _heal_choice(
-                        t_str,
-                        allowed_options,
-                        fallback=None,
-                        field_name=f"tag[{cat_key}]",
-                        cutoff=0.75,
-                    )
-                if choice and choice not in seen:
-                    seen.add(choice)
-                    cleaned_list.append(choice)
-                    if len(cleaned_list) >= 3:
-                        break
-            healed_tags[cat_key] = cleaned_list
+            val = raw_tags.get(cat_key)
+            if isinstance(val, (list, tuple)):
+                val = val[0] if val else ""
+            elif not isinstance(val, str):
+                val = str(val or "")
+            val_str = val.strip()
+            if val_str in allowed_options:
+                healed_tags[cat_key] = val_str
+            else:
+                choice = _heal_choice(
+                    val_str,
+                    allowed_options,
+                    fallback=allowed_options[0],
+                    field_name=f"tag[{cat_key}]",
+                    cutoff=0.6,
+                )
+                healed_tags[cat_key] = choice or allowed_options[0]
         healed["aesthetic_tags"] = healed_tags
     elif raw_tags is None:
         healed["aesthetic_tags"] = AestheticTags.empty().model_dump()
@@ -439,7 +432,7 @@ class OpenAICrossCheck(BaseModel):
         description="빛의 방향과 질, 조형 입체감, 노출, 반사광(핫스팟) 및 그림자 디테일에 대한 객관적 평가 (반드시 '[장점]'과 '[아쉬운 점]' 구분 선행 작성)"
     )
     score: float = Field(
-        description="구도·조명 비평을 종합한 최종 점수 (0.0~10.0). 기준점 6.8~7.2(스탠다드), 7.5~8.2(수작), 8.3~8.9(화보), 9.0~9.4(마스터피스), 9.5~10.0(더 레전드). 5대 체크리스트 무결점 시 +0.1~+0.2 시너지 반영"
+        description="구도·조명 비평을 종합한 최종 점수 (0.0~10.0). 기준점 6.8~7.2(스탠다드), 7.5~8.2(수작), 8.3~8.9(화보), 9.0~9.4(마스터피스), 9.5~10.0(더 레전드). 프로급 완성도 수작은 8점 후반에 머물지 말고 9.0~9.4점 적극 부여(+0.1~+0.3 시너지 반영)"
     )
     reason: str = Field(
         description="구도·조명·색감·기술의 시각적 근거를 종합한 객관적 총평 및 해당 점수를 부여한 명확한 이유"
@@ -493,7 +486,7 @@ class PhotoAnalysis(BaseModel):
     color_score: float = Field(description="색감 점수 (0~10). 기준점 6.8~7.2: 깔끔한 스탠다드, 7.5~8.2: 수작, 8.3~8.9: 고완성도 화보, 9.0~9.4: 마스터피스, 9.5~10.0: 더 레전드")
     technique_notes: str = Field(description="초점/선명도/설정 적절성 평가. 반드시 '[장점]'과 '[단점]'을 명확히 구분하여 서술")
     technique_score: float = Field(description="촬영 기술 점수 (0~10). 기준점 6.8~7.2: 깔끔한 스탠다드, 7.5~8.2: 수작, 8.3~8.9: 고완성도 화보, 9.0~9.4: 마스터피스, 9.5~10.0: 더 레전드")
-    final_score: float = Field(description="사진 전체 최종 종합 점수 (0~10). 단순 평균이 아닌 전체 임팩트 반영(무결점 고득점 시 +0.1~+0.2 시너지 보정, 치명 결함 시 하방 견인)")
+    final_score: float = Field(description="사진 전체 최종 종합 점수 (0~10). 단순 평균이 아닌 전체 임팩트 반영(프로급 수작은 8점대에 주저하지 말고 9.0~9.4점 적극 부여, 치명 결함 시 하방 견인)")
     final_reason: str = Field(description="최종 점수 근거. 장점과 단점을 균형 있게 분석하고 해당 점수를 부여한 명확한 이유 제시")
     strengths: list[str] = Field(description="사진의 주요 장점 목록 (실제 돋보이는 핵심 강점)")
     improvements: list[str] = Field(description="사진의 단점, 아쉬운 점 및 다음 촬영을 위한 개선점 목록")
@@ -533,7 +526,11 @@ class PhotoAnalysis(BaseModel):
         for category_key, allowed_tags in AESTHETIC_TAG_OPTIONS.items():
             field_schema = tag_properties.get(category_key)
             if isinstance(field_schema, dict):
-                field_schema["items"] = {"type": "string", "enum": list(allowed_tags)}
+                field_schema["type"] = "string"
+                field_schema["enum"] = list(allowed_tags)
+        tag_def = schema.get("$defs", {}).get("AestheticTags", {})
+        if isinstance(tag_def, dict):
+            tag_def["required"] = list(AESTHETIC_TAG_OPTIONS.keys())
         required = list(schema.get("required", []))
         for req_field in ("figure_category", "focus_status", "focus_notes", "aesthetic_tags"):
             if req_field not in required:
@@ -608,13 +605,13 @@ class FastPhotoAnalysis(BaseModel):
     )
     quick_summary: str = Field(
         default="",
-        description="점수 책정 전 5대 광학·구도 체크리스트 선행 검증(Micro-CoT): '[강점: 핵심 시각적 근거 2가지 이상] [감점: 실제 기술적 감점 요인 또는 없음(5대 체크리스트 무결점 통과)]'",
+        description="점수 책정 전 5대 광학·구도 체크리스트 선행 검증(Micro-CoT): '[강점: 핵심 시각적 근거 2가지 이상] [감점: 실제 기술적 감점 요인 또는 없음(5대 체크리스트 무결점 통과)]' (사소한 연출 제안은 감점 적지 말고 '없음' 처리)",
     )
     composition_score: float = Field(description="구도 점수 (0~10). 기준점 6.8~7.2: 깔끔한 스탠다드, 7.5~8.2: 수작, 8.3~8.9: 고완성도 화보, 9.0~9.4: 마스터피스, 9.5~10.0: 더 레전드")
     lighting_score: float = Field(description="조명 점수 (0~10). 기준점 6.8~7.2: 깔끔한 스탠다드, 7.5~8.2: 수작, 8.3~8.9: 고완성도 화보, 9.0~9.4: 마스터피스, 9.5~10.0: 더 레전드")
     color_score: float = Field(description="색감 점수 (0~10). 기준점 6.8~7.2: 깔끔한 스탠다드, 7.5~8.2: 수작, 8.3~8.9: 고완성도 화보, 9.0~9.4: 마스터피스, 9.5~10.0: 더 레전드")
     technique_score: float = Field(description="촬영 기술 점수 (0~10). 기준점 6.8~7.2: 깔끔한 스탠다드, 7.5~8.2: 수작, 8.3~8.9: 고완성도 화보, 9.0~9.4: 마스터피스, 9.5~10.0: 더 레전드")
-    final_score: float = Field(description="사진 전체 최종 종합 점수 (0~10). 단순 평균이 아닌 전체 임팩트 반영(무결점 고득점 시 +0.1~+0.2 시너지 보정, 치명 결함 시 하방 견인)")
+    final_score: float = Field(description="사진 전체 최종 종합 점수 (0~10). 단순 평균이 아닌 전체 임팩트 반영(프로급 수작은 8점대에 주저하지 말고 9.0~9.4점 적극 부여, 치명 결함 시 하방 견인)")
     final_reason: str = Field(
         description="최종 점수 핵심 사유 1문장 (80자 이내, [핵심 강점 1개] + [결정적 감점/보완 요인 1개] 요약)"
     )

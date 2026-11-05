@@ -58,7 +58,7 @@ class PhotoExcelManagerTests(unittest.TestCase):
             strengths=["안정된 구도"],
             improvements=["배경을 단순화해 보세요."],
             aesthetic_tags=AestheticTags.empty().model_copy(
-                update={"viewpoint": ["정면"], "mood": ["고요함"]}
+                update={"camera_angle": "아이레벨(눈높이)", "color_tone": "뉴트럴(표준톤)"}
             ),
         )
         record_id = save_analysis(database, photo, "test-model", analysis)
@@ -82,8 +82,8 @@ class PhotoExcelManagerTests(unittest.TestCase):
             sheet.cell(2, headers["강점(줄바꿈 구분)"], "구도 안정\n색감 조화")
             sheet.cell(2, headers[STATUS_HEADER], REVIEW_STATUSES[2])
             sheet.cell(2, headers[USER_NOTES_HEADER], "재촬영 후보로 표시")
-            sheet.cell(2, headers["시점 태그(줄바꿈 구분)"], "측면\n후면")
-            sheet.cell(2, headers["분위기 태그(줄바꿈 구분)"], "따뜻함")
+            sheet.cell(2, headers["카메라 앵글 태그(줄바꿈 구분)"], "로우앵글(앙각)")
+            sheet.cell(2, headers["노출 및 색조 태그(줄바꿈 구분)"], "하이키/쿨톤")
             workbook.save(workbook_path)
 
             self.assertEqual(import_from_excel(database, workbook_path), 1)
@@ -101,8 +101,8 @@ class PhotoExcelManagerTests(unittest.TestCase):
             self.assertEqual(restored.final_score, 9.2)
             self.assertEqual(restored.final_reason, "엑셀에서 수정한 평가")
             self.assertEqual(restored.strengths, ["구도 안정", "색감 조화"])
-            self.assertEqual(restored.aesthetic_tags.viewpoint, ["측면", "후면"])
-            self.assertEqual(restored.aesthetic_tags.mood, ["따뜻함"])
+            self.assertEqual(restored.aesthetic_tags.camera_angle, "로우앵글(앙각)")
+            self.assertEqual(restored.aesthetic_tags.color_tone, "하이키/쿨톤")
             self.assertEqual(row["review_status"], REVIEW_STATUSES[2])
             self.assertEqual(row["user_notes"], "재촬영 후보로 표시")
             with closing(sqlite3.connect(database)) as connection:
@@ -112,14 +112,14 @@ class PhotoExcelManagerTests(unittest.TestCase):
                 ).fetchall()
             self.assertEqual(
                 normalized,
-                [("mood", "따뜻함"), ("viewpoint", "측면"), ("viewpoint", "후면")],
+                [("camera_angle", "로우앵글(앙각)"), ("color_tone", "하이키/쿨톤")],
             )
             summary = summarize_tags(database)
             self.assertEqual(summary["tagged_records"], 1)
             self.assertEqual(summary["untagged_records"], 0)
             self.assertEqual(
-                summary["categories"]["시점"],
-                [{"tag": "측면", "count": 1}, {"tag": "후면", "count": 1}],
+                summary["categories"]["카메라 앵글"],
+                [{"tag": "로우앵글(앙각)", "count": 1}],
             )
 
     def test_export_does_not_modify_the_sqlite_schema(self) -> None:
@@ -214,7 +214,8 @@ class PhotoExcelManagerTests(unittest.TestCase):
                     "SELECT COUNT(*) FROM photo_analysis_tags WHERE analysis_id = ?", (record_id,)
                 ).fetchone()[0]
             restored = PhotoAnalysis.model_validate_json(row[0])
-            self.assertEqual(restored.aesthetic_tags.viewpoint, [])
+            self.assertEqual(restored.aesthetic_tags.shot_scale, "")
+            self.assertEqual(restored.aesthetic_tags.color_tone, "")
             self.assertEqual(tag_count, 0)
 
 

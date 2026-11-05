@@ -14,14 +14,12 @@ if (typeof window.escapeHtml !== 'function') {
 var escapeHtml = window.escapeHtml;
 
 const TAG_CATEGORIES = {
-  "viewpoint": "시점",
-  "composition_space": "구도·공간",
-  "pose_gaze": "포즈·시선",
-  "mood": "분위기",
-  "subject_background": "피사체-배경 관계",
-  "light_expression": "빛 표현",
-  "color_impression": "색조 인상",
-  "narrative_implication": "이야기 암시"
+  "shot_scale": "프레이밍 배율",
+  "camera_angle": "카메라 앵글",
+  "light_direction": "주광 방향",
+  "light_quality": "빛의 성질",
+  "depth_of_field": "피사계 심도",
+  "color_tone": "노출 및 색조"
 };
 
 let selectedTags = new Set();
@@ -77,32 +75,37 @@ function getAllTagsFromItem(item) {
   if (!tags) return set;
   for (const val of Object.values(tags)) {
     if (Array.isArray(val)) {
-      val.forEach(t => set.add(t));
+      val.forEach(t => { if (t && String(t).trim()) set.add(String(t).trim()); });
+    } else if (typeof val === 'string' && val.trim()) {
+      set.add(val.trim());
     }
   }
   return set;
 }
 
 function getTagColorStyle(tag) {
-  if (['차가움', '쿨톤(차가움)', '차가운 톤'].includes(tag)) {
+  if (['하이키/쿨톤', '차가움', '쿨톤(차가움)', '차가운 톤'].includes(tag)) {
     return 'background:#e0f2fe;color:#0369a1;border:1px solid #bae6fd;';
   }
-  if (['따뜻함', '웜톤(따뜻함)', '따뜻한 톤'].includes(tag)) {
+  if (['하이키/웜톤', '따뜻함', '웜톤(따뜻함)', '따뜻한 톤'].includes(tag)) {
     return 'background:#fef3c7;color:#b45309;border:1px solid #fde68a;';
   }
-  if (['청량함', '자연색'].includes(tag)) {
+  if (['로우키/쿨톤', '다크·누아르', '시네마틱'].includes(tag)) {
+    return 'background:#1e293b;color:#f8fafc;border:1px solid #334155;';
+  }
+  if (['로우키/웜톤'].includes(tag)) {
+    return 'background:#451a03;color:#fef3c7;border:1px solid #78350f;';
+  }
+  if (['극얕은심도(배경완전흐림)', '청량함', '자연색'].includes(tag)) {
     return 'background:#d1fae5;color:#065f46;border:1px solid #a7f3d0;';
   }
-  if (['화사함', '파스텔'].includes(tag)) {
+  if (['접사(페이스/디테일)', '화사함', '파스텔'].includes(tag)) {
     return 'background:#ffe4e6;color:#9f1239;border:1px solid #fecdd3;';
   }
-  if (['몽환적', '신비로움', '사이버펑크·네온', '네온·컬러조명'].includes(tag)) {
+  if (['역광/림라이트', '측광(사광)', '컬러/네온조명'].includes(tag)) {
     return 'background:#f3e8ff;color:#6b21a8;border:1px solid #e9d5ff;';
   }
-  if (['다크·누아르', '시네마틱', '로우키(어두움)'].includes(tag)) {
-    return 'background:#334155;color:#f8fafc;border:1px solid #475569;';
-  }
-  if (['하이키(밝음)', '비비드 컬러', '생동감', '역동적'].includes(tag)) {
+  if (['하드(강한 직사광/대비)', '더치앵글(기울임)'].includes(tag)) {
     return 'background:#ffedd5;color:#c2410c;border:1px solid #fed7aa;';
   }
   return 'background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;';
@@ -112,15 +115,14 @@ function renderTagPills(tags, maxCount = 4) {
   if (!tags) return '';
   const pills = [];
   for (const [k, v] of Object.entries(tags)) {
-    if (Array.isArray(v)) {
-      v.forEach(t => {
-        const escaped = escapeHtml(t);
-        const style = getTagColorStyle(t);
-        const isSelected = selectedTags && selectedTags.has(t);
-        const selBorder = isSelected ? 'box-shadow:0 0 0 2px #0284c7;font-weight:800;' : '';
-        pills.push(`<span class="tag-pill" data-tag-action="toggle" data-tag="${escaped}" style="${style}${selBorder}cursor:pointer;" title="클릭하여 #${escaped} 태그로 필터링">${isSelected ? '✓ ' : ''}${escaped}</span>`);
-      });
-    }
+    const list = Array.isArray(v) ? v : (typeof v === 'string' && v.trim() ? [v.trim()] : []);
+    list.forEach(t => {
+      const escaped = escapeHtml(t);
+      const style = getTagColorStyle(t);
+      const isSelected = selectedTags && selectedTags.has(t);
+      const selBorder = isSelected ? 'box-shadow:0 0 0 2px #0284c7;font-weight:800;' : '';
+      pills.push(`<span class="tag-pill" data-tag-action="toggle" data-tag="${escaped}" style="${style}${selBorder}cursor:pointer;" title="클릭하여 #${escaped} 태그로 필터링">${isSelected ? '✓ ' : ''}${escaped}</span>`);
+    });
   }
   if (maxCount > 0 && pills.length > maxCount) {
     const hiddenCount = pills.length - maxCount;
@@ -177,14 +179,14 @@ function populateTagSelectorAndQuickTags() {
   const dataList = (typeof getScopedData === 'function') ? getScopedData(rawList) : rawList;
   dataList.forEach(d => {
     const tags = d.aesthetic_tags || {};
-    for (const [ckey, list] of Object.entries(tags)) {
-      if (Array.isArray(list)) {
-        list.forEach(t => {
-          tagFreq[t] = (tagFreq[t] || 0) + 1;
-          tagsByCategory[ckey] = tagsByCategory[ckey] || new Set();
-          tagsByCategory[ckey].add(t);
-        });
-      }
+    for (const [ckey, val] of Object.entries(tags)) {
+      const list = Array.isArray(val) ? val : (typeof val === 'string' && val.trim() ? [val.trim()] : []);
+      list.forEach(t => {
+        if (!t) return;
+        tagFreq[t] = (tagFreq[t] || 0) + 1;
+        tagsByCategory[ckey] = tagsByCategory[ckey] || new Set();
+        tagsByCategory[ckey].add(t);
+      });
     }
   });
 

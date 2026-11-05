@@ -652,7 +652,9 @@ def get_tag_stats(
         color_score = float(a.get("color_score") or 0.0)
 
         for cat_key, t_list in tags_dict.items():
-            if not isinstance(t_list, list):
+            if isinstance(t_list, str):
+                t_list = [t_list.strip()] if t_list.strip() else []
+            elif not isinstance(t_list, list):
                 continue
             cat_name = AESTHETIC_TAG_CATEGORIES.get(cat_key, cat_key)
             for t in t_list:
@@ -844,9 +846,14 @@ def get_focal_stats(
         tags_dict = a.get("aesthetic_tags") or {}
         if isinstance(tags_dict, dict):
             for t_list in tags_dict.values():
-                if isinstance(t_list, list):
-                    for t in t_list:
+                if isinstance(t_list, str):
+                    t = t_list.strip()
+                    if t:
                         bucket["tag_counts"][t] = bucket["tag_counts"].get(t, 0) + 1
+                elif isinstance(t_list, list):
+                    for t in t_list:
+                        if t:
+                            bucket["tag_counts"][t] = bucket["tag_counts"].get(t, 0) + 1
 
         lens = str(a.get("lens_model") or "").strip()
         if lens:
