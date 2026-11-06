@@ -189,6 +189,7 @@ def _get_or_create_cached_content(
             return raw_name
         except Exception as exc:
             print(f"[Gemini Cache] 명시적 캐시 생성 생략 ({model}): {exc}", file=sys.stderr)
+            _EXPLICIT_CACHE_STORE[cache_key] = (None, now + EXPLICIT_CACHE_TTL_SECONDS)
             return None
 
 
