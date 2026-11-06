@@ -520,11 +520,31 @@ function populateUploadCollectionSelect() {
 }
 window.populateUploadCollectionSelect = populateUploadCollectionSelect;
 
+function onUploadMedianChange(checked) {
+  const sel = document.getElementById('upload-sample-count');
+  if (sel) {
+    sel.disabled = !checked;
+    sel.style.opacity = checked ? '1' : '0.5';
+    sel.style.pointerEvents = checked ? 'auto' : 'none';
+  }
+  if (window.ModelSettings) {
+    window.ModelSettings.set('median_sampling', checked ? 'true' : 'false');
+  }
+}
+window.onUploadMedianChange = onUploadMedianChange;
+
 function openUploadModal() {
   document.getElementById('upload-modal').style.display = 'flex';
   const uploadTierEl = document.getElementById('upload-tier');
   if (uploadTierEl && window.ModelSettings) {
     uploadTierEl.value = window.ModelSettings.get('photo_grading');
+  }
+  const medianBox = document.getElementById('upload-median');
+  if (medianBox && window.ModelSettings) {
+    medianBox.checked = (window.ModelSettings.get('median_sampling') === 'true');
+  }
+  if (medianBox) {
+    onUploadMedianChange(medianBox.checked);
   }
   const currentModeEl = document.getElementById('upload-analysis-mode');
   selectUploadAnalysisMode(currentModeEl && currentModeEl.value === 'fast' ? 'fast' : 'full');
@@ -600,6 +620,11 @@ async function processBatchUpload(files) {
     const modeInput = document.getElementById('upload-analysis-mode');
     const analysisMode = (modeInput && modeInput.value === 'fast') ? 'fast' : 'full';
     const force = document.getElementById('upload-force').checked;
+    const medianBox = document.getElementById('upload-median');
+    const sampleCountSelect = document.getElementById('upload-sample-count');
+    const useMedian = medianBox ? medianBox.checked : false;
+    const chosenSamples = sampleCountSelect ? (parseInt(sampleCountSelect.value, 10) || 3) : 3;
+    const sampleCount = useMedian ? chosenSamples : 1;
     const progContainer = document.getElementById('progress-container');
     const progText = document.getElementById('progress-text');
     const progPercent = document.getElementById('progress-percent');
@@ -614,6 +639,7 @@ async function processBatchUpload(files) {
     let successCount = 0;
     let failCount = 0;
     const modeTag = analysisMode === 'fast' ? '⚡ 경량 선별' : '🔍 정밀 분석';
+    const sampleTag = sampleCount > 1 ? ` (🎯 ${sampleCount}회 병렬)` : '';
 
     for (let i = 0; i < total; i++) {
       const file = files[i];
@@ -621,7 +647,7 @@ async function processBatchUpload(files) {
       const pct = Math.round(((i) / total) * 100);
       progPercent.textContent = `${pct}%`;
       progBar.style.width = `${pct}%`;
-      progText.textContent = `[${currentNum} / ${total}장] AI 모델 ${modeTag} 진행 중...`;
+      progText.textContent = `[${currentNum} / ${total}장] AI 모델 ${modeTag}${sampleTag} 진행 중...`;
       progFile.textContent = `현재 분석 파일: ${file.name} (${(file.size / 1024 / 1024).toFixed(1)}MB)`;
 
       const formData = new FormData();
@@ -629,6 +655,7 @@ async function processBatchUpload(files) {
       formData.append('tier', tier);
       formData.append('category', category);
       formData.append('analysis_mode', analysisMode);
+      formData.append('sample_count', String(sampleCount));
 
       const colSelectEl = document.getElementById('upload-collection-select');
       const colNewInputEl = document.getElementById('upload-new-collection-name');
@@ -651,7 +678,10 @@ async function processBatchUpload(files) {
         if (result.success) {
           successCount++;
           const dupNote = result.duplicate ? ' (이미 분석된 사진 - API 호출 생략)' : '';
-          status.textContent = `✓ [${currentNum}/${total}] ${file.name} 완료${dupNote} (${result.analysis.final_score.toFixed(1)}점 - ${result.analysis.figure_category})`;
+          const sampleNote = (result.sampled_scores && result.sampled_scores.length > 1)
+            ? ` [중앙값: ${result.sampled_scores.join(', ')}]`
+            : '';
+          status.textContent = `✓ [${currentNum}/${total}] ${file.name} 완료${dupNote} (${result.analysis.final_score.toFixed(1)}점${sampleNote} - ${result.analysis.figure_category})`;
           status.style.color = 'var(--teal)';
         } else {
           failCount++;

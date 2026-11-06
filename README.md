@@ -90,6 +90,10 @@ python .\photo_analyzer.py "F:\photos\" --fast --workers 4
 
 # 6. 모델명을 직접 지정할 수도 있습니다.
 python .\photo_analyzer.py "F:\photos\sample.jpg" --model "gemini-3.8-flash"
+
+# 7. 단일 사진 또는 폴더 분석 시 병렬 채점 중앙값(Median) 채택 (--samples 3 또는 5)
+# 동일 사진을 여러 번 동시 채점하여 단발성 튀는 점수(Outlier)를 배제하고 가장 신뢰도 높은 중간값을 채택합니다.
+python .\photo_analyzer.py "F:\photos\sample.jpg" --samples 3
 ```
 
 ## 폴더 일괄 분석 (Batch Mode)
@@ -102,6 +106,9 @@ python .\photo_analyzer.py "F:\photos\figure_set\"
 
 # 4개 병렬 워커 + Pro 티어로 하위 폴더까지 일괄 분석
 python .\photo_analyzer.py "F:\photos\figure_set\" --tier pro --workers 4 --recursive
+
+# 3회 병렬 중앙값 채점 + 4개 워커로 일괄 분석
+python .\photo_analyzer.py "F:\photos\figure_set\" --samples 3 --workers 4
 
 # 경량 모드로 수백 장 초고속 일괄 선별
 python .\photo_analyzer.py "F:\photos\figure_set\" --fast --workers 6
@@ -144,6 +151,12 @@ python .\batch_reanalyze_all.py --model pro --delay 4.5 --concurrency 1
 - **🎯 병렬 채점 후 중앙값(Median) 채택**: 동일 사진을 3회(권장) 또는 5회 병렬 채점하여 튀는 이상치(Outlier)를 배제하고 가장 신뢰도 높은 중간값 결과를 저장합니다.
 - **동시 처리 병렬 수**: 1장(극보수), 2장(기본 안정), 3장, 5장, 10장, 최대 50장(RPM 1K+ 초극속) 지원.
 - 실시간 프로그레스 바(%), 남은 장수, 건별 완료 알림 스트림 제공.
+
+### 3. 신규 사진 업로드 모달의 병렬 중앙값(Median) 채점
+웹 대시보드 상단 `📤 사진 분석 및 업로드` 모달에서도 신규 사진을 분석할 때 **"🎯 병렬 채점 후 중앙값(Median) 채택"** 옵션(3회 권장 / 5회 초정밀)을 제공합니다.
+- 단일 사진 또는 폴더 일괄 드롭/선택 업로드 시 해당 옵션을 켜면 동일 사진을 지정된 횟수(3회 또는 5회)만큼 동시 병렬 채점합니다.
+- 평가 중 발생하는 단발성 점수 편차 및 이상치(Outlier)를 제거하고 가장 신뢰도 높은 중간값 분석 결과를 데이터베이스에 저장합니다.
+- 업로드 진행 중 프로그레스 바에 `(🎯 3회 병렬)` 형태로 실시간 진행 상태가 표시됩니다.
 
 ## 저장 구조
 

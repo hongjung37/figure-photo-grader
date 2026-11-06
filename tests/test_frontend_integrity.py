@@ -103,6 +103,8 @@ const mockElements = {
   'upload-mode-full-btn': { style: {} },
   'upload-mode-fast-btn': { style: {} },
   'upload-mode-hint': { innerHTML: '' },
+  'upload-median': { checked: false },
+  'upload-sample-count': { value: '3', disabled: true, style: {} },
   'date-scope-panel': { style: {} },
   'date-scope-from': { value: '' },
   'date-scope-to': { value: '' },
@@ -413,6 +415,16 @@ const escaped = fnEscape(testDangerous);
 if (escaped !== '&lt;script&gt;alert(1)&lt;/script&gt;&amp;&quot;&#39;') {
   throw new Error('safeBlindEscape did not escape dangerous characters properly: ' + escaped);
 }
+// 12) Upload median sampling UI toggle
+vm.runInContext('onUploadMedianChange(true);', ctx);
+if (mockElements['upload-sample-count'].disabled !== false || mockElements['upload-sample-count'].style.opacity !== '1') {
+  throw new Error('onUploadMedianChange(true) failed to enable upload-sample-count');
+}
+vm.runInContext('onUploadMedianChange(false);', ctx);
+if (mockElements['upload-sample-count'].disabled !== true || mockElements['upload-sample-count'].style.opacity !== '0.5') {
+  throw new Error('onUploadMedianChange(false) failed to disable upload-sample-count');
+}
+
 process.stdout.write('OK');
 """
         res = subprocess.run(
@@ -425,6 +437,12 @@ process.stdout.write('OK');
         self.assertEqual(res.returncode, 0, f"Script evaluation failed: {res.stderr}\n{res.stdout}")
         self.assertIn("OK", res.stdout)
 
+
+    def test_upload_modal_median_sampling_elements(self):
+        self.assertIn('id="upload-median"', self.html)
+        self.assertIn('id="upload-sample-count"', self.html)
+        self.assertIn('onUploadMedianChange(this.checked)', self.html)
+        self.assertIn("formData.append('sample_count', String(sampleCount))", self.js)
 
     def test_blind_rating_xss_and_filename_escaping(self):
         blind_code = (PROJECT_ROOT / "static/js/blind_rating.js").read_text(encoding="utf-8")

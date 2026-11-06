@@ -19,22 +19,37 @@ def _dispatch_analyze(
     model: str,
     category_hint: str | None = None,
     analysis_mode: str = "full",
+    sample_count: int = 1,
 ) -> PhotoAnalysis:
     mod = sys.modules.get("photo_analyzer")
     if mod is not None and hasattr(mod, "analyze_with_gemini"):
         fn = getattr(mod, "analyze_with_gemini")
         if fn is not analyze_with_gemini:
+            kwargs: dict[str, Any] = {"model": model, "category_hint": category_hint}
             if analysis_mode == "fast":
+                kwargs["analysis_mode"] = "fast"
+            if sample_count > 1:
+                kwargs["sample_count"] = sample_count
+            try:
+                return fn(photo, **kwargs)
+            except TypeError:
+                kwargs.pop("sample_count", None)
                 try:
-                    return fn(photo, model=model, category_hint=category_hint, analysis_mode="fast")
+                    return fn(photo, **kwargs)
                 except TypeError:
                     return fn(photo, model=model, category_hint=category_hint)
-            return fn(photo, model=model, category_hint=category_hint)
     from app.services.multi_llm import analyze_photo, resolve_task_model
     provider, resolved_model = resolve_task_model(model)
+    analyze_kwargs: dict[str, Any] = {
+        "provider": provider,
+        "model": resolved_model,
+        "category_hint": category_hint,
+    }
     if analysis_mode == "fast":
-        return analyze_photo(photo, provider=provider, model=resolved_model, category_hint=category_hint, analysis_mode="fast")
-    return analyze_photo(photo, provider=provider, model=resolved_model, category_hint=category_hint)
+        analyze_kwargs["analysis_mode"] = "fast"
+    if sample_count > 1:
+        analyze_kwargs["sample_count"] = sample_count
+    return analyze_photo(photo, **analyze_kwargs)
 
 
 _dispatch_analyze_with_gemini = _dispatch_analyze
@@ -50,6 +65,7 @@ def run_batch_pipeline(
     category: str = "auto",
     generate_xmp: bool = False,
     analysis_mode: str = "full",
+    sample_count: int = 1,
 ) -> int:
     """Analyze multiple photos in parallel, save results to DB, generate reports and optional XMP sidecars."""
     from app.config import ALL_MODEL_PRESETS
@@ -79,10 +95,13 @@ def run_batch_pipeline(
             analysis = PhotoAnalysis.model_validate(analysis_dict)
         else:
             cat_hint = category if category != "auto" else None
-            if analysis_mode == "fast":
-                analysis = _dispatch_analyze_with_gemini(photo, model=model, category_hint=cat_hint, analysis_mode="fast")
-            else:
-                analysis = _dispatch_analyze_with_gemini(photo, model=model, category_hint=cat_hint)
+            analysis = _dispatch_analyze_with_gemini(
+                photo,
+                model=model,
+                category_hint=cat_hint,
+                analysis_mode=analysis_mode,
+                sample_count=sample_count,
+            )
             record_id = save_analysis(db_path, photo, model, analysis)
         report_path = None
         rel_report = None

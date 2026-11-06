@@ -507,7 +507,7 @@
       </button>
     </div>
     <div id="upload-mode-hint" style="font-size:0.76rem;color:var(--muted);background:var(--card-sub);border:1px solid var(--line);border-radius:8px;padding:7px 10px;margin-bottom:12px;line-height:1.4;">
-      🔍 <strong>정밀 분석 모드:</strong> 구도·조명·색감·기술 상세 비평과 강점/개선점, 8대 미학 태그를 모두 생성합니다.
+      🔍 <strong>정밀 분석 모드:</strong> 구도·조명·색감·기술 상세 비평과 강점/개선점, 6대 물리 레시피 태그를 모두 생성합니다.
     </div>
 
     <label style="font-weight:700;font-size:0.84rem;display:block;margin-bottom:6px;">피규어 촬영 세부 유형:</label>
@@ -518,6 +518,23 @@
       <option value="staging">🎬 스튜디오 연출/디오라마 (드라마틱 조명, 콘트라스트)</option>
       <option value="general">📷 일반 피규어 촬영 (기본 전시/조형 중심)</option>
     </select>
+
+    <!-- Parallel Scoring (Median Sampling) Options -->
+    <div id="upload-median-container" style="margin-bottom:14px;padding:9px 12px;background:rgba(99,102,241,0.06);border:1px dashed rgba(99,102,241,0.32);border-radius:8px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:0.83rem;font-weight:600;color:var(--text);user-select:none;margin:0;">
+          <input type="checkbox" id="upload-median" style="width:16px;height:16px;accent-color:#4f46e5;cursor:pointer;" onchange="onUploadMedianChange(this.checked)">
+          <span>🎯 병렬 채점 후 중앙값(Median) 채택</span>
+        </label>
+        <select id="upload-sample-count" class="select-input" style="padding:2px 8px;font-size:0.75rem;height:auto;width:auto;">
+          <option value="3" selected>3회 병렬 (권장)</option>
+          <option value="5">🔥 5회 병렬 (초정밀)</option>
+        </select>
+      </div>
+      <div style="font-size:0.74rem;color:var(--muted);margin-top:3px;padding-left:24px;line-height:1.4;">
+        동일 사진을 여러 번 동시 병렬 채점하여 단발성 튀는 점수(Outlier)를 배제하고 가장 신뢰도 높은 중앙값 분석을 저장합니다.
+      </div>
+    </div>
 
     <label style="font-weight:700;font-size:0.84rem;display:block;margin-bottom:6px;">🗂️ 업로드 후 담을 컬렉션(앨범):</label>
     <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px;">

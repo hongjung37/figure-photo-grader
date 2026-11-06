@@ -143,6 +143,16 @@ flowchart TD
    - Level 2: 동일 사진 SHA-256 코디네이션 락으로 동시 호출 시 캐시 축출(Eviction) 방지.
    - 세마포어 상한을 50(`MAX_CONCURRENT_OPENAI_CALLS = 50`)으로 확장하여 대량 재평가 시 처리량 극대화.
 
+### 2.8 신규 사진 분석 및 CLI의 병렬 중앙값(Median) 채점 파이프라인
+1. **웹 대시보드 업로드 모달 (`static/js/modals.js` & `templates/index.html`)**:
+   - 신규 사진 업로드 모달(`openUploadModal`)에 `🎯 병렬 채점 후 중앙값(Median) 채택` 체크박스(`upload-median`) 및 표본 수(`upload-sample-count`: 3회/5회) 설정 UI 탑재.
+   - `onUploadMedianChange` 이벤트 핸들러를 통해 체크 해제 시 드롭다운 비활성화 및 스타일 조절, `window.ModelSettings`와의 양방향 동기화 지원.
+   - 단일/일괄 사진 업로드 시 `FormData`에 `sample_count`를 추가 전달하여 백엔드 `/api/analyze`로 전송.
+   - 업로드 및 일괄 분석 진행 중 프로그레스 바에 `(🎯 3회 병렬)` 형태로 실시간 진행 상태 노출.
+2. **CLI & 일괄 분석 파이프라인 (`app/cli.py` & `app/services/batch_service.py`)**:
+   - CLI 파서에 `--samples`, `--sample-count` (1, 3, 5) 옵션 추가.
+   - 단일 파일 분석 및 폴더 일괄 분석 파이프라인(`run_batch_pipeline`) 모두 `sample_count` 인자를 받아 `multi_llm.analyze_photo`로 안전하게 위임.
+
 ---
 
 ## 3. 프롬프트 엔지니어링 설계 원칙

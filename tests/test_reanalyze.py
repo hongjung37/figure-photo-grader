@@ -293,5 +293,97 @@ class ReanalyzeFeatureTests(unittest.TestCase):
         self.assertIn("body.darkroom .reanalyze-mode-card", css)
 
 
+    def test_upload_modal_median_sampling_ui(self):
+        html_path = PROJECT_ROOT / "templates/index.html"
+        modals_path = PROJECT_ROOT / "static/js/modals.js"
+
+        html = html_path.read_text(encoding="utf-8")
+        modals_js = modals_path.read_text(encoding="utf-8")
+
+        # HTML elements
+        self.assertIn('id="upload-median"', html)
+        self.assertIn('id="upload-sample-count"', html)
+        self.assertIn('onUploadMedianChange(this.checked)', html)
+
+        # JS functions and payload appending
+        self.assertIn("function onUploadMedianChange", modals_js)
+        self.assertIn("formData.append('sample_count', String(sampleCount))", modals_js)
+
+    def test_cli_parser_sample_count(self):
+        from app.cli import build_parser
+        parser = build_parser()
+        args1 = parser.parse_args(["test.jpg", "--samples", "3"])
+        self.assertEqual(args1.sample_count, 3)
+        args2 = parser.parse_args(["test.jpg", "--sample-count", "5"])
+        self.assertEqual(args2.sample_count, 5)
+        args3 = parser.parse_args(["test.jpg"])
+        self.assertEqual(args3.sample_count, 1)
+
+    def test_batch_service_sample_count_forwarding(self):
+        from app.services.batch_service import run_batch_pipeline
+        photo_path = Path(self.temp_dir.name) / "dummy.jpg"
+        photo_path.write_bytes(_get_dummy_image_bytes())
+
+        dummy_analysis = _make_dummy_analysis(score=8.7)
+        with patch("app.services.batch_service._dispatch_analyze_with_gemini", return_value=dummy_analysis) as mock_dispatch:
+            code = run_batch_pipeline(
+                photo_paths=[photo_path],
+                model="flash",
+                db_path=self.db_path,
+                report_dir=None,
+                summary_html_path=None,
+                max_workers=1,
+                sample_count=3,
+            )
+            self.assertEqual(code, 0)
+            mock_dispatch.assert_called_once()
+            self.assertEqual(mock_dispatch.call_args[1].get("sample_count"), 3)
+
+    def test_api_analyze_sample_count_forwarding(self):
+        from app.web.handlers import DashboardRequestHandler
+        from io import BytesIO
+
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "test.sqlite3"
+            handler = DashboardRequestHandler.__new__(DashboardRequestHandler)
+            handler.path = "/api/analyze"
+            handler.db_path = db_path
+
+            boundary = "----WebKitFormBoundarySampleTest"
+            dummy_bytes = _get_dummy_image_bytes()
+            body = (
+                f"--{boundary}\r\n"
+                f'Content-Disposition: form-data; name="image"; filename="sample.jpg"\r\n'
+                f"Content-Type: image/jpeg\r\n\r\n"
+            ).encode("utf-8") + dummy_bytes + (
+                f"\r\n--{boundary}\r\n"
+                f'Content-Disposition: form-data; name="sample_count"\r\n\r\n'
+                f"3\r\n"
+                f"--{boundary}--\r\n"
+            ).encode("utf-8")
+
+            handler.headers = {
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+                "Content-Length": str(len(body)),
+            }
+            handler.rfile = BytesIO(body)
+            handler.wfile = BytesIO()
+            handler.send_response = MagicMock()
+            handler.send_header = MagicMock()
+            handler.end_headers = MagicMock()
+
+            dummy_analysis = _make_dummy_analysis(score=8.6)
+
+            with patch("app.web.handlers.analyze_photo", return_value=dummy_analysis) as mock_analyze, \
+                 patch("app.web.handlers.get_last_sampled_scores", return_value=[8.2, 8.6, 9.0]):
+                handler.do_POST()
+                mock_analyze.assert_called_once()
+                self.assertEqual(mock_analyze.call_args[1].get("sample_count"), 3)
+
+            output_bytes = handler.wfile.getvalue()
+            self.assertIn(b'"sampled_scores": [8.2, 8.6, 9.0]', output_bytes)
+            self.assertIn(b'"median_score": 8.6', output_bytes)
+
+
 if __name__ == "__main__":
     unittest.main()

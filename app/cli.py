@@ -23,7 +23,13 @@ from app.services.multi_llm import analyze_photo, resolve_task_model
 from app.services.xmp_service import write_xmp_sidecar
 
 
-def _dispatch_analyze(photo, model: str, category: str | None, analysis_mode: str = "full"):
+def _dispatch_analyze(
+    photo,
+    model: str,
+    category: str | None,
+    analysis_mode: str = "full",
+    sample_count: int = 1,
+):
     mod = sys.modules.get("photo_analyzer")
     if mod is not None and hasattr(mod, "analyze_with_gemini"):
         fn = getattr(mod, "analyze_with_gemini")
@@ -35,9 +41,16 @@ def _dispatch_analyze(photo, model: str, category: str | None, analysis_mode: st
                     return fn(photo, model=model, category_hint=category)
             return fn(photo, model=model, category_hint=category)
     provider, resolved_model = resolve_task_model(model)
+    analyze_kwargs = {
+        "provider": provider,
+        "model": resolved_model,
+        "category_hint": category,
+    }
     if analysis_mode == "fast":
-        return analyze_photo(photo, provider=provider, model=resolved_model, category_hint=category, analysis_mode="fast")
-    return analyze_photo(photo, provider=provider, model=resolved_model, category_hint=category)
+        analyze_kwargs["analysis_mode"] = "fast"
+    if sample_count > 1:
+        analyze_kwargs["sample_count"] = sample_count
+    return analyze_photo(photo, **analyze_kwargs)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -120,6 +133,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="분석 깊이 모드 선택 (full: 정밀 분석, fast: 대량 선별용 경량 분석)",
     )
+    parser.add_argument(
+        "--samples",
+        "--sample-count",
+        dest="sample_count",
+        type=int,
+        choices=[1, 3, 5],
+        default=1,
+        help="동일 사진에 대해 N회 병렬 채점 후 중앙값(Median) 채택 (1, 3, 5) (기본값: 1)",
+    )
     return parser
 
 
@@ -160,6 +182,7 @@ def cli_main(argv: list[str] | None = None) -> int:
             "max_workers": args.workers,
             "category": args.category,
             "generate_xmp": args.xmp,
+            "sample_count": args.sample_count,
         }
         if analysis_mode == "fast":
             batch_kwargs["analysis_mode"] = "fast"
@@ -187,10 +210,13 @@ def cli_main(argv: list[str] | None = None) -> int:
                 raise ValueError("HTML 보고서 경로가 입력 사진, SQLite DB 또는 .env 경로와 같을 수 없습니다.")
         photo = prepare_photo(target_path)
         cat_arg = args.category if args.category != "auto" else None
-        if analysis_mode == "fast":
-            analysis = _dispatch_analyze(photo, model=model, category=cat_arg, analysis_mode="fast")
-        else:
-            analysis = _dispatch_analyze(photo, model=model, category=cat_arg)
+        analysis = _dispatch_analyze(
+            photo,
+            model=model,
+            category=cat_arg,
+            analysis_mode=analysis_mode,
+            sample_count=args.sample_count,
+        )
         record_id = save_analysis(db_path, photo, model, analysis)
         report_path = None
         if report_output is not None:
