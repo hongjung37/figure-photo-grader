@@ -152,7 +152,11 @@ def _get_or_create_cached_content(
         return None
 
     instr_hash = hashlib.sha256(system_instruction.encode("utf-8")).hexdigest()
-    resolved_key = (api_key or getattr(client, "_api_key", None) or "").strip()
+    resolved_key = (
+        api_key
+        or getattr(client, "_api_key", None)
+        or ("vertex" if is_vertex_ai_enabled() else "")
+    ).strip()
     cache_key = (resolved_key, model, instr_hash)
     now = time.monotonic()
 
@@ -189,6 +193,7 @@ def _get_or_create_cached_content(
             return raw_name
         except Exception as exc:
             print(f"[Gemini Cache] 명시적 캐시 생성 생략 ({model}): {exc}", file=sys.stderr)
+            _EXPLICIT_CACHE_STORE[cache_key] = (None, now + EXPLICIT_CACHE_TTL_SECONDS)
             return None
 
 
@@ -197,13 +202,78 @@ def clear_last_used_gemini_model() -> None:
     _THREAD_LOCAL.last_used_model = None
 
 
-def _get_client(api_key: str) -> genai.Client:
-    """Return a process-wide genai client (one per API key) instead of rebuilding per call."""
+_RUNTIME_BACKEND_OVERRIDE: str | None = None
+
+
+def is_vertex_ai_enabled() -> bool:
+    """Return whether Vertex AI mode is active."""
+    global _RUNTIME_BACKEND_OVERRIDE
+    if _RUNTIME_BACKEND_OVERRIDE is not None:
+        return _RUNTIME_BACKEND_OVERRIDE == "vertex"
+    return os.environ.get("GOOGLE_GENAI_USE_VERTEXAI", "").strip().lower() in ("true", "1", "yes")
+
+
+def get_gemini_backend() -> str:
+    """Return currently active backend: 'vertex' or 'aistudio'."""
+    return "vertex" if is_vertex_ai_enabled() else "aistudio"
+
+
+def set_gemini_backend(backend: str, persist_env: bool = True) -> str:
+    """Switch Gemini engine to 'vertex' or 'aistudio' at runtime and persist to .env."""
+    global _RUNTIME_BACKEND_OVERRIDE
+    chosen = "vertex" if str(backend).strip().lower() == "vertex" else "aistudio"
+    _RUNTIME_BACKEND_OVERRIDE = chosen
+
+    # Update in-memory os.environ
+    os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "true" if chosen == "vertex" else "false"
+
+    # Invalidate client caches
     with _CLIENT_LOCK:
-        client = _CLIENT_CACHE.get(api_key)
+        _CLIENT_CACHE.clear()
+
+    # Persist to .env if requested
+    if persist_env:
+        try:
+            env_path = _get_env_file_path()
+            if env_path.exists():
+                content = env_path.read_text(encoding="utf-8")
+                target_val = "true" if chosen == "vertex" else "false"
+                if "GOOGLE_GENAI_USE_VERTEXAI=" in content:
+                    import re
+                    content = re.sub(
+                        r"GOOGLE_GENAI_USE_VERTEXAI\s*=\s*[^\r\n]+",
+                        f"GOOGLE_GENAI_USE_VERTEXAI={target_val}",
+                        content,
+                    )
+                else:
+                    content = f"GOOGLE_GENAI_USE_VERTEXAI={target_val}\n" + content
+                env_path.write_text(content, encoding="utf-8")
+        except Exception as exc:
+            print(f"[Gemini Backend] .env 저장 중 경고: {exc}", file=sys.stderr)
+
+    return chosen
+
+
+def _get_client(api_key: str | None = None) -> genai.Client:
+    """Return a process-wide genai client (one per API key or Vertex AI config) instead of rebuilding per call."""
+    load_dotenv(dotenv_path=_get_env_file_path(), override=False)
+    if is_vertex_ai_enabled():
+        project = os.environ.get("GOOGLE_CLOUD_PROJECT", "bbbbb-513908").strip() or "bbbbb-513908"
+        location = os.environ.get("GOOGLE_CLOUD_LOCATION", "global").strip() or "global"
+        cache_key = f"vertex:{project}:{location}"
+        with _CLIENT_LOCK:
+            client = _CLIENT_CACHE.get(cache_key)
+            if client is None:
+                client = genai.Client(vertexai=True, project=project, location=location)
+                _CLIENT_CACHE[cache_key] = client
+            return client
+
+    effective_key = (api_key or os.environ.get("GEMINI_API_KEY") or "").strip()
+    with _CLIENT_LOCK:
+        client = _CLIENT_CACHE.get(effective_key)
         if client is None:
-            client = genai.Client(api_key=api_key)
-            _CLIENT_CACHE[api_key] = client
+            client = genai.Client(api_key=effective_key)
+            _CLIENT_CACHE[effective_key] = client
         return client
 
 
@@ -216,7 +286,7 @@ def _dispatch_call_gemini_interaction(*args: Any, **kwargs: Any) -> str:
     return _call_gemini_interaction(*args, **kwargs)
 
 
-def _dispatch_get_client(api_key: str) -> Any:
+def _dispatch_get_client(api_key: str | None = None) -> Any:
     mod = sys.modules.get("photo_analyzer")
     if mod is not None and hasattr(mod, "_get_client"):
         fn = getattr(mod, "_get_client")
@@ -566,14 +636,26 @@ def _call_gemini_interaction(
                         api_key=api_key,
                     )
 
-                if cache_name and hasattr(client, "models"):
+                use_models_api = (
+                    (cache_name is not None and hasattr(client, "models"))
+                    or is_vertex_ai_enabled()
+                    or not hasattr(client, "interactions")
+                )
+
+                if use_models_api and hasattr(client, "models"):
                     contents = _convert_input_to_contents(input_payload)
-                    cleaned_schema = _clean_schema_for_gemini(schema)
-                    config = types.GenerateContentConfig(
-                        cached_content=cache_name,
-                        response_mime_type="application/json",
-                        response_schema=cleaned_schema,
-                    )
+                    cleaned_schema = _clean_schema_for_gemini(schema) if schema else None
+                    config_kwargs: dict[str, Any] = {
+                        "response_mime_type": "application/json" if schema else "text/plain",
+                    }
+                    if cleaned_schema:
+                        config_kwargs["response_schema"] = cleaned_schema
+                    if cache_name:
+                        config_kwargs["cached_content"] = cache_name
+                    elif system_instruction:
+                        config_kwargs["system_instruction"] = system_instruction
+
+                    config = types.GenerateContentConfig(**config_kwargs)
                     resp = client.models.generate_content(
                         model=active_model,
                         contents=contents,
@@ -664,8 +746,8 @@ def analyze_with_gemini(
     """Analyze figure photo and return strictly validated PhotoAnalysis."""
     load_dotenv(dotenv_path=_get_env_file_path(), override=False)
     api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        raise RuntimeError("GEMINI_API_KEY를 .env 파일 또는 환경변수에 설정해 주세요.")
+    if not api_key and not is_vertex_ai_enabled():
+        raise RuntimeError("GEMINI_API_KEY 또는 Vertex AI 설정을 .env 파일이나 환경변수에 설정해 주세요.")
 
     is_fast = (analysis_mode or "full").strip().lower() == "fast"
     if is_fast:
@@ -730,8 +812,8 @@ def cross_check_with_gemini(
     """Generate a second-opinion critique from Gemini (Fast mode by default)."""
     load_dotenv(dotenv_path=_get_env_file_path(), override=False)
     resolved_key = (api_key or os.environ.get("GEMINI_API_KEY") or "").strip()
-    if not resolved_key:
-        raise RuntimeError("GEMINI_API_KEY를 .env 파일 또는 환경변수에 설정해 주세요.")
+    if not resolved_key and not is_vertex_ai_enabled():
+        raise RuntimeError("GEMINI_API_KEY 또는 Vertex AI 설정을 .env 파일이나 환경변수에 설정해 주세요.")
 
     is_fast = (analysis_mode or "fast").strip().lower() == "fast"
     if is_fast:
@@ -801,8 +883,8 @@ def generate_lightroom_advice(photo: PreparedPhoto, model: str = DEFAULT_MODEL) 
     """Generate on-demand Adobe Lightroom post-processing slider recommendations."""
     load_dotenv(dotenv_path=_get_env_file_path(), override=False)
     api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        raise RuntimeError("GEMINI_API_KEY를 .env 파일 또는 환경변수에 설정해 주세요.")
+    if not api_key and not is_vertex_ai_enabled():
+        raise RuntimeError("GEMINI_API_KEY 또는 Vertex AI 설정을 .env 파일이나 환경변수에 설정해 주세요.")
 
     prompt = build_lightroom_prompt()
     client = _dispatch_get_client(api_key)
@@ -828,8 +910,8 @@ def generate_sns_advice(photo: PreparedPhoto, model: str = DEFAULT_MODEL) -> SNS
     """Generate on-demand SNS platform crop coordinates and social captions for Instagram & X."""
     load_dotenv(dotenv_path=_get_env_file_path(), override=False)
     api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        raise RuntimeError("GEMINI_API_KEY를 .env 파일 또는 환경변수에 설정해 주세요.")
+    if not api_key and not is_vertex_ai_enabled():
+        raise RuntimeError("GEMINI_API_KEY 또는 Vertex AI 설정을 .env 파일이나 환경변수에 설정해 주세요.")
 
     prompt = build_sns_advice_prompt(photo)
     client = _dispatch_get_client(api_key)
@@ -859,8 +941,8 @@ def generate_single_sns_crop(photo: PreparedPhoto, ratio_key: str, model: str = 
     cfg = SNS_CROP_RATIO_CONFIGS[ratio_key]
     load_dotenv(dotenv_path=_get_env_file_path(), override=False)
     api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        raise RuntimeError("GEMINI_API_KEY를 .env 파일 또는 환경변수에 설정해 주세요.")
+    if not api_key and not is_vertex_ai_enabled():
+        raise RuntimeError("GEMINI_API_KEY 또는 Vertex AI 설정을 .env 파일이나 환경변수에 설정해 주세요.")
 
     prompt = build_single_crop_prompt(photo, ratio_key, cfg)
     client = _dispatch_get_client(api_key)
@@ -886,8 +968,8 @@ def generate_all_sns_crops(photo: PreparedPhoto, model: str = DEFAULT_MODEL) -> 
     """Generate the 4 SNS crop boxes and AI best ratio recommendation in ONE call."""
     load_dotenv(dotenv_path=_get_env_file_path(), override=False)
     api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        raise RuntimeError("GEMINI_API_KEY를 .env 파일 또는 환경변수에 설정해 주세요.")
+    if not api_key and not is_vertex_ai_enabled():
+        raise RuntimeError("GEMINI_API_KEY 또는 Vertex AI 설정을 .env 파일이나 환경변수에 설정해 주세요.")
 
     ratio_lines = []
     for key, cfg in SNS_CROP_RATIO_CONFIGS.items():
@@ -922,8 +1004,8 @@ def generate_sns_caption_and_tags(photo: PreparedPhoto, model: str = DEFAULT_MOD
     """Generate social caption and hashtags on-demand without re-analyzing crops."""
     load_dotenv(dotenv_path=_get_env_file_path(), override=False)
     api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        raise RuntimeError("GEMINI_API_KEY를 .env 파일 또는 환경변수에 설정해 주세요.")
+    if not api_key and not is_vertex_ai_enabled():
+        raise RuntimeError("GEMINI_API_KEY 또는 Vertex AI 설정을 .env 파일이나 환경변수에 설정해 주세요.")
 
     prompt = build_caption_and_tags_prompt(photo)
     client = _dispatch_get_client(api_key)

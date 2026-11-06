@@ -100,7 +100,10 @@ from app.services.gemini_client import (
     generate_single_sns_crop,
     generate_sns_advice,
     generate_sns_caption_and_tags,
+    get_gemini_backend,
     get_usage_stats,
+    is_vertex_ai_enabled,
+    set_gemini_backend,
     set_usage_log_db,
 )
 from app.services.openai_client import (

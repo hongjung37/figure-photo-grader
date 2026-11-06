@@ -356,6 +356,23 @@
       </div>
     </div>
 
+    <div style="background:var(--card-sub);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px;">
+      <label style="font-weight:700;font-size:0.9rem;display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <span>🌐 Gemini 실행 엔진</span>
+        <span id="gemini-engine-badge" style="font-size:0.75rem;padding:2px 8px;border-radius:999px;background:rgba(99,102,241,0.12);color:#4f46e5;font-weight:700;">확인 중...</span>
+      </label>
+      <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center;">
+        <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:0.88rem;font-weight:600;">
+          <input type="radio" name="setting-gemini-engine" value="vertex" id="engine-vertex" style="accent-color:#4f46e5;cursor:pointer;">
+          <span>☁️ Google Cloud Vertex AI</span>
+        </label>
+        <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:0.88rem;font-weight:600;">
+          <input type="radio" name="setting-gemini-engine" value="aistudio" id="engine-aistudio" style="accent-color:#4f46e5;cursor:pointer;">
+          <span>🔑 Google AI Studio</span>
+        </label>
+      </div>
+    </div>
+
     <div style="display:grid;gap:12px;margin-bottom:18px;">
       <div style="background:var(--card-sub);border:1px solid var(--line);border-radius:12px;padding:14px;">
         <label for="setting-model-grading" style="font-weight:700;font-size:0.9rem;display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">

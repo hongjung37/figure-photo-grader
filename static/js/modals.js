@@ -374,6 +374,24 @@ function openModelSettingsModal() {
   if (capEl) capEl.value = s.sns_caption || 'lite';
   if (statusEl) statusEl.textContent = '';
 
+  // Fetch current backend engine
+  const badgeEl = document.getElementById('gemini-engine-badge');
+  const vRadio = document.getElementById('engine-vertex');
+  const aRadio = document.getElementById('engine-aistudio');
+  fetch('/api/engine-settings')
+    .then(r => r.json())
+    .then(data => {
+      const isVertex = data.backend === 'vertex';
+      if (vRadio) vRadio.checked = isVertex;
+      if (aRadio) aRadio.checked = !isVertex;
+      if (badgeEl) {
+        badgeEl.textContent = isVertex ? '☁️ Vertex AI' : '🔑 AI Studio';
+        badgeEl.style.color = isVertex ? '#4f46e5' : '#059669';
+        badgeEl.style.background = isVertex ? 'rgba(99,102,241,0.12)' : 'rgba(16,185,129,0.12)';
+      }
+    })
+    .catch(() => {});
+
   modal.style.display = 'flex';
 }
 
@@ -413,6 +431,8 @@ function saveModelSettingsFromModal() {
   const lrEl = document.getElementById('setting-model-lr');
   const cropEl = document.getElementById('setting-model-crop');
   const capEl = document.getElementById('setting-model-caption');
+  const engineRadio = document.querySelector('input[name="setting-gemini-engine"]:checked');
+  const chosenEngine = engineRadio ? engineRadio.value : 'vertex';
 
   const newSettings = {
     photo_grading: gEl ? gEl.value : 'standard',
@@ -424,6 +444,13 @@ function saveModelSettingsFromModal() {
   if (window.ModelSettings) {
     window.ModelSettings.save(newSettings);
   }
+
+  // Save backend engine to server
+  fetch('/api/engine-settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ backend: chosenEngine })
+  }).catch(e => console.error('Engine settings save error:', e));
 
   // Sync upload modal tier if present
   const uploadTierEl = document.getElementById('upload-tier');

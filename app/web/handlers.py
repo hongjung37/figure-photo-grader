@@ -359,6 +359,9 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         if path == "/api/focal-stats":
             return self._handle_get_focal_stats(parsed.query)
 
+        if path == "/api/engine-settings":
+            return self._handle_get_engine_settings()
+
         if path.startswith("/api/image/"):
             return self._handle_get_image(path, parsed.query)
 
@@ -547,6 +550,8 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 return self._handle_post_toggle_exclude()
             if path == "/api/batch-exclude":
                 return self._handle_post_batch_exclude()
+            if path == "/api/engine-settings":
+                return self._handle_post_engine_settings()
 
             if path.startswith("/api/post-process-advice/"):
                 record_id = int(path.rstrip("/").split("/")[-1])
@@ -726,6 +731,28 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             "success": True,
             "collection": updated,
             "collections": get_all_collections(self.db_path),
+        })
+
+    def _handle_get_engine_settings(self) -> None:
+        from app.services.gemini_client import get_gemini_backend
+        backend = get_gemini_backend()
+        self._send_json_ok({
+            "success": True,
+            "backend": backend,
+            "project": os.environ.get("GOOGLE_CLOUD_PROJECT", "bbbbb-513908"),
+            "location": os.environ.get("GOOGLE_CLOUD_LOCATION", "global"),
+            "has_api_key": bool(os.environ.get("GEMINI_API_KEY")),
+        })
+
+    def _handle_post_engine_settings(self) -> None:
+        from app.services.gemini_client import set_gemini_backend
+        data = self._read_json_body()
+        backend = str(data.get("backend", "vertex")).strip().lower()
+        active_backend = set_gemini_backend(backend, persist_env=True)
+        self._send_json_ok({
+            "success": True,
+            "backend": active_backend,
+            "message": f"Gemini 엔진이 {'Google Cloud Vertex AI' if active_backend == 'vertex' else 'Google AI Studio'}로 전환되었습니다.",
         })
 
     def _handle_post_reanalyze(self) -> None:
