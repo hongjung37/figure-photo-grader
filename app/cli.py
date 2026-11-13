@@ -73,7 +73,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--tier",
         choices=list(ALL_MODEL_PRESETS.keys()),
         default=DEFAULT_TIER,
-        help="AI 성능/비용 티어 선택 (lite, standard, pro, flash-3.6, flash-3.7, luna, ensemble) (기본값: standard)",
+        help="AI 성능/비용 티어 선택 (lite, standard, pro, hydrogen, luna, ensemble) (기본값: standard)",
     )
     parser.add_argument(
         "--model",

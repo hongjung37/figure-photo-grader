@@ -12,6 +12,7 @@ const TASK_MODEL_OPTIONS = [
   { value: 'lite', label: '⚡ Flash-Lite 3.1 (초고속)', shortLabel: '⚡ Flash-Lite 3.1' },
   { value: 'standard', label: '🔍 Flash-Lite 3.5 (표준)', shortLabel: '🔍 Flash-Lite 3.5' },
   { value: 'pro', label: '💎 Flash 3.8 (고화질 심층)', shortLabel: '💎 Flash 3.8' },
+  { value: 'hydrogen', label: '⚛️ Gemini 4 Hydrogen (최신)', shortLabel: '⚛️ 4 Hydrogen' },
   { value: 'luna', label: '🌙 GPT-6 Luna (OpenAI)', shortLabel: '🌙 GPT-6 Luna' }
 ];
 
@@ -55,7 +56,8 @@ const ModelSettings = {
     const s = String(modelStr).toLowerCase();
     if (s.startsWith('ensemble') || s.includes('+')) {
       let gLabel = 'Lite 3.5';
-      if (s.includes('3.8') || s.includes('pro')) gLabel = 'Flash 3.8';
+      if (s.includes('hydrogen') || s.includes('gemini-4')) gLabel = '4 Hydrogen';
+      else if (s.includes('3.8') || s.includes('pro')) gLabel = 'Flash 3.8';
       else if (s.includes('3.7')) gLabel = 'Flash 3.7';
       else if (s.includes('3.6')) gLabel = 'Flash 3.6';
       else if (s.includes('3.1') || s.includes('lite)')) gLabel = 'Lite 3.1';
@@ -63,6 +65,7 @@ const ModelSettings = {
       return `🤝 ${gLabel} + Luna`;
     }
     if (s.includes('luna')) return '🌙 GPT-6 Luna';
+    if (s.includes('hydrogen') || s === '4-hydrogen') return '⚛️ 4 Hydrogen';
     if (s.includes('3.8') || s === 'pro') return '💎 Flash 3.8';
     if (s.includes('3.7') || s === 'flash-3.7') return '🚀 Flash 3.7';
     if (s.includes('3.6') || s === 'flash-3.6') return '🧪 Flash 3.6';

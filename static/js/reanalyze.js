@@ -104,12 +104,11 @@ function renderReanalyzePanel(item) {
                 <option value="luna" ${savedTier === 'luna' ? 'selected' : ''}>🌙 OpenAI GPT-6 Luna (최고 정확도 엄격 심사 - 추천)</option>
                 <option value="standard" ${savedTier === 'standard' ? 'selected' : ''}>🔍 Gemini Flash-Lite 3.5 (균형 잡힌 표준 화질 평가)</option>
                 <option value="lite" ${savedTier === 'lite' ? 'selected' : ''}>⚡ Gemini Flash-Lite 3.1 (초고속 스크리닝)</option>
-                <option value="flash-3.6" ${savedTier === 'flash-3.6' ? 'selected' : ''}>🧪 Gemini Flash 3.6 (실험적 고성능)</option>
-                <option value="flash-3.7" ${savedTier === 'flash-3.7' ? 'selected' : ''}>🚀 Gemini Flash 3.7 (차세대 고속 비평)</option>
                 <option value="pro" ${savedTier === 'pro' ? 'selected' : ''}>💎 Gemini Flash 3.8 (고화질 디테일 심층 비평)</option>
+                <option value="hydrogen" ${savedTier === 'hydrogen' ? 'selected' : ''}>⚛️ Gemini 4 Hydrogen (차세대 고속·고정밀 분석)</option>
                 <option value="ensemble" ${savedTier === 'ensemble' ? 'selected' : ''}>🤝 앙상블: Flash-Lite 3.5 + GPT-6 Luna 크로스체크</option>
-                <option value="ensemble-3.7" ${savedTier === 'ensemble-3.7' ? 'selected' : ''}>🤝 앙상블: Flash 3.7 + GPT-6 Luna 크로스체크</option>
                 <option value="ensemble-pro" ${savedTier === 'ensemble-pro' ? 'selected' : ''}>🤝 앙상블: Flash 3.8 (Pro) + GPT-6 Luna 크로스체크</option>
+                <option value="ensemble-hydrogen" ${savedTier === 'ensemble-hydrogen' ? 'selected' : ''}>🤝 앙상블: 4 Hydrogen + GPT-6 Luna 크로스체크</option>
               </select>
 
               <label class="reanalyze-sublabel" for="reanalyze-depth-${item.id}" style="margin-top:8px;display:block;">분석 깊이 (모드):</label>
